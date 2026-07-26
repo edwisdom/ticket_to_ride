@@ -47,6 +47,7 @@ class Board:
         "color_names",
         "data_hash",
         "deck_composition",
+        "deck_composition_counts",
         "deck_size",
         "dist",
         "locomotive",
@@ -105,6 +106,9 @@ class Board:
             + [self.locomotive] * raw.locomotives
         )
         self.deck_size = len(self.deck_composition)
+        self.deck_composition_counts = tuple(
+            [raw.cards_per_color] * self.n_colors + [raw.locomotives]
+        )
 
         self._build_pairs()
         self._build_buckets()

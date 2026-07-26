@@ -172,14 +172,21 @@ probabilities in `EXPLICIT` mode. It is a *view*; it is never the source of a dr
    round-robin; the two are distributionally identical and this one is simpler to port.)
 2. **Then** flip 5 face-up, `faceup[0]` first.
 3. Run the locomotive flush check (§2.5).
-4. Deal the initial ticket offers **in seat order**, `initial_ticket_deal` each, straight
-   off the top of the ticket deck.
-5. Seats choose their keeps **in seat order**. Physically this is simultaneous; because
-   keeps are secret and no seat observes another's choice, sequentializing is
+4. **Seats take their opening ticket offer and choose their keeps in seat order.** Seat 0
+   draws `initial_ticket_deal` off the top, keeps at least `initial_ticket_keep_min`, and
+   returns the rest to the bottom in ascending offer index; then seat 1, and so on.
+   Returned tickets therefore reach the bottom in (seat, offer index) order, and replays
+   are exact.
+
+   Physically the offers are dealt and chosen simultaneously. Dealing one seat at a time
+   gives every seat exactly the cards it would otherwise have received — the ticket deck is
+   long enough that a return never wraps back into a later seat's deal, which
+   `test_enough_tickets_for_a_full_table` enforces per map — and because keeps are secret
+   and no seat observes another's choice, sequentializing the *choice* is
    information-equivalent. **This is the one documented rules deviation.**
-6. Each seat's returned tickets go to the bottom of the ticket deck immediately, in
-   ascending offer index — so the return order is (seat, offer index), and replays are
-   exact.
+5. An offer that admits exactly one legal keep mask (one ticket left in the deck, or a
+   forced `keep >= offer size`) is resolved immediately rather than being asked. This is
+   the same rule the mid-game `DRAW_TICKETS` action uses.
 
 ### 2.3 Drawing a card
 
@@ -229,9 +236,18 @@ Checked after setup and after every refill.
 
 ### 2.6 Refill and short displays
 
-Empty slots are refilled in **ascending slot index**. When the deck and the discard pile are
-both empty the display legitimately holds fewer than 5 cards; empty slots are `-1` and are
-untakeable. When every pool is empty, drawing is entirely illegal — and if a seat then has
+Empty slots are refilled in **ascending slot index**, at four points and no others: after
+the initial deal, after a face-up card is taken (before the second draw), after a flush,
+and **at the end of every turn**.
+
+The end-of-turn refill is what stops a short display from becoming permanent. A claim moves
+its payment into the discard, so cards can become available again — but if every slot is
+already empty, nobody can *take* a face-up card, and a take is otherwise the only thing
+that triggers a refill. Without this the display would stay empty for the rest of the game
+with a full discard pile sitting next to it.
+
+When the deck and the discard pile are both empty the display legitimately holds fewer
+than 5 cards; empty slots are `-1` and are untakeable. When every pool is empty, drawing is entirely illegal — and if a seat then has
 no affordable route and no ticket to draw, it plays the explicit `PASS`. **If every seat
 passes consecutively the state is frozen: terminate and score**, or the engine hangs.
 
