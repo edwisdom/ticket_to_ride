@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * *"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_FROZEN: "1"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --group dev
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+
+  # Split from `lint` because ty must see torch to resolve imports under rl/, and we do
+  # not want that install on the critical path of the fast lint feedback loop.
+  # Linux torch comes from the pytorch-cpu index, so this is ~200MB, not ~3GB.
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --all-extras --group dev
+      - run: uv run ty check --output-format github
+
+  # The fast job installs NO torch, which is what keeps CI at ~2 minutes instead of ~15
+  # and avoids pulling the CUDA wheels entirely. See pyproject.toml for why that works.
+  test-fast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --group dev
+      - run: uv run pytest -n auto
+      - name: assert torch is absent
+        run: uv run python -c "
+          import importlib.util, sys;
+          sys.exit(1) if importlib.util.find_spec('torch') else print('torch absent, as intended')"
+
+  test-rl:
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.labels.*.name, 'rl') || github.event_name == 'schedule'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      # Resolves torch through the pytorch-cpu index (see [tool.uv.sources]); plain
+      # torch on linux/cp314 would drag in 18 CUDA packages, ~3GB.
+      - run: uv sync --extra rl --group dev
+      - run: uv run pytest -n auto -m "torch"
+
+  nightly:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --all-extras --group dev
+      - run: uv run pytest -n auto -m "slow"
