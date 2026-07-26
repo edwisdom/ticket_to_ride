@@ -25,6 +25,15 @@ repos:
         pass_filenames: false
         files: ^(RULES\.md|ticket_to_ride/data/maps/.*\.toml|tools/gen_board\.py)$
 
+      # docs/CONTRACT.md is the Phase 1 -> Phase 2 gate. Drift here is never a
+      # regeneration: it invalidates every replay ever recorded.
+      - id: contract-vectors
+        name: frozen contract vectors reproduce
+        entry: uv run python tools/gen_vectors.py --check
+        language: system
+        pass_filenames: false
+        files: ^(ticket_to_ride/engine/.*\.py|tools/gen_vectors\.py|tests/golden/.*)$
+
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:

@@ -1,4 +1,4 @@
-.PHONY: setup fmt lint type test test-all cov bench bench-check board tb clean help
+.PHONY: setup fmt lint type test test-all cov bench bench-check board vectors tb clean help
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-13s\033[0m %s\n", $$1, $$2}'
@@ -35,6 +35,9 @@ bench-check:  ## Fail if throughput regressed >20% vs the saved baseline (M2 onl
 
 board:  ## Regenerate board data from RULES.md and the map TOMLs
 	uv run python tools/gen_board.py
+
+vectors:  ## Verify the frozen contract vectors still reproduce (see docs/CONTRACT.md)
+	uv run python tools/gen_vectors.py --check
 
 tb:  ## Launch tensorboard over all runs
 	uv run tensorboard --logdir runs/
