@@ -172,6 +172,10 @@ class Board:
             f"({self.ticket_points[t]})"
         )
 
+    def cards_per_type(self, card_type: int) -> int:
+        """How many of this card type are printed. The locomotive count differs."""
+        return self.deck_composition_counts[card_type]
+
     def color_name(self, c: int) -> str:
         if c == GRAY:
             return "gray"

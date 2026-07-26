@@ -25,6 +25,14 @@ repos:
         pass_filenames: false
         files: ^(RULES\.md|ticket_to_ride/data/maps/.*\.toml|tools/gen_board\.py)$
 
+      # The observation layout is declared once and generated into both languages.
+      - id: gen-obs-spec
+        name: observation spec is regenerated
+        entry: uv run python tools/gen_obs_spec.py --check
+        language: system
+        pass_filenames: false
+        files: ^(ticket_to_ride/rl/encode/spec\.py|tools/gen_obs_spec\.py)$
+
       # docs/CONTRACT.md is the Phase 1 -> Phase 2 gate. Drift here is never a
       # regeneration: it invalidates every replay ever recorded.
       - id: contract-vectors

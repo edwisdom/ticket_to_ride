@@ -33,8 +33,9 @@ bench:  ## Run benchmarks and save a new baseline
 bench-check:  ## Fail if throughput regressed >20% vs the saved baseline (M2 only)
 	uv run pytest -m bench --benchmark-compare --benchmark-compare-fail=mean:20%
 
-board:  ## Regenerate board data from RULES.md and the map TOMLs
+board:  ## Regenerate board data and the observation feature-spec table
 	uv run python tools/gen_board.py
+	uv run python tools/gen_obs_spec.py
 
 vectors:  ## Verify the frozen contract vectors still reproduce (see docs/CONTRACT.md)
 	uv run python tools/gen_vectors.py --check
