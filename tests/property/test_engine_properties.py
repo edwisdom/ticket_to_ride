@@ -425,3 +425,32 @@ def test_the_sweep_actually_exercises_a_locomotive_flush() -> None:
                 if locos >= 2:
                     return
     pytest.fail("no seed below 200 triggered a locomotive flush")
+
+
+def test_the_flush_cascade_cap_actually_fires_in_a_real_game() -> None:
+    """The cap is load-bearing, not belt and braces.
+
+    Once most of the deck is in players' hands, the available pool can be small and
+    locomotive-heavy, and every reflush deals three more of them. Found by strengthening
+    `validate()`'s flush assertion, which until then passed vacuously.
+    """
+    game = Game(RuleConfig(n_players=5))
+    for seed in range(SWEEP):
+        state = game.new_initial_state(seed)
+        rng = stream(seed, "policy")
+        while not state.is_terminal():
+            state.step(state.sample_legal(rng))
+            if state.flush_capped:
+                assert state.faceup.count(game.board.locomotive) >= 3
+                return
+    pytest.fail(f"no seed below {SWEEP} reached a cascade bail-out; the branch is untested")
+
+
+def test_flush_capped_is_transient_and_never_hashed() -> None:
+    """It records how the last flush ended, not where the game is."""
+    game = Game(RuleConfig(n_players=2))
+    state = game.new_initial_state(1)
+    before = state.state_hash()
+    state.flush_capped = not state.flush_capped
+    assert state.state_hash() == before
+    assert state.clone().flush_capped == state.flush_capped

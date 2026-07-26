@@ -148,6 +148,16 @@ run. The same arithmetic bites when handing several seats the same colour: use
 `error-on-warning = true` turns it into a build failure. So does an ignore that stops being
 necessary. Read the diagnostic; it suggests the right name.
 
+### The locomotive-flush cascade cap is load-bearing, not belt and braces
+
+It fires in real late-game 5P positions: once most of the deck is in players' hands the
+available pool can be small and locomotive-heavy, and every reflush deals three more of
+them. Measured on seed 15 of the 5P sweep, at turn 243. Found by *strengthening*
+`validate()`'s flush assertion, which until then read
+`nonloco_available < 3 or deck_has_cards` — and the second clause made it pass vacuously in
+almost every state. `State.flush_capped` now records the bail-out explicitly so the
+assertion can distinguish "the guard blocked it" from "the engine forgot to flush".
+
 ### PLAN.md's estimates that turned out different
 
 Three, all harmless but worth not rediscovering: the claim-mask buckets are **45**, not 33

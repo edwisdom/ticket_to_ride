@@ -90,5 +90,7 @@ makes the Python and Rust engines structurally incapable of disagreeing about th
   deviations from the plan.
 - **[docs/GOTCHAS.md](docs/GOTCHAS.md)** — traps already hit (with the fix in place), and
   known traps in work not yet written. Read before touching build config or the engine.
+- **[docs/reproducibility.md](docs/reproducibility.md)** — the three reproducibility levels,
+  what each actually promises, and the seeding discipline behind them.
 
-`docs/reproducibility.md` and `docs/lab_notebook.md` arrive with Phases 5 and 6.
+`docs/lab_notebook.md` arrives with Phase 6.

@@ -105,6 +105,7 @@ class State:
         "dsu",
         "faceup",
         "final_left",
+        "flush_capped",
         "game",
         "hand",
         "history",
@@ -141,6 +142,10 @@ class State:
         # in the innermost legality loop and a 9-element scan there is measurable.
         self.discard_total = 0
         self.faceup = [EMPTY_SLOT] * FACEUP_SLOTS
+        # Transient: whether the last flush stopped on its cascade cap. Derived
+        # bookkeeping for `validate()`, deliberately *not* serialized -- two states
+        # differing only in it have identical futures.
+        self.flush_capped = False
         self.certain = bytearray(n * k)
         self.unknown = bytearray(n)
         self.dsu = [bytearray(range(board.n_cities)) for _ in range(n)]
@@ -273,11 +278,18 @@ class State:
            three non-locomotives.
         2. The **cascade cap**, a deterministic bail-out that simply stops flushing.
 
-        After a bail-out the display may legitimately show 3+ locomotives; `validate()`
-        checks that this only ever happens when the guard was the reason.
+        After a bail-out the display may legitimately show 3+ locomotives, and
+        `flush_capped` records that it happened so `validate()` can tell that case apart
+        from a flush the engine simply forgot to run.
+
+        **The cap is not merely belt and braces.** It fires in real late-game 5P positions:
+        once most of the deck is in players' hands the available pool can be small and
+        locomotive-heavy, and every reflush deals three more of them. Measured on seed 15
+        of the 5P sweep, at turn 243.
         """
         loco = self.game.board.locomotive
         faceup = self.faceup
+        self.flush_capped = False
         for _ in range(self.game.cfg.flush_cascade_cap):
             if faceup.count(loco) < FLUSH_LOCOS:
                 return
@@ -290,6 +302,8 @@ class State:
                     self.discard_total += 1
                     faceup[i] = EMPTY_SLOT
             self._refill()
+        # Fell out of the loop rather than returning: the cascade hit its cap.
+        self.flush_capped = faceup.count(loco) >= FLUSH_LOCOS
 
     def _nonloco_available(self) -> int:
         """Non-locomotives left in the deck plus the discard, measured before a flush."""
@@ -905,7 +919,6 @@ class State:
         board, n = self.game.board, self.game.n_players
         k = board.n_card_types
 
-        in_play = self.deck_pos < len(self.deck)
         held = sum(self.hand)
         on_table = sum(1 for c in self.faceup if c != EMPTY_SLOT)
         in_deck = len(self.deck) - self.deck_pos
@@ -936,12 +949,14 @@ class State:
         assert len(ring) == self.tdeck_len, "ticket ring length disagrees with tdeck_len"
 
         # The flush assertion most engines lack: 3+ locomotives face-up is only legitimate
-        # when the guard (or the cascade cap) stopped the flush.
-        locos = sum(1 for c in self.faceup if c == board.locomotive)
+        # when the guard blocked the flush, or when the cascade hit its cap -- and the cap
+        # case is recorded rather than assumed, so this cannot pass vacuously.
+        locos = self.faceup.count(board.locomotive)
         if locos >= FLUSH_LOCOS:
-            assert self._nonloco_available() < FLUSH_LOCOS or in_play, (
-                f"{locos} locomotives face-up with {self._nonloco_available()} non-locomotives "
-                "available: the flush should have fired"
+            available = self._nonloco_available()
+            assert available < FLUSH_LOCOS or self.flush_capped, (
+                f"{locos} locomotives face-up with {available} non-locomotives available "
+                "and no cascade bail-out: the flush should have fired"
             )
 
         assert 0 <= self.cur < n
@@ -968,6 +983,7 @@ class State:
         other.discard = bytearray(self.discard)
         other.discard_total = self.discard_total
         other.faceup = self.faceup[:]
+        other.flush_capped = self.flush_capped
         other.tdeck = self.tdeck[:]
         other.tdeck_head = self.tdeck_head
         other.tdeck_len = self.tdeck_len
@@ -1001,6 +1017,7 @@ class State:
         dst.discard[:] = self.discard
         dst.discard_total = self.discard_total
         dst.faceup[:] = self.faceup
+        dst.flush_capped = self.flush_capped
         dst.tdeck[:] = self.tdeck
         dst.tdeck_head = self.tdeck_head
         dst.tdeck_len = self.tdeck_len
