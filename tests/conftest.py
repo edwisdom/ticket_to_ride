@@ -7,11 +7,16 @@ the same rule the engine itself follows (see docs/reproducibility.md).
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# `tests/rig.py` is a helper module, not a test file, so pytest never puts its directory on
+# the path by itself.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 
 @pytest.fixture(scope="session")

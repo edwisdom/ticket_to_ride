@@ -410,8 +410,6 @@ class State:
         space = self.game.space
         if not 0 <= action < space.n:
             raise IllegalAction(f"action {action} outside 0..{space.n - 1}")
-        if self.game.cfg.track_history:
-            self.history.append(action)
 
         phase = self.phase
         if phase == PHASE_MAIN:
@@ -422,6 +420,13 @@ class State:
             self._step_keep(action, space)
         else:
             raise IllegalAction("the game is over")
+
+        # Recorded only once the action has actually been applied. Every `_step_*` path
+        # validates before it mutates, so a rejected action leaves the state untouched --
+        # and the history has to stay untouched with it, or a replay of a game that
+        # survived an illegal action would diverge.
+        if self.game.cfg.track_history:
+            self.history.append(action)
 
     def _step_main(self, action: int, space: ActionSpace) -> None:
         if action < space.claim_end:
