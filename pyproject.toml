@@ -1,10 +1,51 @@
 [project]
 name = "ticket_to_ride"
 version = "0.1.0"
-description = "Add your description here"
+description = "Ticket to Ride game engine and self-play reinforcement learning research platform"
 readme = "README.md"
-requires-python = ">=3.14"
-dependencies = []
+# Upper bound is deliberate: torch 2.13 gates several of its own dependencies on
+# python_version < "3.15", i.e. it is not yet validated on 3.15.
+requires-python = ">=3.14,<3.15"
+dependencies = [
+    "numpy>=2.5",
+    "msgspec>=0.21",
+    "typer>=0.27",
+    "rich>=15",
+]
+
+[project.optional-dependencies]
+# torch is deliberately NOT a base dependency. The engine, agents, eval and CLI all
+# import without it, which keeps worker startup at ~50ms instead of ~1.5s and lets CI
+# run the whole unit+property suite with no torch and no CUDA download.
+rl = [
+    # >=2.13 is load-bearing: torch 2.12 dropped the macosx_11_0_arm64 wheel tag, and
+    # uv's aarch64-apple-darwin platform alias implies a macOS 11 target, which silently
+    # resolves torch 2.11 instead. Pinning turns that downgrade into a resolution error.
+    "torch>=2.13",
+    "tensorboard>=2.21",
+]
+web = [
+    "fastapi>=0.140",
+    "uvicorn>=0.51",
+]
+
+[project.scripts]
+ttr = "ticket_to_ride.cli.app:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=9",
+    "pytest-xdist>=3.6",
+    "pytest-cov>=6",
+    "pytest-benchmark>=5",
+    "pytest-timeout>=2.3",
+    "hypothesis>=6.140",
+    "syrupy>=4.8",
+    "ruff>=0.16",
+    "ty>=0.0.63",
+    "pre-commit>=4",
+    "polars>=1.40",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -12,3 +53,112 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["ticket_to_ride"]
+
+# ---------------------------------------------------------------------------
+# uv
+# ---------------------------------------------------------------------------
+
+# Constrain lock forks to the platforms we actually use, so the resolver cannot pick a
+# torch build for a macOS-11 fork that we would never install.
+[tool.uv]
+environments = [
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
+
+# Plain `torch` on linux/cp314 resolves 18 CUDA packages (~3GB). CI never needs them.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+# ---------------------------------------------------------------------------
+# ruff
+# ---------------------------------------------------------------------------
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+extend-exclude = ["ticket_to_ride/data/board_gen.py"]  # generated
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F", "I", "N", "UP", "B", "A", "C4", "SIM", "RET", "PTH",
+    "RUF", "ARG", "TID", "NPY", "PERF", "PL",
+    # ANN stands in for mypy's disallow_untyped_defs / disallow_incomplete_defs, which
+    # ty does not have. Dropping it would mean an unannotated function silently type
+    # checks clean, which is exactly what strict mode existed to prevent.
+    "ANN",
+]
+ignore = [
+    "E501",     # the formatter owns line length
+    "PLR0913",  # RL entry points legitimately take many arguments
+    "ANN401",   # `Any` is occasionally correct (**kwargs); the other ANN rules are not
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "PLR2004", "ARG", "PLR0915"]
+"tools/**" = ["T201"]
+# rl/ is the one place torch may be imported eagerly, and the one place annotations are
+# relaxed -- torch's own typing is incomplete enough that strict annotation coverage
+# there is pure friction.
+"ticket_to_ride/rl/**" = ["TID253", "ANN"]
+
+# Boundary 1, enforced at lint time. The authoritative check is the subprocess test in
+# tests/unit/engine/test_import_boundary.py; this is the fast-feedback version.
+[tool.ruff.lint.flake8-tidy-imports]
+banned-module-level-imports = ["torch"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ticket_to_ride"]
+
+# ---------------------------------------------------------------------------
+# ty  (type checking; replaces mypy)
+# ---------------------------------------------------------------------------
+#
+# ty is inference-based and has no `disallow_untyped_defs` equivalent -- that half of
+# `mypy --strict` is enforced by ruff's ANN rules above instead. The split is:
+#   ty    -> "are these types consistent?"
+#   ANN   -> "are these functions annotated at all?"
+#
+# python-version is inferred from project.requires-python (3.14), so it is not repeated.
+
+[tool.ty.src]
+exclude = ["ticket_to_ride/data/board_gen.py"]  # generated
+
+[tool.ty.terminal]
+# Warning-level diagnostics fail the build. Without this, `ty check` exits 0 on warnings
+# and `make type` would go green while real problems accumulate.
+error-on-warning = true
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+
+[tool.pytest.ini_options]
+addopts = "-q --strict-markers --strict-config -m 'not slow and not bench'"
+testpaths = ["tests"]
+timeout = 60
+markers = [
+    "slow: integration and self-play tests (minutes)",
+    "torch: requires the `rl` extra",
+    "bench: throughput benchmarks, never in the default run",
+]
+filterwarnings = [
+    "error",
+    # pytest-benchmark warns when xdist is active, which `error` above would turn into a
+    # collection-time INTERNALERROR. Benchmarks are excluded from the default run anyway;
+    # `make bench` runs them serially.
+    "ignore:Benchmarks are automatically disabled:",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["ticket_to_ride"]
+omit = ["ticket_to_ride/data/board_gen.py"]
+
+[tool.coverage.report]
+exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError", "@overload"]
