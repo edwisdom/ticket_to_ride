@@ -224,3 +224,13 @@ __marimo__/
 
 # Cursor
 .cursorignore
+
+# --- ticket_to_ride ---
+# training runs: checkpoints, logs, replays
+runs/
+# results.db, league pool, exported checkpoints
+artifacts/
+# rust build output
+target/
+# pytest-benchmark saves
+.benchmarks/
