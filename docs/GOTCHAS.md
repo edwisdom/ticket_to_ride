@@ -1,8 +1,10 @@
 # Gotchas
 
 Traps in this project. Part 1 is things already hit, with the fix in place — **do not
-"clean up" these without reading why they exist.** Part 2 is known traps in work not yet
-written, extracted from [PLAN.md](PLAN.md) so they aren't rediscovered the hard way.
+"clean up" these without reading why they exist.** Part 2 is traps extracted from
+[PLAN.md](PLAN.md) so they aren't rediscovered the hard way; the ones marked ✅ have been
+hit and handled, and stay because each is a thing to re-check when the Rust port
+reimplements it.
 
 ---
 
@@ -102,13 +104,82 @@ if ever wanted.
 numpy/scipy/torch/msgspec ship `cp314t` wheels, but **polars ships abi3 wheels, which are
 ABI-incompatible with free-threaded CPython**. Revisit later; standard 3.14 is the pin.
 
+### The face-up display can empty permanently
+
+Refilling only when a face-up card is *taken* looks right and has an absorbing state: once
+every pool empties the display goes to five empty slots, and then nobody can take a face-up
+card, so nothing ever triggers a refill again -- even after a claim puts five cards back in
+the discard. The engine also refills at **end of turn**; see docs/CONTRACT.md §2.6. Costs
+five comparisons a turn.
+
+### The ticket ring must blank vacated slots
+
+`tdeck` is a ring buffer, and the whole array is serialized into `state_hash()`. Leaving
+stale ticket ids in consumed slots makes two semantically identical positions hash
+differently, so a drawn slot is set to 255 on the way out. Same class of bug as padding
+bytes in a struct hash.
+
+### `state_hash()` must exclude the union-find
+
+The per-player DSU is a *cache*, fully derivable from `seg_owner`. Including it would let a
+pure-performance change to path compression move the hash and break differential testing
+for no reason. The consumed deck prefix is the mirror-image call: `state_hash()` keeps it
+(identical game means identical down to the unrealized future) and `position_hash()` zeroes
+it (two states differing only in dealt-card *order* are the same position).
+
+### `step()` must record history *after* it validates
+
+Appending the action first leaves a phantom entry when the action is rejected, and the
+replay of that game then diverges. Every `_step_*` path validates before it mutates, so the
+history has to follow the same rule. Caught by
+`test_a_rejected_action_leaves_the_state_untouched`.
+
+### A colour only has twelve cards
+
+Rigging a test deck as `[0] * 20` asks for twenty black cards when the box holds twelve.
+`tests/rig.py` raises rather than silently truncating, and `rig.filler()` produces a legal
+run. The same arithmetic bites when handing several seats the same colour: use
+`rig.spread_hands()`.
+
+### `ty` rule names are not guessable, and a wrong one fails the build
+
+`# ty: ignore[possibly-unbound-attribute]` is not a rule -- it is `possibly-missing-attribute`;
+`non-subscriptable` is `not-subscriptable`. An unknown rule name is a *warning*, and
+`error-on-warning = true` turns it into a build failure. So does an ignore that stops being
+necessary. Read the diagnostic; it suggests the right name.
+
+### PLAN.md's estimates that turned out different
+
+Three, all harmless but worth not rediscovering: the claim-mask buckets are **45**, not 33
+(§5.3); the observation is **3355** dims on the USA map, not ~2000-2800 (§6.1), because the
+100x9 required-colour block is genuinely needed as an input; and the engine reaches ~1100
+random USA 2P games/s, not the 2000 in the §14 exit criterion. TTR-mini clears 2000. See
+the throughput note in `tests/unit/test_cli.py`.
+
+### Path halving does not flatten a chain in one pass
+
+`dsu_find` uses path *halving* -- one pointer update per step, no second pass -- so a test
+asserting `parent[x] == root` after a single find on a 20-long chain fails. Repeated finds
+converge; that is the trade being made.
+
+### A "first subset size that works" Steiner brute force is wrong
+
+More edges can weigh less. An oracle that returns as soon as some edge subset of size *k*
+connects the terminals will happily report a worse tree than the DP found. The check that
+actually works for three terminals is the closed form: `min over v of d(v,a)+d(v,b)+d(v,c)`
+in the shortest-path metric.
+
 ---
 
 ## Part 2 — known traps in the work ahead
 
-These come from the design work in [PLAN.md](PLAN.md). Nothing here is implemented yet.
+These come from the design work in [PLAN.md](PLAN.md).
 
-### The 3-locomotive flush can hang forever
+The first seven were Phase 1 traps and are now **handled** -- kept here because each one is
+a thing to check when the Rust port reimplements it, and the note is the check. Everything
+after "Never report a mirrored win-rate matrix" is still ahead.
+
+### The 3-locomotive flush can hang forever  ✅ handled
 
 When 3+ of the 5 face-up cards are locomotives, all five are discarded and replaced — and
 the replacement can itself contain 3 locomotives, so it cascades. With 14 locomotives in the
@@ -117,7 +188,7 @@ deck, an all-locomotive available pool **loops forever**. Guard the loop on
 hang bug in TTR implementations, and the assertion that catches it (never 3+ locomotives
 face-up unless the guard blocks the flush) is the one most engines lack. See PLAN.md §5.2.
 
-### The deck must be a pre-materialized permutation
+### The deck must be a pre-materialized permutation  ✅ handled
 
 Sampling lazily from card *counts* + RNG is distributionally identical for play, and is
 tempting because it makes clones smaller and reshuffles free. **It silently destroys paired
@@ -127,7 +198,7 @@ Materialize the permutation at game construction so environment randomness is a 
 function of the seed, independent of agent behavior. Keep a counts *view* for determinization
 sampling. PLAN.md §5.1.
 
-### Double-route rules differ by player count
+### Double-route rules differ by player count  ✅ handled
 
 2–3P: once *either* track of a double pair is claimed by anyone, the sibling is closed to
 **everyone**. 4–5P: the sibling stays open to other players, but one player may never own
@@ -135,7 +206,7 @@ both tracks. Getting this wrong is the single most common TTR implementation bug
 directions — and watch the agent's double-route claim rate: if the engine wrongly locks both
 halves, a trained agent will silently learn to avoid them and nothing will look broken.
 
-### "Longest continuous path" is a longest *trail*, weighted in train cars
+### "Longest continuous path" is a longest *trail*, weighted in train cars  ✅ handled
 
 Not a path, not a segment count. Each segment may be used at most once, cities may repeat,
 loops are allowed, and the length is measured in **train cars**, not routes. **All tied
@@ -151,13 +222,13 @@ probability to optimizing `win + λ·score`** — a real objective change, not a
 Put this in the code comment; it is the single most commonly botched piece of reward
 shaping. PLAN.md §6.3.
 
-### Action space is 915, and the keep-mask starts at 1
+### Action space is 915, and the keep-mask starts at 1  ✅ handled
 
 900 claim + 6 draw + 1 draw-tickets + **7** keep + 1 pass. The ticket-keep action is
 `bitmask - 1` for `bitmask ∈ 1..7` — keeping *nothing* is never legal, so there are 7 keep
 actions, not 8. Off-by-one here shifts every action index above it.
 
-### Claim legality needs the `hand[c] >= 1` guard
+### Claim legality needs the `hand[c] >= 1` guard  ✅ handled
 
 Without it, a hand of pure locomotives makes all 8 gray-color pay slots legal *and
 identical*, so eight distinct action ids denote the same payment and the policy distribution
@@ -184,12 +255,13 @@ fire — so every "well-designed heuristic" played its opening tickets and never
 Ship a test asserting each heuristic actually exercises **every action type** on **every
 map**, including drawing extra tickets.
 
-### Freeze the PRNG, draw procedure, and `state_hash` *before* writing Rust
+### Freeze the PRNG, draw procedure, and `state_hash` *before* writing Rust  ✅ handled
 
 Differential testing is impossible unless all three are pinned bit-for-bit with test
 vectors. Two equally-correct sampling implementations produce different — still valid —
 trajectories, which destroys the oracle. This is the gate between Phase 1 and Phase 2.
-PLAN.md §5.8.
+PLAN.md §5.8. **Done: [CONTRACT.md](CONTRACT.md) plus `tests/golden/contract_vectors.json`
+and the 84-game `tests/golden/replays.bin` corpus.**
 
 ### Compare Python vs Rust at every step, not just at the terminal
 
