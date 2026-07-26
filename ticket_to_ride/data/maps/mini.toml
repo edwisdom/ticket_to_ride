@@ -1,0 +1,102 @@
+# TTR-mini -- a small board for brute-force verification and 10-minute training runs.
+#
+# Hand-authored (unlike usa.toml, which is generated from RULES.md). This is deliberately
+# a *data file, not a code path*: same engine, same rules, smaller board. It pays for
+# itself three ways -- exhaustive engine verification, fast algorithm iteration, and the
+# only setting where an exploitability number is reachable.
+#
+# Design follows PLAN.md §13. The prior art's mini map dropped to 4 colors, max length 3
+# and zero double routes, which removes color scarcity, the high-commitment end of the
+# scoring curve, and blocking -- i.e. most of what makes TTR interesting. This one keeps
+# 6 colors, max length 5, and 6 double routes.
+#
+#   14 cities · 24 city pairs · 30 segments · 101 spaces · 14 tickets · 54 cards
+#
+# Geography is the real western USA sub-map, so lat/lon can be shared with usa later.
+# max_players is 4, not 5: 5 x 3 initial tickets would exceed the 14-ticket deck.
+# Ticket points are the shortest-path cost in train cars between the two cities, which is
+# asserted by tests/unit/engine/test_board.py.
+schema = 1
+name = "mini"
+trains_per_player = 20
+min_players = 2
+max_players = 4
+longest_path_bonus = 10
+colors = ["black", "blue", "green", "orange", "red", "yellow"]
+cards_per_color = 8
+locomotives = 6
+# route_points[i] scores a route of length i+1.
+route_points = [1, 2, 4, 7, 10]
+initial_ticket_deal = 3
+initial_ticket_keep_min = 2
+draw_ticket_deal = 3
+draw_ticket_keep_min = 1
+
+cities = [
+  "Calgary",
+  "Denver",
+  "El Paso",
+  "Helena",
+  "Las Vegas",
+  "Los Angeles",
+  "Phoenix",
+  "Portland",
+  "Salt Lake City",
+  "San Francisco",
+  "Santa Fe",
+  "Seattle",
+  "Vancouver",
+  "Winnipeg",
+]
+
+# [from, to, length, color]; "gray" accepts a set of any one color.
+segments = [
+  ["Vancouver", "Seattle", 1, "gray"],
+  ["Vancouver", "Seattle", 1, "gray"],
+  ["Vancouver", "Calgary", 3, "gray"],
+  ["Seattle", "Calgary", 4, "gray"],
+  ["Seattle", "Portland", 1, "gray"],
+  ["Seattle", "Portland", 1, "gray"],
+  ["Seattle", "Helena", 5, "yellow"],
+  ["Portland", "San Francisco", 5, "green"],
+  ["Portland", "San Francisco", 5, "red"],
+  ["Portland", "Salt Lake City", 5, "blue"],
+  ["Calgary", "Winnipeg", 5, "black"],
+  ["Calgary", "Helena", 4, "blue"],
+  ["Helena", "Winnipeg", 4, "blue"],
+  ["Helena", "Denver", 4, "black"],
+  ["Helena", "Salt Lake City", 3, "red"],
+  ["Salt Lake City", "San Francisco", 5, "orange"],
+  ["Salt Lake City", "San Francisco", 5, "green"],
+  ["Salt Lake City", "Las Vegas", 3, "orange"],
+  ["Salt Lake City", "Denver", 3, "red"],
+  ["Salt Lake City", "Denver", 3, "yellow"],
+  ["San Francisco", "Los Angeles", 3, "green"],
+  ["San Francisco", "Los Angeles", 3, "yellow"],
+  ["Las Vegas", "Los Angeles", 2, "gray"],
+  ["Los Angeles", "Phoenix", 3, "gray"],
+  ["Los Angeles", "El Paso", 5, "black"],
+  ["Phoenix", "El Paso", 3, "gray"],
+  ["Phoenix", "Santa Fe", 3, "gray"],
+  ["Phoenix", "Denver", 5, "orange"],
+  ["Santa Fe", "Denver", 2, "gray"],
+  ["Santa Fe", "El Paso", 2, "gray"],
+]
+
+# [from, to, points]
+tickets = [
+  ["Vancouver", "Denver", 10],
+  ["Seattle", "Los Angeles", 9],
+  ["Winnipeg", "Phoenix", 13],
+  ["Portland", "El Paso", 12],
+  ["Calgary", "Salt Lake City", 7],
+  ["Vancouver", "Santa Fe", 12],
+  ["Las Vegas", "Winnipeg", 10],
+  ["San Francisco", "Denver", 8],
+  ["Seattle", "El Paso", 13],
+  ["Helena", "Los Angeles", 8],
+  ["Denver", "Los Angeles", 8],
+  ["Calgary", "Denver", 8],
+  ["Winnipeg", "San Francisco", 12],
+  ["Vancouver", "El Paso", 14],
+]

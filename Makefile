@@ -1,4 +1,4 @@
-.PHONY: setup fmt lint type test test-all cov bench bench-check tb clean help
+.PHONY: setup fmt lint type test test-all cov bench bench-check board tb clean help
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-13s\033[0m %s\n", $$1, $$2}'
@@ -32,6 +32,9 @@ bench:  ## Run benchmarks and save a new baseline
 
 bench-check:  ## Fail if throughput regressed >20% vs the saved baseline (M2 only)
 	uv run pytest -m bench --benchmark-compare --benchmark-compare-fail=mean:20%
+
+board:  ## Regenerate board data from RULES.md and the map TOMLs
+	uv run python tools/gen_board.py
 
 tb:  ## Launch tensorboard over all runs
 	uv run tensorboard --logdir runs/

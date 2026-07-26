@@ -13,6 +13,18 @@ repos:
       # "works on my machine".
       - id: uv-lock
 
+  - repo: local
+    hooks:
+      # RULES.md and the map TOMLs are inputs to checked-in generated code in two
+      # languages. Committing one without the other is how the Python and Rust engines
+      # would start disagreeing about the board itself.
+      - id: gen-board
+        name: board data is regenerated
+        entry: uv run python tools/gen_board.py --check
+        language: system
+        pass_filenames: false
+        files: ^(RULES\.md|ticket_to_ride/data/maps/.*\.toml|tools/gen_board\.py)$
+
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
