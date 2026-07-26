@@ -75,9 +75,9 @@ Some cities are connected by *Double-Routes*. One player cannot claim both route
 
 ***Important Note:*** *In 2 or 3 player games, only one of the Double-Routes can be used. A player can claim either of the two routes between cities, but the other route is then closed to other players.*
 
-**Example 1:** *To claim the route from Montréal to New York, a player would need a set of three Blue Passenger Car cards.*
+**Example 1:** *To claim the route from Montreal to New York, a player would need a set of three Blue Passenger Car cards.*
 
-**Example 2:** *To claim the route from Montréal to Toronto, a player could use any set of Train Car cards, as a long as they are the same type.*
+**Example 2:** *To claim the route from Montreal to Toronto, a player could use any set of Train Car cards, as a long as they are the same type.*
 
 ## Route Scoring Table
 
@@ -133,8 +133,8 @@ The player with the most points wins the game. If two or more players are tied f
 | Los Angeles | Chicago | 16 |
 | Los Angeles | Miami | 20 |
 | Los Angeles | New York | 21 |
-| Montréal | Atlanta | 9 |
-| Montréal | New Orleans | 13 |
+| Montreal | Atlanta | 9 |
+| Montreal | New Orleans | 13 |
 | New York | Atlanta | 6 |
 | Portland | Nashville | 17 |
 | Portland | Phoenix | 11 |
@@ -144,7 +144,7 @@ The player with the most points wins the game. If two or more players are tied f
 | Seattle | Los Angeles | 9 |
 | Seattle | New York | 22 |
 | Toronto | Miami | 10 |
-| Vancouver | Montréal | 20 |
+| Vancouver | Montreal | 20 |
 | Vancouver | Santa Fe | 13 |
 | Winnipeg | Houston | 12 |
 | Winnipeg | Little Rock | 11 |
@@ -175,7 +175,7 @@ A complete edge list for the base *Ticket to Ride* USA map.
 | Seattle | Calgary | 4 | gray |
 | Seattle | Portland | 1 | gray \|\| gray |
 | Seattle | Helena | 6 | yellow |
-| Portland | San Francisco | 5 | green \|\| pink |
+| Portland | San Francisco | 5 | green \|\| purple |
 | Portland | Salt Lake City | 6 | blue |
 | Calgary | Winnipeg | 6 | white |
 | Calgary | Helena | 4 | gray |
@@ -183,11 +183,11 @@ A complete edge list for the base *Ticket to Ride* USA map.
 | Helena | Duluth | 6 | orange |
 | Helena | Omaha | 5 | red |
 | Helena | Denver | 4 | green |
-| Helena | Salt Lake City | 3 | pink |
+| Helena | Salt Lake City | 3 | purple |
 | Salt Lake City | San Francisco | 5 | orange \|\| white |
 | Salt Lake City | Las Vegas | 3 | orange |
 | Salt Lake City | Denver | 3 | red \|\| yellow |
-| San Francisco | Los Angeles | 3 | yellow \|\| pink |
+| San Francisco | Los Angeles | 3 | yellow \|\| purple |
 | Las Vegas | Los Angeles | 2 | gray |
 | Los Angeles | Phoenix | 3 | gray |
 | Los Angeles | El Paso | 6 | black |
@@ -202,16 +202,16 @@ A complete edge list for the base *Ticket to Ride* USA map.
 | El Paso | Houston | 6 | green |
 | Denver | Oklahoma City | 4 | red |
 | Denver | Kansas City | 4 | black \|\| orange |
-| Denver | Omaha | 4 | pink |
+| Denver | Omaha | 4 | purple |
 | Winnipeg | Sault St. Marie | 6 | gray |
 | Winnipeg | Duluth | 4 | black |
 | Duluth | Sault St. Marie | 3 | gray |
-| Duluth | Toronto | 6 | pink |
+| Duluth | Toronto | 6 | purple |
 | Duluth | Chicago | 3 | red |
 | Duluth | Omaha | 2 | gray \|\| gray |
 | Omaha | Chicago | 4 | blue |
 | Omaha | Kansas City | 1 | gray \|\| gray |
-| Kansas City | Saint Louis | 2 | blue \|\| pink |
+| Kansas City | Saint Louis | 2 | blue \|\| purple |
 | Kansas City | Oklahoma City | 2 | gray \|\| gray |
 | Oklahoma City | Little Rock | 2 | gray |
 | Oklahoma City | Dallas | 2 | gray \|\| gray |
@@ -246,7 +246,7 @@ A complete edge list for the base *Ticket to Ride* USA map.
 | Atlanta | Charleston | 2 | gray |
 | Atlanta | Miami | 5 | blue |
 | Atlanta | New Orleans | 4 | yellow \|\| orange |
-| Charleston | Miami | 4 | pink |
+| Charleston | Miami | 4 | purple |
 | New Orleans | Miami | 6 | red |
 
 ---
