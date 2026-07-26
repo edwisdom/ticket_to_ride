@@ -42,6 +42,15 @@ repos:
         pass_filenames: false
         files: ^(ticket_to_ride/engine/.*\.py|tools/gen_vectors\.py|tests/golden/.*)$
 
+      # 84 finished games that must still be finished the same way. A rules or scoring
+      # regression shows up here as a concrete failing game, not as a drifting win rate.
+      - id: golden-replays
+        name: golden replays still reproduce
+        entry: uv run python tools/gen_replays.py --check
+        language: system
+        pass_filenames: false
+        files: ^(ticket_to_ride/(engine|agents|data)/.*\.py|tools/gen_replays\.py|tests/golden/.*)$
+
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:

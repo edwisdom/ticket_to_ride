@@ -138,6 +138,30 @@ def decode(data: bytes) -> Replay:
     )
 
 
+def pack(records: list[Replay]) -> bytes:
+    """Concatenate replays with a u32 length prefix each, for a corpus in one file."""
+    out = [len(records).to_bytes(4, "little")]
+    for rec in records:
+        blob = encode(rec)
+        out.append(len(blob).to_bytes(4, "little"))
+        out.append(blob)
+    return b"".join(out)
+
+
+def unpack(data: bytes) -> list[Replay]:
+    count = int.from_bytes(data[:4], "little")
+    offset = 4
+    records: list[Replay] = []
+    for _ in range(count):
+        size = int.from_bytes(data[offset : offset + 4], "little")
+        offset += 4
+        records.append(decode(data[offset : offset + size]))
+        offset += size
+    if offset != len(data):
+        raise ReplayError(f"trailing bytes in pack: {len(data) - offset}")
+    return records
+
+
 def replay(rec: Replay, cfg: RuleConfig | None = None) -> State:
     """Re-run a recorded game and prove it reproduced.
 

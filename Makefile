@@ -39,6 +39,7 @@ board:  ## Regenerate board data and the observation feature-spec table
 
 vectors:  ## Verify the frozen contract vectors still reproduce (see docs/CONTRACT.md)
 	uv run python tools/gen_vectors.py --check
+	uv run python tools/gen_replays.py --check
 
 tb:  ## Launch tensorboard over all runs
 	uv run tensorboard --logdir runs/
