@@ -10,6 +10,9 @@ from importlib.metadata import version as _version
 
 import typer
 
+from ticket_to_ride.cli.cmd_bench import bench_command
+from ticket_to_ride.cli.cmd_map import map_command
+
 app = typer.Typer(
     name="ttr",
     help="Ticket to Ride engine, agents, and self-play RL.",
@@ -32,6 +35,10 @@ def _root() -> None:
 def version() -> None:
     """Print the installed version."""
     typer.echo(_version("ticket_to_ride"))
+
+
+app.command("map")(map_command)
+app.command("bench")(bench_command)
 
 
 def main() -> None:
