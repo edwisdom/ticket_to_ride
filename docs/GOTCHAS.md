@@ -64,6 +64,13 @@ fails with "Got unexpected extra argument(s)". `ticket_to_ride/cli/app.py` defin
 code** — it breaks the moment the app is down to one command, which is easy to hit while
 refactoring.
 
+### `ruff format` rewrites Python inside markdown
+
+ruff 0.16 formats fenced ```python blocks in `.md` files. That silently rewrites design
+docs — it tried to split `a.step(act); b.step(act)` across two lines in a PLAN.md code
+sketch, which failed `ruff format --check` and would have turned CI red. `docs/` is in
+`extend-exclude` for this reason. If you add a docs directory elsewhere, exclude it too.
+
 ### ty has no `disallow_untyped_defs`
 
 `ty` (0.0.63) is inference-based. An unannotated function type checks clean, so swapping

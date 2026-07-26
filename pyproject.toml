@@ -82,7 +82,12 @@ torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
 [tool.ruff]
 target-version = "py314"
 line-length = 100
-extend-exclude = ["ticket_to_ride/data/board_gen.py"]  # generated
+extend-exclude = [
+    "ticket_to_ride/data/board_gen.py",  # generated
+    # ruff formats fenced Python inside markdown. docs/ holds prose and design sketches
+    # -- PLAN.md in particular is a verbatim archive -- and must not be rewritten.
+    "docs/",
+]
 
 [tool.ruff.lint]
 select = [
