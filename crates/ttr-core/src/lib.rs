@@ -23,7 +23,10 @@
 //!
 //! [`ticket_to_ride.engine`]: https://github.com/edwisdom/ticket_to_ride
 
+pub mod actions;
+pub mod board;
 pub mod board_gen;
+pub mod config;
 pub mod hashing;
 pub mod obs_spec_gen;
 pub mod rng;
