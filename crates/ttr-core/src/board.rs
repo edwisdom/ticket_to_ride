@@ -131,6 +131,26 @@ pub const MAX_PLAYERS: usize = {
     best
 };
 
+/// The longest route over every generated map. Bounds the per-length scratch tables the
+/// claim-legality scan builds on the stack.
+pub const MAX_ROUTE_LEN: usize = {
+    let mut best = 0;
+    let mut i = 0;
+    while i < MAPS.len() {
+        let segments = MAPS[i].segments;
+        let mut j = 0;
+        while j < segments.len() {
+            let len = segments[j].2 as usize;
+            if len > best {
+                best = len;
+            }
+            j += 1;
+        }
+        i += 1;
+    }
+    best
+};
+
 /// The face-up display is five cards in every published edition.
 pub const FACEUP_SLOTS: usize = 5;
 
@@ -142,6 +162,7 @@ pub const FACEUP_SLOTS: usize = 5;
 ///
 /// Affordability depends only on the pair, so the scan tests each bucket once and walks
 /// segments only for the affordable ones.
+#[derive(Debug)]
 pub struct Bucket {
     pub length: u8,
     /// A colour index, or [`GRAY`].
@@ -363,6 +384,25 @@ impl Board {
             self.raw.cities[self.ticket_a[t] as usize],
             self.raw.cities[self.ticket_b[t] as usize],
             self.ticket_points[t],
+        )
+    }
+}
+
+impl std::fmt::Debug for Board {
+    /// A one-line summary rather than the derived dump. The derived form would print 100
+    /// segments and a 36x36 distance matrix into every failing assertion message, and it
+    /// would also force `Debug` onto the generated `RawMap`.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "<Board {}: {} cities, {} pairs, {} segments, {} spaces, {} tickets, {} cards>",
+            self.name,
+            self.n_cities,
+            self.n_pairs,
+            self.n_segments,
+            self.total_spaces,
+            self.n_tickets,
+            self.deck_size,
         )
     }
 }

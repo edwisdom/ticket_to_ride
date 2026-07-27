@@ -27,9 +27,11 @@ pub mod actions;
 pub mod board;
 pub mod board_gen;
 pub mod config;
+pub mod graph;
 pub mod hashing;
 pub mod obs_spec_gen;
 pub mod rng;
+pub mod state;
 
 /// The frozen-contract version, kept in lockstep with
 /// `ticket_to_ride.engine.contract.CONTRACT_VERSION`.
