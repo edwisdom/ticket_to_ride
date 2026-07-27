@@ -24,7 +24,9 @@
 //! [`ticket_to_ride.engine`]: https://github.com/edwisdom/ticket_to_ride
 
 pub mod board_gen;
+pub mod hashing;
 pub mod obs_spec_gen;
+pub mod rng;
 
 /// The frozen-contract version, kept in lockstep with
 /// `ticket_to_ride.engine.contract.CONTRACT_VERSION`.
