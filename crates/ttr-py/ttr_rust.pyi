@@ -19,6 +19,31 @@ class IllegalAction(Exception):  # noqa: N818 - mirrors engine.state.IllegalActi
 def contract_version() -> int: ...
 def obs_version() -> int: ...
 def performance_threads() -> int: ...
+def default_params() -> dict[str, float | int | bool]:
+    """The Elo anchor's heuristic constants. The one place Python reads them from."""
+
+def params_hash(overrides: dict[str, float | int | bool] | None = None) -> str:
+    """blake2b-128 over a parameter set. Provenance -- see `behaviour_hash` for identity."""
+
+def behaviour_hash(tier: str, overrides: dict[str, float | int | bool] | None = None) -> str:
+    """A content address for an agent: what it plays over a frozen probe set.
+
+    This is what pins the Elo anchor. A params hash catches an edited constant and misses a
+    changed tiebreak or a fixed bug; both move H3's play and would silently re-base every
+    rating recorded against it.
+    """
+
+def run_arena(
+    map_name: str,
+    n_players: int,
+    agents: list[tuple[str, dict[str, float | int | bool] | None, int]],
+    lineup: list[int],
+    seed_root: int = 0,
+    blocks: int = 100,
+    threads: int = 0,
+) -> tuple[ArenaGames, ArenaSeats]:
+    """Play every rotation of `blocks` seed blocks. One call for the whole schedule."""
+
 def random_playouts(
     map_name: str,
     n_players: int,
@@ -117,6 +142,45 @@ class State:
     def tickets_remaining(self) -> int: ...
     @property
     def seed(self) -> int: ...
+
+class ArenaGames:
+    """One row per finished game, columnar."""
+
+    block_seed: list[int]
+    rotation: list[int]
+    turns: list[int]
+    #: The final `state_hash`, so a re-run is verifiable rather than merely repeatable.
+    final_hash: list[int]
+    seconds: float
+
+class ArenaSeats:
+    """One row per (game, seat), columnar. `game` indexes into `ArenaGames`."""
+
+    game: list[int]
+    seat: list[int]
+    #: Index into the arena's agent list -- **not** the seat.
+    agent: list[int]
+    score: list[int]
+    ret: list[float]
+    rank: list[int]
+    won: list[int]
+    tickets_kept: list[int]
+    tickets_made: list[int]
+    ticket_points: list[int]
+    routes_claimed: list[int]
+    trains_left: list[int]
+    cards_left: list[int]
+    longest_trail: list[int]
+    longest_bonus: list[int]
+    n_claim: list[int]
+    n_claim_wild: list[int]
+    n_claim_double: list[int]
+    n_draw_faceup: list[int]
+    n_draw_blind: list[int]
+    n_draw_tickets: list[int]
+    n_keep: list[int]
+    n_keep_extra: list[int]
+    n_pass: list[int]
 
 class VecEnv:
     def __init__(

@@ -197,7 +197,10 @@ impl Coverage {
             .collect()
     }
 
-    fn record(&mut self, state: &crate::state::State, action: u16) {
+    /// Fold one decision in. Public so the arena can collect the same counters
+    /// per seat that the coverage sweep collects per agent -- one implementation,
+    /// so an arena diagnostic and a coverage test can never disagree.
+    pub fn record(&mut self, state: &crate::state::State, action: u16) {
         let space = state.space;
         let board = state.board;
         self.decisions += 1;

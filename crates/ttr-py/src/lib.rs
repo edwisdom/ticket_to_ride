@@ -15,9 +15,11 @@ use pyo3::buffer::{Element, PyBuffer};
 use pyo3::create_exception;
 use pyo3::exceptions::{PyBufferError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::PyBytes;
+use pyo3::types::{PyBytes, PyDict};
 
+use ttr_core::arena::{self, AgentSpec};
 use ttr_core::config::RuleConfig;
+use ttr_core::heuristic::{HeuristicParams, Tier};
 use ttr_core::resample::{assert_consistent, resample_from_infoset};
 use ttr_core::rng::Pcg32;
 use ttr_core::state::{Game, State};
@@ -690,6 +692,290 @@ fn performance_threads() -> usize {
     ttr_core::vecenv::performance_threads()
 }
 
+// ---------------------------------------------------------------------------
+// Heuristics and the arena
+// ---------------------------------------------------------------------------
+
+/// Build a parameter set from a dict of overrides on the anchor's defaults.
+///
+/// Unknown keys are an **error**, not ignored. A silently dropped override is a tuning run
+/// that reports a change it never applied, and the params hash would agree with the
+/// baseline while the experimenter believes otherwise.
+fn params_from(overrides: Option<&Bound<'_, PyDict>>) -> PyResult<HeuristicParams> {
+    let mut p = HeuristicParams::default();
+    let Some(d) = overrides else {
+        return Ok(p);
+    };
+    for (key, value) in d.iter() {
+        let name: String = key.extract()?;
+        match name.as_str() {
+            "ticket_draw_train_fraction" => p.ticket_draw_train_fraction = value.extract()?,
+            "h1_max_tickets" => p.h1_max_tickets = value.extract()?,
+            "h1_take_faceup_locomotive" => p.h1_take_faceup_locomotive = value.extract()?,
+            "plan_utilization_target" => p.plan_utilization_target = value.extract()?,
+            "completion_sharpness" => p.completion_sharpness = value.extract()?,
+            "min_points_per_train" => p.min_points_per_train = value.extract()?,
+            "contest_weight" => p.contest_weight = value.extract()?,
+            "double_lockout_weight" => p.double_lockout_weight = value.extract()?,
+            "cards_per_draw_turn" => p.cards_per_draw_turn = value.extract()?,
+            "faceup_needed_bonus" => p.faceup_needed_bonus = value.extract()?,
+            "locomotive_value" => p.locomotive_value = value.extract()?,
+            "surplus_card_value" => p.surplus_card_value = value.extract()?,
+            "endgame_train_fraction" => p.endgame_train_fraction = value.extract()?,
+            "endgame_ticket_urgency" => p.endgame_ticket_urgency = value.extract()?,
+            "convex_path_exponent" => p.convex_path_exponent = value.extract()?,
+            "gray_cannibalization_penalty" => p.gray_cannibalization_penalty = value.extract()?,
+            "longest_chain_weight" => p.longest_chain_weight = value.extract()?,
+            "ticket_keep_dead_penalty" => p.ticket_keep_dead_penalty = value.extract()?,
+            "threat_weight" => p.threat_weight = value.extract()?,
+            "threat_horizon_turns" => p.threat_horizon_turns = value.extract()?,
+            "threat_severance_exponent" => p.threat_severance_exponent = value.extract()?,
+            "threat_crowding_penalty" => p.threat_crowding_penalty = value.extract()?,
+            "hoard_safety_margin" => p.hoard_safety_margin = value.extract()?,
+            "double_grab_urgency" => p.double_grab_urgency = value.extract()?,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "unknown heuristic parameter {other:?}"
+                )));
+            }
+        }
+    }
+    p.validate().map_err(PyValueError::new_err)?;
+    Ok(p)
+}
+
+/// The anchor's defaults, as a dict. The one place Python reads the constants from, so a
+/// tuning script cannot drift from the values the agents actually run.
+#[pyfunction]
+fn default_params(py: Python<'_>) -> PyResult<Py<PyDict>> {
+    let p = HeuristicParams::default();
+    let d = PyDict::new(py);
+    for entry in p.canonical().split('|').skip(1) {
+        let (name, value) = entry.split_once('=').expect("canonical is name=value");
+        // Round-trip through the canonical text rather than listing the fields again here:
+        // a field added to the struct then appears automatically instead of being silently
+        // missing from the dict Python tunes with.
+        if let Ok(b) = value.parse::<bool>() {
+            d.set_item(name, b)?;
+        } else if let Ok(i) = value.parse::<i64>() {
+            d.set_item(name, i)?;
+        } else {
+            d.set_item(
+                name,
+                value
+                    .parse::<f64>()
+                    .map_err(|e| PyRuntimeError::new_err(format!("canonical field {name}: {e}")))?,
+            )?;
+        }
+    }
+    Ok(d.unbind())
+}
+
+/// blake2b-128 over a parameter set. **Provenance, not identity** -- see `behaviour_hash`.
+#[pyfunction]
+#[pyo3(signature = (overrides=None))]
+fn params_hash(overrides: Option<&Bound<'_, PyDict>>) -> PyResult<String> {
+    Ok(params_from(overrides)?.params_hash())
+}
+
+/// A content address for an agent: what it actually plays, over a frozen probe set.
+///
+/// **This is what pins the Elo anchor.** A parameter hash catches an edited constant and
+/// misses a changed tiebreak, a changed Steiner fallback, a fixed bug -- each of which moves
+/// H3's play and silently re-bases every rating recorded against it. Two builds that play
+/// identically are the same player; two that play differently are different players even at
+/// the same commit, which is also why `git_sha` is provenance on a match rather than part of
+/// an agent's identity.
+#[pyfunction]
+#[pyo3(signature = (tier, overrides=None))]
+fn behaviour_hash(
+    py: Python<'_>,
+    tier: &str,
+    overrides: Option<&Bound<'_, PyDict>>,
+) -> PyResult<String> {
+    let t =
+        Tier::parse(tier).ok_or_else(|| PyValueError::new_err(format!("unknown tier {tier:?}")))?;
+    let p = params_from(overrides)?;
+    Ok(py.detach(|| ttr_core::heuristic::behaviour_hash(t, &p)))
+}
+
+/// Per-seat outcomes for one arena run, columnar. One row per (game, seat).
+#[pyclass(name = "ArenaSeats", module = "ttr_rust", frozen, get_all)]
+pub struct PyArenaSeats {
+    pub game: Vec<u32>,
+    pub seat: Vec<u8>,
+    pub agent: Vec<u16>,
+    pub score: Vec<i16>,
+    pub ret: Vec<f64>,
+    pub rank: Vec<u8>,
+    pub won: Vec<u8>,
+    pub tickets_kept: Vec<u8>,
+    pub tickets_made: Vec<u8>,
+    pub ticket_points: Vec<i16>,
+    pub routes_claimed: Vec<u16>,
+    pub trains_left: Vec<u8>,
+    pub cards_left: Vec<u16>,
+    pub longest_trail: Vec<u16>,
+    pub longest_bonus: Vec<i16>,
+    pub n_claim: Vec<u32>,
+    pub n_claim_wild: Vec<u32>,
+    pub n_claim_double: Vec<u32>,
+    pub n_draw_faceup: Vec<u32>,
+    pub n_draw_blind: Vec<u32>,
+    pub n_draw_tickets: Vec<u32>,
+    pub n_keep: Vec<u32>,
+    pub n_keep_extra: Vec<u32>,
+    pub n_pass: Vec<u32>,
+}
+
+/// Per-game outcomes for one arena run, columnar. One row per game.
+#[pyclass(name = "ArenaGames", module = "ttr_rust", frozen, get_all)]
+pub struct PyArenaGames {
+    pub block_seed: Vec<u64>,
+    pub rotation: Vec<u8>,
+    pub turns: Vec<u16>,
+    pub final_hash: Vec<u64>,
+    pub seconds: f64,
+}
+
+/// Play every rotation of `blocks` seed blocks and return the two tables.
+///
+/// One call for the whole schedule. A Python loop calling into Rust per decision would pay
+/// a few microseconds of call overhead against a ~25 microsecond H3 decision and would not
+/// parallelise at all under the GIL; this releases it and spreads blocks across the pool.
+///
+/// `agents` is a list of `(tier, overrides_or_None, seed)`; `lineup` names which agent fills
+/// each seat before rotation.
+#[pyfunction]
+#[pyo3(signature = (map_name, n_players, agents, lineup, seed_root=0, blocks=100, threads=0))]
+#[allow(clippy::too_many_arguments)]
+fn run_arena(
+    py: Python<'_>,
+    map_name: &str,
+    n_players: usize,
+    agents: Vec<(String, Option<Py<PyDict>>, u64)>,
+    lineup: Vec<u16>,
+    seed_root: u64,
+    blocks: u64,
+    threads: usize,
+) -> PyResult<(PyArenaGames, PyArenaSeats)> {
+    let cfg = RuleConfig {
+        map_name: map_name.to_string(),
+        n_players,
+        track_history: false,
+        ..RuleConfig::default()
+    };
+    let game = Game::new(cfg).map_err(|e| PyValueError::new_err(e.to_string()))?;
+
+    let mut specs = Vec::with_capacity(agents.len());
+    for (tier, overrides, seed) in &agents {
+        let t = Tier::parse(tier)
+            .ok_or_else(|| PyValueError::new_err(format!("unknown tier {tier:?}")))?;
+        let bound = overrides.as_ref().map(|d| d.bind(py).clone());
+        specs.push(AgentSpec {
+            tier: t,
+            params: params_from(bound.as_ref())?,
+            seed: *seed,
+        });
+    }
+    if lineup.len() != n_players {
+        return Err(PyValueError::new_err(format!(
+            "lineup has {} entries for {n_players} seats",
+            lineup.len()
+        )));
+    }
+    if let Some(bad) = lineup.iter().find(|&&a| a as usize >= specs.len()) {
+        return Err(PyValueError::new_err(format!(
+            "lineup names agent {bad}, but only {} were given",
+            specs.len()
+        )));
+    }
+    let threads = if threads == 0 {
+        ttr_core::vecenv::performance_threads()
+    } else {
+        threads
+    };
+
+    let (out, seconds) = py.detach(|| {
+        let start = std::time::Instant::now();
+        let out = arena::run(&game, &specs, &lineup, seed_root, blocks, threads);
+        (out, start.elapsed().as_secs_f64())
+    });
+
+    let rows = out.len() * n_players;
+    let mut games = PyArenaGames {
+        block_seed: Vec::with_capacity(out.len()),
+        rotation: Vec::with_capacity(out.len()),
+        turns: Vec::with_capacity(out.len()),
+        final_hash: Vec::with_capacity(out.len()),
+        seconds,
+    };
+    macro_rules! seats_vecs {
+        ($($f:ident),* $(,)?) => { PyArenaSeats { $($f: Vec::with_capacity(rows)),* } };
+    }
+    let mut seats = seats_vecs!(
+        game,
+        seat,
+        agent,
+        score,
+        ret,
+        rank,
+        won,
+        tickets_kept,
+        tickets_made,
+        ticket_points,
+        routes_claimed,
+        trains_left,
+        cards_left,
+        longest_trail,
+        longest_bonus,
+        n_claim,
+        n_claim_wild,
+        n_claim_double,
+        n_draw_faceup,
+        n_draw_blind,
+        n_draw_tickets,
+        n_keep,
+        n_keep_extra,
+        n_pass,
+    );
+
+    for (g, outcome) in out.iter().enumerate() {
+        games.block_seed.push(outcome.block_seed);
+        games.rotation.push(outcome.rotation);
+        games.turns.push(outcome.turns);
+        games.final_hash.push(outcome.final_hash);
+        for (s, row) in outcome.seats.iter().enumerate() {
+            seats.game.push(g as u32);
+            seats.seat.push(s as u8);
+            seats.agent.push(row.agent);
+            seats.score.push(row.score);
+            seats.ret.push(row.ret);
+            seats.rank.push(row.rank);
+            seats.won.push(u8::from(row.won));
+            seats.tickets_kept.push(row.tickets_kept);
+            seats.tickets_made.push(row.tickets_made);
+            seats.ticket_points.push(row.ticket_points);
+            seats.routes_claimed.push(row.routes_claimed);
+            seats.trains_left.push(row.trains_left);
+            seats.cards_left.push(row.cards_left);
+            seats.longest_trail.push(row.longest_trail);
+            seats.longest_bonus.push(row.longest_bonus);
+            let c = row.coverage;
+            seats.n_claim.push(c.claim);
+            seats.n_claim_wild.push(c.claim_wild);
+            seats.n_claim_double.push(c.claim_double);
+            seats.n_draw_faceup.push(c.draw_faceup);
+            seats.n_draw_blind.push(c.draw_blind);
+            seats.n_draw_tickets.push(c.draw_tickets);
+            seats.n_keep.push(c.keep);
+            seats.n_keep_extra.push(c.keep_extra);
+            seats.n_pass.push(c.pass);
+        }
+    }
+    Ok((games, seats))
+}
+
 /// The frozen-contract version this build implements. Python asserts it matches
 /// `ticket_to_ride.engine.contract.CONTRACT_VERSION`.
 #[pyfunction]
@@ -710,6 +996,12 @@ fn ttr_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(obs_version, m)?)?;
     m.add_function(wrap_pyfunction!(random_playouts, m)?)?;
     m.add_function(wrap_pyfunction!(performance_threads, m)?)?;
+    m.add_function(wrap_pyfunction!(default_params, m)?)?;
+    m.add_function(wrap_pyfunction!(params_hash, m)?)?;
+    m.add_function(wrap_pyfunction!(behaviour_hash, m)?)?;
+    m.add_function(wrap_pyfunction!(run_arena, m)?)?;
+    m.add_class::<PyArenaGames>()?;
+    m.add_class::<PyArenaSeats>()?;
     m.add_class::<PyGame>()?;
     m.add_class::<PyState>()?;
     m.add_class::<PyVecEnv>()?;

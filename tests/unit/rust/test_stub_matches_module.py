@@ -30,14 +30,23 @@ def _stub_tree() -> ast.Module:
 
 
 def _stub_classes() -> dict[str, set[str]]:
+    """Class members the stub declares: methods, properties, and bare annotations.
+
+    Both forms are needed. `#[getter]` on a small class reads best as `@property def`, but a
+    columnar result object with two dozen fields reads as plain annotations -- and a stub
+    that only counted one form would report every field of the other as missing.
+    """
     out: dict[str, set[str]] = {}
     for node in _stub_tree().body:
-        if isinstance(node, ast.ClassDef):
-            out[node.name] = {
-                item.name
-                for item in node.body
-                if isinstance(item, ast.FunctionDef) and item.name not in IGNORED
-            }
+        if not isinstance(node, ast.ClassDef):
+            continue
+        names: set[str] = set()
+        for item in node.body:
+            if isinstance(item, ast.FunctionDef) and item.name not in IGNORED:
+                names.add(item.name)
+            elif isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
+                names.add(item.target.id)
+        out[node.name] = names
     return out
 
 
@@ -64,7 +73,9 @@ def test_no_stubbed_function_is_missing_from_the_module(rust: ModuleType) -> Non
     assert not extra, f"{STUB} promises functions the module does not have: {sorted(extra)}"
 
 
-@pytest.mark.parametrize("class_name", ["Game", "State", "VecEnv", "Rng"])
+@pytest.mark.parametrize(
+    "class_name", ["Game", "State", "VecEnv", "Rng", "ArenaGames", "ArenaSeats"]
+)
 def test_class_members_agree(class_name: str, rust: ModuleType) -> None:
     stub = _stub_classes()
     assert class_name in stub, f"{STUB} does not describe {class_name}"

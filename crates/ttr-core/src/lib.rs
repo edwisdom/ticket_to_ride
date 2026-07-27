@@ -24,6 +24,7 @@
 //! [`ticket_to_ride.engine`]: https://github.com/edwisdom/ticket_to_ride
 
 pub mod actions;
+pub mod arena;
 pub mod board;
 pub mod board_gen;
 pub mod config;
