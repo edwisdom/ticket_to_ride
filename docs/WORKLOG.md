@@ -76,8 +76,12 @@ measurement, unearned complexity. Recorded so nobody tries it a third time. Lega
 
 ### What the differential harness found, and what it taught
 
-Byte-identical over the fast tier and the full nightly sweep; all 84 golden replays
-reproduce their recorded final hash *and* scores. Compared at **every** step: `state_hash`,
+Byte-identical over **100k seeds x 7 (map, seat-count) configurations -- 700,000 games,
+compared at every step, zero divergences.** That is wider than §14 asks for: the criterion
+is 100k seeds x {2,3,4,5}P on one map, and this covers USA 2-5P *and* mini 2-4P. All 84
+golden replays reproduce their recorded final hash *and* scores.
+
+Compared at **every** step: `state_hash`,
 `position_hash`, sorted `legal_actions`, `is_terminal`, `current_player`, and at the
 terminal the longest trails, itemized breakdown, final scores, winners and `returns`.
 
@@ -151,6 +155,18 @@ Three PyO3 traps are in GOTCHAS: `extension-module` breaking a bare `cargo build
 per-package), and a `Clone` pyclass's automatic `FromPyObject` silently copying an RNG
 handle at the call boundary — which would leave the caller's stream unadvanced and make
 every determinization identical.
+
+### Two operational notes
+
+`make bench-check` needs an idle machine. Run alongside the nightly sweep under `-n auto`,
+pytest-benchmark reports a 40–80% "regression" that is pure core contention, with a
+`PerformanceRegression` traceback that names your code. Measured, not hypothesised — the
+same gate passes cleanly on a quiet box. That is also why CI asserts a *ratio* and leaves
+the absolute figures to local runs.
+
+The nightly sweep takes ~20 minutes wall-clock under `-n auto` on 12 cores. Redirecting it
+through `nohup` can lose pytest's final summary line; the per-test progress characters are
+the reliable signal, since a failure prints `F` inline as it happens.
 
 ### Next
 

@@ -50,7 +50,10 @@ cov:  ## Fast tests with coverage
 bench:  ## Run benchmarks and save a new baseline
 	uv run pytest -m bench --benchmark-autosave
 
-bench-check:  ## Fail if throughput regressed >20% vs the saved baseline (M2 only)
+# Needs a quiet machine. Running it alongside anything else -- the nightly differential
+# sweep under `-n auto` is the obvious offender -- reports a 40-80% "regression" that is
+# purely core contention. Measured, not hypothesised.
+bench-check:  ## Fail if throughput regressed >20% vs the saved baseline (M2, idle machine)
 	uv run pytest -m bench --benchmark-compare --benchmark-compare-fail=mean:20%
 
 board:  ## Regenerate board data and the observation feature-spec table

@@ -20,7 +20,8 @@ training reinforcement learning agents against it via self-play.
 | 8 | Scaling, web UI, human gauntlet | |
 
 The engine plays 2–5 players on the USA map and 2–4 on TTR-mini. Two implementations,
-byte-identical and compared at every step:
+byte-identical over 700,000 games (100k seeds x every map and seat count), compared at
+every step:
 
 | | µs/step | full USA 2P games/s |
 | --- | --- | --- |

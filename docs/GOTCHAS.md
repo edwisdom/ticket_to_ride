@@ -231,6 +231,14 @@ changes `deck_len`, which changes the image length, and a byte-offset diff then 
 "the images are different lengths" — which reads like a layout bug and sends you to check
 field widths when the real difference is one value several fields earlier.
 
+### `make bench-check` needs an idle machine
+
+Run alongside anything else — the nightly differential sweep under `-n auto` is the obvious
+offender — pytest-benchmark reports a **40–80% "regression"** that is purely core
+contention, complete with a `PerformanceRegression` traceback that names your code.
+Measured, not hypothesised. The absolute figures are only meaningful on a quiet box, which
+is also why the gate is local-only and CI asserts a *ratio* instead.
+
 ### PyO3: `extension-module` breaks a plain `cargo build` on macOS
 
 The feature deliberately does not link libpython. maturin passes
