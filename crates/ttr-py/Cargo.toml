@@ -1,0 +1,17 @@
+[package]
+name = "ttr-py"
+description = "Thin PyO3 shim over ttr-core. Contains no game logic."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+# The importable module is `ttr_rust`, a distribution separate from `ticket_to_ride`.
+# Keeping them apart is what lets the Python engine stay the oracle: it must never gain a
+# dependency on the thing it is the oracle for.
+name = "ttr_rust"
+crate-type = ["cdylib"]
+
+[dependencies]
+ttr-core = { path = "../ttr-core" }
+pyo3 = { version = "0.29", features = ["extension-module"] }

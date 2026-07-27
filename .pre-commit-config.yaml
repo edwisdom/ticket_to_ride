@@ -51,6 +51,22 @@ repos:
         pass_filenames: false
         files: ^(ticket_to_ride/(engine|agents|data)/.*\.py|tools/gen_replays\.py|tests/golden/.*)$
 
+      # Rust formatting and lints. `cargo fmt` is fast enough to be unconditional; clippy
+      # is scoped to Rust changes because a cold run is ~30s.
+      - id: cargo-fmt
+        name: rust is formatted
+        entry: cargo fmt --all -- --check
+        language: system
+        pass_filenames: false
+        files: ^(crates/.*\.rs|Cargo\.(toml|lock))$
+
+      - id: cargo-clippy
+        name: clippy is clean
+        entry: cargo clippy --workspace --all-targets -- -D warnings
+        language: system
+        pass_filenames: false
+        files: ^(crates/.*\.rs|crates/.*/Cargo\.toml|Cargo\.(toml|lock))$
+
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:

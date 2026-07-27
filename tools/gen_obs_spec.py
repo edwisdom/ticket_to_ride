@@ -27,6 +27,9 @@ from ticket_to_ride.rl.encode.spec import OBS_VERSION, obs_spec  # noqa: E402
 
 OUT = REPO_ROOT / "crates" / "ttr-core" / "src" / "obs_spec_gen.rs"
 
+#: Emitted before every generated table. See tools/gen_board.py for why.
+SKIP = "#[rustfmt::skip]"
+
 
 def emit() -> str:
     lines = [
@@ -39,6 +42,10 @@ def emit() -> str:
         "//! the value written into a slot, which is what the differential harness checks.",
         "",
         "#![allow(dead_code)]",
+        "",
+        "// The generated tables below carry `#[rustfmt::skip]`; see tools/gen_board.py for",
+        "// the full reasoning. Short version: without it the fmt hook and `make board`",
+        "// rewrite each other forever, and the file-wide inner form does not compile.",
         "",
         f"pub const OBS_VERSION: u32 = {OBS_VERSION};",
         "",
@@ -74,6 +81,7 @@ def emit() -> str:
         up = name.upper()
         names.append(up)
         for block in spec.blocks:
+            lines.append(SKIP)
             lines.append(f"const {up}_{block.name.upper()}_FIELDS: &[ObsField] = &[")
             lines += [
                 f'    ObsField {{ name: "{f.name}", offset: {f.offset}, width: {f.width} }},'
@@ -81,6 +89,7 @@ def emit() -> str:
             ]
             lines += ["];", ""]
 
+        lines.append(SKIP)
         lines.append(f"const {up}_BLOCKS: &[ObsBlock] = &[")
         for block in spec.blocks:
             lines.append(
@@ -91,6 +100,7 @@ def emit() -> str:
         lines += ["];", ""]
 
         lines += [
+            SKIP,
             f"pub const {up}_OBS: ObsSpec = ObsSpec {{",
             f'    map: "{name}",',
             f"    size: {spec.size},",

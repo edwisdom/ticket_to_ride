@@ -1,0 +1,26 @@
+[workspace]
+members = ["crates/ttr-core", "crates/ttr-py"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+# Pinned rather than floating: this crate is the twin of a differential-testing oracle,
+# so a toolchain upgrade that changes any observable behaviour must be a deliberate act.
+rust-version = "1.85"
+
+[workspace.dependencies]
+# One hash primitive for the whole project, matching Python's `hashlib.blake2b`. See
+# docs/CONTRACT.md §3 for why blake2b rather than the FNV-1a PLAN.md §5.8 called for.
+blake2b_simd = "1.0"
+
+# Self-play spends its life inside `step()`, so this is the profile that matters:
+# `maturin develop --release` and `cargo bench` both use it.
+#
+# Deliberately *not* `panic = "abort"`. PyO3 turns a Rust panic into a Python exception by
+# unwinding across the FFI boundary; aborting would take the whole interpreter down, and a
+# differential harness that dies instead of reporting a failing seed is useless. Cargo does
+# not allow `panic` in a per-package override, so it cannot be set here and exempted there.
+[profile.release]
+lto = "fat"
+codegen-units = 1

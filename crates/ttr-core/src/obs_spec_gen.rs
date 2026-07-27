@@ -8,6 +8,10 @@
 
 #![allow(dead_code)]
 
+// The generated tables below carry `#[rustfmt::skip]`; see tools/gen_board.py for
+// the full reasoning. Short version: without it the fmt hook and `make board`
+// rewrite each other forever, and the file-wide inner form does not compile.
+
 pub const OBS_VERSION: u32 = 1;
 
 pub struct ObsField {
@@ -34,10 +38,12 @@ pub struct ObsSpec {
     pub blocks: &'static [ObsBlock],
 }
 
+#[rustfmt::skip]
 const USA_SEGMENT_STATIC_FIELDS: &[ObsField] = &[
     ObsField { name: "required_color", offset: 0, width: 9 },
 ];
 
+#[rustfmt::skip]
 const USA_SEGMENT_DYNAMIC_FIELDS: &[ObsField] = &[
     ObsField { name: "owner", offset: 0, width: 6 },
     ObsField { name: "closed", offset: 6, width: 1 },
@@ -48,6 +54,7 @@ const USA_SEGMENT_DYNAMIC_FIELDS: &[ObsField] = &[
     ObsField { name: "extends_my_chain", offset: 17, width: 1 },
 ];
 
+#[rustfmt::skip]
 const USA_OWN_HAND_FIELDS: &[ObsField] = &[
     ObsField { name: "counts", offset: 0, width: 9 },
     ObsField { name: "thermometer", offset: 9, width: 9 },
@@ -58,6 +65,7 @@ const USA_OWN_HAND_FIELDS: &[ObsField] = &[
     ObsField { name: "thermometer6", offset: 54, width: 9 },
 ];
 
+#[rustfmt::skip]
 const USA_TICKETS_FIELDS: &[ObsField] = &[
     ObsField { name: "held", offset: 0, width: 1 },
     ObsField { name: "connected", offset: 1, width: 1 },
@@ -68,16 +76,19 @@ const USA_TICKETS_FIELDS: &[ObsField] = &[
     ObsField { name: "fragility", offset: 11, width: 1 },
 ];
 
+#[rustfmt::skip]
 const USA_STEINER_FIELDS: &[ObsField] = &[
     ObsField { name: "remaining_cost", offset: 0, width: 1 },
     ObsField { name: "cost_minus_trains", offset: 1, width: 1 },
     ObsField { name: "exact", offset: 2, width: 1 },
 ];
 
+#[rustfmt::skip]
 const USA_FACEUP_FIELDS: &[ObsField] = &[
     ObsField { name: "card", offset: 0, width: 10 },
 ];
 
+#[rustfmt::skip]
 const USA_PILES_FIELDS: &[ObsField] = &[
     ObsField { name: "deck_size", offset: 0, width: 1 },
     ObsField { name: "discard_size", offset: 1, width: 1 },
@@ -86,6 +97,7 @@ const USA_PILES_FIELDS: &[ObsField] = &[
     ObsField { name: "unseen", offset: 12, width: 9 },
 ];
 
+#[rustfmt::skip]
 const USA_OPPONENTS_FIELDS: &[ObsField] = &[
     ObsField { name: "present", offset: 0, width: 1 },
     ObsField { name: "trains", offset: 1, width: 1 },
@@ -100,6 +112,7 @@ const USA_OPPONENTS_FIELDS: &[ObsField] = &[
     ObsField { name: "max_possible", offset: 24, width: 9 },
 ];
 
+#[rustfmt::skip]
 const USA_CLOCK_FIELDS: &[ObsField] = &[
     ObsField { name: "phase", offset: 0, width: 5 },
     ObsField { name: "seats", offset: 5, width: 5 },
@@ -115,6 +128,7 @@ const USA_CLOCK_FIELDS: &[ObsField] = &[
     ObsField { name: "gap_to_leader", offset: 25, width: 1 },
 ];
 
+#[rustfmt::skip]
 const USA_BLOCKS: &[ObsBlock] = &[
     ObsBlock { name: "segment_static", count: 100, stride: 9, offset: 0, fields: USA_SEGMENT_STATIC_FIELDS },
     ObsBlock { name: "segment_dynamic", count: 100, stride: 18, offset: 900, fields: USA_SEGMENT_DYNAMIC_FIELDS },
@@ -127,16 +141,19 @@ const USA_BLOCKS: &[ObsBlock] = &[
     ObsBlock { name: "clock", count: 1, stride: 26, offset: 3329, fields: USA_CLOCK_FIELDS },
 ];
 
+#[rustfmt::skip]
 pub const USA_OBS: ObsSpec = ObsSpec {
     map: "usa",
     size: 3355,
     blocks: USA_BLOCKS,
 };
 
+#[rustfmt::skip]
 const MINI_SEGMENT_STATIC_FIELDS: &[ObsField] = &[
     ObsField { name: "required_color", offset: 0, width: 7 },
 ];
 
+#[rustfmt::skip]
 const MINI_SEGMENT_DYNAMIC_FIELDS: &[ObsField] = &[
     ObsField { name: "owner", offset: 0, width: 6 },
     ObsField { name: "closed", offset: 6, width: 1 },
@@ -147,6 +164,7 @@ const MINI_SEGMENT_DYNAMIC_FIELDS: &[ObsField] = &[
     ObsField { name: "extends_my_chain", offset: 17, width: 1 },
 ];
 
+#[rustfmt::skip]
 const MINI_OWN_HAND_FIELDS: &[ObsField] = &[
     ObsField { name: "counts", offset: 0, width: 7 },
     ObsField { name: "thermometer", offset: 7, width: 7 },
@@ -157,6 +175,7 @@ const MINI_OWN_HAND_FIELDS: &[ObsField] = &[
     ObsField { name: "thermometer6", offset: 42, width: 7 },
 ];
 
+#[rustfmt::skip]
 const MINI_TICKETS_FIELDS: &[ObsField] = &[
     ObsField { name: "held", offset: 0, width: 1 },
     ObsField { name: "connected", offset: 1, width: 1 },
@@ -167,16 +186,19 @@ const MINI_TICKETS_FIELDS: &[ObsField] = &[
     ObsField { name: "fragility", offset: 11, width: 1 },
 ];
 
+#[rustfmt::skip]
 const MINI_STEINER_FIELDS: &[ObsField] = &[
     ObsField { name: "remaining_cost", offset: 0, width: 1 },
     ObsField { name: "cost_minus_trains", offset: 1, width: 1 },
     ObsField { name: "exact", offset: 2, width: 1 },
 ];
 
+#[rustfmt::skip]
 const MINI_FACEUP_FIELDS: &[ObsField] = &[
     ObsField { name: "card", offset: 0, width: 8 },
 ];
 
+#[rustfmt::skip]
 const MINI_PILES_FIELDS: &[ObsField] = &[
     ObsField { name: "deck_size", offset: 0, width: 1 },
     ObsField { name: "discard_size", offset: 1, width: 1 },
@@ -185,6 +207,7 @@ const MINI_PILES_FIELDS: &[ObsField] = &[
     ObsField { name: "unseen", offset: 10, width: 7 },
 ];
 
+#[rustfmt::skip]
 const MINI_OPPONENTS_FIELDS: &[ObsField] = &[
     ObsField { name: "present", offset: 0, width: 1 },
     ObsField { name: "trains", offset: 1, width: 1 },
@@ -199,6 +222,7 @@ const MINI_OPPONENTS_FIELDS: &[ObsField] = &[
     ObsField { name: "max_possible", offset: 22, width: 7 },
 ];
 
+#[rustfmt::skip]
 const MINI_CLOCK_FIELDS: &[ObsField] = &[
     ObsField { name: "phase", offset: 0, width: 5 },
     ObsField { name: "seats", offset: 5, width: 5 },
@@ -214,6 +238,7 @@ const MINI_CLOCK_FIELDS: &[ObsField] = &[
     ObsField { name: "gap_to_leader", offset: 25, width: 1 },
 ];
 
+#[rustfmt::skip]
 const MINI_BLOCKS: &[ObsBlock] = &[
     ObsBlock { name: "segment_static", count: 30, stride: 7, offset: 0, fields: MINI_SEGMENT_STATIC_FIELDS },
     ObsBlock { name: "segment_dynamic", count: 30, stride: 18, offset: 210, fields: MINI_SEGMENT_DYNAMIC_FIELDS },
@@ -226,6 +251,7 @@ const MINI_BLOCKS: &[ObsBlock] = &[
     ObsBlock { name: "clock", count: 1, stride: 26, offset: 1143, fields: MINI_CLOCK_FIELDS },
 ];
 
+#[rustfmt::skip]
 pub const MINI_OBS: ObsSpec = ObsSpec {
     map: "mini",
     size: 1169,

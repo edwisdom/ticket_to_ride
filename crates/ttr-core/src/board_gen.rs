@@ -8,6 +8,16 @@
 
 #![allow(dead_code)]
 
+// Each generated table below carries `#[rustfmt::skip]`. Without it rustfmt
+// explodes them to one entry per line (+228 lines on this file alone) and sets up
+// a permanent fight: `make board` writes the compact form, the fmt hook rewrites
+// it, and `--check` then fails on a file nobody edited. Same class of trap as
+// `ruff format` rewriting Python inside docs/*.md.
+//
+// It has to be the per-item *outer* attribute: the file-wide `#![rustfmt::skip]`
+// is a custom inner attribute, which rustfmt honours but rustc rejects as
+// unstable (rust-lang/rust#54726), so the crate simply would not build.
+
 pub const SCHEMA_VERSION: u32 = 1;
 
 /// One board's data. Mirrors `ticket_to_ride.data.rawmap.RawMap` field for field.
@@ -46,10 +56,12 @@ impl RawMap {
     }
 }
 
+#[rustfmt::skip]
 pub const USA_CITIES: [&str; 36] = [
     "Atlanta", "Boston", "Calgary", "Charleston", "Chicago", "Dallas", "Denver", "Duluth", "El Paso", "Helena", "Houston", "Kansas City", "Las Vegas", "Little Rock", "Los Angeles", "Miami", "Montreal", "Nashville", "New Orleans", "New York", "Oklahoma City", "Omaha", "Phoenix", "Pittsburgh", "Portland", "Raleigh", "Saint Louis", "Salt Lake City", "San Francisco", "Santa Fe", "Sault St. Marie", "Seattle", "Toronto", "Vancouver", "Washington", "Winnipeg",
 ];
 
+#[rustfmt::skip]
 pub const USA_SEGMENTS: [(u8, u8, u8, u8); 100] = [
     (0, 3, 2, 255), (0, 15, 5, 1), (0, 17, 1, 255), (0, 18, 4, 3),
     (0, 18, 4, 7), (0, 25, 2, 255), (0, 25, 2, 255), (1, 16, 2, 255),
@@ -78,6 +90,7 @@ pub const USA_SEGMENTS: [(u8, u8, u8, u8); 100] = [
     (30, 32, 2, 255), (30, 35, 6, 255), (31, 33, 1, 255), (31, 33, 1, 255),
 ];
 
+#[rustfmt::skip]
 pub const USA_TICKETS: [(u8, u8, u8); 30] = [
     (0, 16, 9), (0, 19, 6), (0, 28, 17), (1, 15, 12), (2, 22, 13),
     (2, 27, 7), (4, 14, 16), (4, 18, 7), (4, 29, 9), (5, 19, 11),
@@ -87,8 +100,10 @@ pub const USA_TICKETS: [(u8, u8, u8); 30] = [
     (17, 30, 8), (19, 31, 22), (20, 30, 9), (22, 24, 11), (29, 33, 13),
 ];
 
+#[rustfmt::skip]
 pub const USA_COLOR_NAMES: [&str; 8] = ["black", "blue", "green", "orange", "purple", "red", "white", "yellow",];
 
+#[rustfmt::skip]
 pub const USA: RawMap = RawMap {
     name: "usa",
     cities: &USA_CITIES,
@@ -109,10 +124,12 @@ pub const USA: RawMap = RawMap {
     data_hash: "1e5e154018541e483aba9c4ba702396c",
 };
 
+#[rustfmt::skip]
 pub const MINI_CITIES: [&str; 14] = [
     "Calgary", "Denver", "El Paso", "Helena", "Las Vegas", "Los Angeles", "Phoenix", "Portland", "Salt Lake City", "San Francisco", "Santa Fe", "Seattle", "Vancouver", "Winnipeg",
 ];
 
+#[rustfmt::skip]
 pub const MINI_SEGMENTS: [(u8, u8, u8, u8); 30] = [
     (0, 3, 4, 1), (0, 11, 4, 255), (0, 12, 3, 255), (0, 13, 5, 0),
     (1, 3, 4, 0), (1, 6, 5, 3), (1, 8, 3, 4), (1, 8, 3, 5),
@@ -124,14 +141,17 @@ pub const MINI_SEGMENTS: [(u8, u8, u8, u8); 30] = [
     (11, 12, 1, 255), (11, 12, 1, 255),
 ];
 
+#[rustfmt::skip]
 pub const MINI_TICKETS: [(u8, u8, u8); 14] = [
     (0, 1, 8), (0, 8, 7), (1, 5, 8), (1, 9, 8), (1, 12, 10),
     (2, 7, 12), (2, 11, 13), (2, 12, 14), (3, 5, 8), (4, 13, 10),
     (5, 11, 9), (6, 13, 13), (9, 13, 12), (10, 12, 12),
 ];
 
+#[rustfmt::skip]
 pub const MINI_COLOR_NAMES: [&str; 6] = ["black", "blue", "green", "orange", "red", "yellow",];
 
+#[rustfmt::skip]
 pub const MINI: RawMap = RawMap {
     name: "mini",
     cities: &MINI_CITIES,

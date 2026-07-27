@@ -1,0 +1,15 @@
+[package]
+name = "ttr-core"
+description = "Ticket to Ride engine core. Pure Rust, no Python, standalone-tested."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+blake2b_simd.workspace = true
+
+[dev-dependencies]
+# Test-only: the contract vectors are checked by reading
+# tests/golden/contract_vectors.json directly, so `cargo test` validates the port against
+# the same file Python does rather than against a hand-copied constant.
+serde_json = "1.0"

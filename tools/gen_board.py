@@ -417,6 +417,11 @@ def emit_python(specs: list[Spec]) -> str:
     return "\n".join(lines)
 
 
+#: Emitted before every generated table. See the header comment in `emit_rust` for why it
+#: is the per-item outer attribute rather than one file-wide inner one.
+SKIP = "#[rustfmt::skip]"
+
+
 def _rs_tuples(rows: tuple[tuple[int, ...], ...], per_line: int) -> list[str]:
     cells = ["(" + ", ".join(str(v) for v in row) + ")," for row in rows]
     return ["    " + " ".join(cells[i : i + per_line]) for i in range(0, len(cells), per_line)]
@@ -433,6 +438,16 @@ def emit_rust(specs: list[Spec]) -> str:
         "//! about the board itself. Indices and DATA_HASH are frozen -- see docs/CONTRACT.md.",
         "",
         "#![allow(dead_code)]",
+        "",
+        "// Each generated table below carries `#[rustfmt::skip]`. Without it rustfmt",
+        "// explodes them to one entry per line (+228 lines on this file alone) and sets up",
+        "// a permanent fight: `make board` writes the compact form, the fmt hook rewrites",
+        "// it, and `--check` then fails on a file nobody edited. Same class of trap as",
+        "// `ruff format` rewriting Python inside docs/*.md.",
+        "//",
+        "// It has to be the per-item *outer* attribute: the file-wide `#![rustfmt::skip]`",
+        "// is a custom inner attribute, which rustfmt honours but rustc rejects as",
+        "// unstable (rust-lang/rust#54726), so the crate simply would not build.",
         "",
         f"pub const SCHEMA_VERSION: u32 = {SCHEMA_VERSION};",
         "",
@@ -476,26 +491,31 @@ def emit_rust(specs: list[Spec]) -> str:
     for spec in specs:
         up = spec.name.upper()
         lines += [
+            SKIP,
             f"pub const {up}_CITIES: [&str; {len(spec.cities)}] = [",
             "    " + " ".join(f'"{c}",' for c in spec.cities),
             "];",
             "",
+            SKIP,
             f"pub const {up}_SEGMENTS: [(u8, u8, u8, u8); {len(spec.segments)}] = [",
         ]
         lines += _rs_tuples(spec.segments, 4)
         lines += [
             "];",
             "",
+            SKIP,
             f"pub const {up}_TICKETS: [(u8, u8, u8); {len(spec.tickets)}] = [",
         ]
         lines += _rs_tuples(spec.tickets, 5)
         lines += [
             "];",
             "",
+            SKIP,
             f"pub const {up}_COLOR_NAMES: [&str; {len(spec.color_names)}] = ["
             + " ".join(f'"{c}",' for c in spec.color_names)
             + "];",
             "",
+            SKIP,
             f"pub const {up}: RawMap = RawMap {{",
             f'    name: "{spec.name}",',
             f"    cities: &{up}_CITIES,",

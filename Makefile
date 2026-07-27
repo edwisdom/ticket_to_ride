@@ -1,4 +1,5 @@
-.PHONY: setup fmt lint type test test-all cov bench bench-check board vectors tb clean help
+.PHONY: setup fmt lint type test test-all cov bench bench-check board vectors tb clean clean-rust help \
+        rust rust-fmt rust-lint rust-test
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-13s\033[0m %s\n", $$1, $$2}'
@@ -6,6 +7,25 @@ help:
 setup:  ## Install everything and wire up pre-commit
 	uv sync --all-extras --dev
 	uv run pre-commit install
+
+# --- Rust -----------------------------------------------------------------
+#
+# Deliberately not part of `uv sync`: the pure-Python edit loop and the torch-free CI job
+# stay Rust-free, and the ~8s release build only happens when asked for. Tests needing the
+# extension skip when it is absent -- unless TTR_REQUIRE_RUST is set, which CI does.
+
+rust:  ## Build the Rust core and install it into .venv (release, the profile self-play uses)
+	uv run maturin develop --release -m crates/ttr-py/Cargo.toml
+
+rust-fmt:  ## Format the Rust sources
+	cargo fmt --all
+
+rust-lint:  ## Rust formatting + clippy, warnings are errors
+	cargo fmt --all -- --check
+	cargo clippy --workspace --all-targets -- -D warnings
+
+rust-test:  ## ttr-core's standalone tests -- no Python interpreter involved
+	cargo test --workspace
 
 fmt:  ## Format and autofix
 	uv run ruff format .
@@ -47,3 +67,6 @@ tb:  ## Launch tensorboard over all runs
 clean:  ## Remove tool caches
 	rm -rf .pytest_cache .ruff_cache .mypy_cache .benchmarks
 	find . -name __pycache__ -type d -prune -exec rm -rf {} +
+
+clean-rust:  ## Remove the Rust build directory (a few GB once benches have run)
+	cargo clean

@@ -1,0 +1,24 @@
+# A distribution of its own, installed into the same `.venv` as `ticket_to_ride` but
+# never depended on by it. See crates/ttr-py/src/lib.rs for why the separation matters.
+#
+# Build it with `make rust` (maturin develop --release). It is deliberately NOT part of
+# `uv sync --dev`, so the fast CI job and the pure-Python edit loop never need a Rust
+# toolchain, and the ~40s release build only happens when asked for.
+
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
+
+[project]
+name = "ttr-rust"
+description = "Rust core for the Ticket to Ride engine"
+requires-python = ">=3.14,<3.15"
+dynamic = ["version"]
+classifiers = ["Private :: Do Not Upload"]
+
+[tool.maturin]
+manifest-path = "Cargo.toml"
+module-name = "ttr_rust"
+# The workspace's release profile (fat LTO, one codegen unit) is the one self-play runs
+# under, so it is also the one the differential harness and benchmarks must measure.
+profile = "release"

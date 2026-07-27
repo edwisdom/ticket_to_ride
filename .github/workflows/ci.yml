@@ -55,6 +55,36 @@ jobs:
           import importlib.util, sys;
           sys.exit(1) if importlib.util.find_spec('torch') else print('torch absent, as intended')"
 
+  # The Rust core. Separate from `test-fast` because it needs a Rust toolchain and a
+  # ~1 min release build, and because `test-fast` exists to prove the pure-Python engine
+  # stands alone -- which it cannot prove if this job's artifacts are lying around.
+  #
+  # TTR_REQUIRE_RUST=1 is the point of this job. Without it, an extension that failed to
+  # build would make every differential test skip and the job would go green having
+  # compared nothing at all.
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      # ttr-core standalone: the contract vectors are validated with no Python in the loop,
+      # so a Rust-side PRNG regression is caught even if the bindings are broken.
+      - run: cargo test --workspace
+      - run: uv sync --group dev
+      - run: uv run maturin develop --release -m crates/ttr-py/Cargo.toml
+      - name: differential and binding tests
+        env:
+          TTR_REQUIRE_RUST: "1"
+        run: uv run pytest -n auto
+
   test-rl:
     runs-on: ubuntu-latest
     if: contains(github.event.pull_request.labels.*.name, 'rl') || github.event_name == 'schedule'
@@ -74,8 +104,16 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
       - run: uv sync --all-extras --group dev
-      - run: uv run pytest -n auto -m "slow"
+      # The full differential sweep (100k seeds x {2,3,4,5}P, compared at every step) lives
+      # behind the `slow` marker, so the nightly needs the extension built or it would run
+      # the sweep against nothing.
+      - run: uv run maturin develop --release -m crates/ttr-py/Cargo.toml
+      - env:
+          TTR_REQUIRE_RUST: "1"
+        run: uv run pytest -n auto -m "slow"

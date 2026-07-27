@@ -1,0 +1,12 @@
+# PyO3's `extension-module` feature deliberately does not link libpython: the symbols are
+# resolved by the interpreter that loads the `.so`. maturin passes the flag below itself,
+# but a plain `cargo build`/`cargo test` over the workspace does not, and on macOS the
+# linker then fails with a wall of undefined `_Py*` symbols that looks like a broken
+# toolchain rather than an expected one.
+#
+# Linux resolves undefined symbols in a shared object lazily and needs nothing here.
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup"]
+
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup"]
