@@ -101,19 +101,52 @@ def test_summary_reports_the_invariants_the_engine_is_sized_against() -> None:
 
 
 def test_bench_runs_and_reports_both_numbers() -> None:
-    result = runner.invoke(app, ["bench", "--games", "3", "--format", "json"])
+    result = runner.invoke(app, ["bench", "--games", "3", "--repeat", "1", "--format", "json"])
     assert result.exit_code == 0
     rows = json.loads(result.stdout)
     assert {row["map"] for row in rows} == {"usa", "mini"}
     for row in rows:
         assert row["games_per_second"] > 0
         assert row["microseconds_per_step"] > 0
+        assert row["engine"]
 
 
 def test_bench_all_covers_every_configuration() -> None:
-    result = runner.invoke(app, ["bench", "--suite", "all", "--games", "1", "--format", "json"])
+    """Every (map, seats) pair appears, however many engines each is measured with.
+
+    Counting *rows* would make this depend on whether `ttr_rust` happens to be built,
+    which has nothing to do with what the test is checking.
+    """
+    result = runner.invoke(
+        app, ["bench", "--suite", "all", "--games", "1", "--repeat", "1", "--format", "json"]
+    )
     assert result.exit_code == 0
-    assert len(json.loads(result.stdout)) == 4 + 3  # usa 2-5P, mini 2-4P
+    rows = json.loads(result.stdout)
+    covered = {(row["map"], row["players"]) for row in rows}
+    assert covered == {("usa", n) for n in range(2, 6)} | {("mini", n) for n in range(2, 5)}
+
+
+def test_bench_python_only_reports_one_row_per_configuration() -> None:
+    result = runner.invoke(
+        app,
+        [
+            "bench",
+            "--suite",
+            "all",
+            "--games",
+            "1",
+            "--repeat",
+            "1",
+            "--engines",
+            "python",
+            "--format",
+            "json",
+        ],
+    )
+    assert result.exit_code == 0
+    rows = json.loads(result.stdout)
+    assert len(rows) == 4 + 3  # usa 2-5P, mini 2-4P
+    assert {row["engine"] for row in rows} == {"python"}
 
 
 def test_bench_rejects_an_unknown_suite() -> None:

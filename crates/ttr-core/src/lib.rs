@@ -35,6 +35,7 @@ pub mod obs_spec_gen;
 pub mod rng;
 pub mod scoring;
 pub mod state;
+pub mod vecenv;
 
 /// The frozen-contract version, kept in lockstep with
 /// `ticket_to_ride.engine.contract.CONTRACT_VERSION`.

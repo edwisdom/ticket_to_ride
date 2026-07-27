@@ -11,13 +11,65 @@
 //! permanent differential-testing oracle, and an oracle that imports the implementation it
 //! validates is not an oracle. `tests/unit/engine/test_import_boundary.py` enforces it.
 
+use pyo3::buffer::{Element, PyBuffer};
 use pyo3::create_exception;
-use pyo3::exceptions::{PyRuntimeError, PyValueError};
+use pyo3::exceptions::{PyBufferError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 
 use ttr_core::config::RuleConfig;
 use ttr_core::state::{Game, State};
+use ttr_core::vecenv::VecEnv;
+
+/// Borrow a caller-provided buffer as a mutable slice, so batched writes copy nothing.
+///
+/// Accepts anything exporting the buffer protocol -- a `bytearray`, an `array.array`, a
+/// numpy array, a torch tensor's storage -- without this crate depending on any of them.
+///
+/// # Safety
+///
+/// The raw slice is sound because every precondition is checked here and the rest is the
+/// buffer protocol's own guarantee:
+///
+/// * `PyBuffer::get` holds a `Py_buffer` view for as long as `buf` lives, which is what
+///   stops the exporter from resizing or freeing the memory underneath us.
+/// * Non-contiguous and read-only buffers are rejected, so the elements really are
+///   `want` consecutive `T`s that may be written.
+/// * Nothing inside the call re-enters Python, so no interpreter code can observe the
+///   slice while it exists.
+///
+/// The caller's side of the contract -- not touching the buffer from another thread during
+/// the call -- is the same one numpy and torch extensions have always required.
+///
+/// Takes `&mut PyBuffer` rather than `&PyBuffer` on purpose. Deriving a `&mut [T]` from a
+/// shared reference would let two calls hand out aliasing mutable slices of the same
+/// memory; requiring unique access makes that impossible to write rather than merely
+/// impolite. (clippy::mut_from_ref catches exactly this.)
+unsafe fn writable_slice<'a, T: Element>(
+    buf: &'a mut PyBuffer<T>,
+    want: usize,
+    what: &str,
+) -> PyResult<&'a mut [T]> {
+    if buf.readonly() {
+        return Err(PyBufferError::new_err(format!(
+            "{what} buffer is read-only"
+        )));
+    }
+    if !buf.is_c_contiguous() {
+        return Err(PyBufferError::new_err(format!(
+            "{what} buffer is not C-contiguous"
+        )));
+    }
+    if buf.item_count() != want {
+        return Err(PyValueError::new_err(format!(
+            "{what} buffer holds {} items, need {want}",
+            buf.item_count()
+        )));
+    }
+    // SAFETY: see the doc comment above -- checked contiguous, writable, correctly sized,
+    // and pinned by the live buffer view.
+    Ok(unsafe { std::slice::from_raw_parts_mut(buf.buf_ptr().cast::<T>(), want) })
+}
 
 create_exception!(
     ttr_rust,
@@ -343,6 +395,184 @@ impl PyState {
     }
 }
 
+/// A batch of independent games stepped together.
+///
+/// Every buffer-writing method takes a **writable buffer** (anything supporting the buffer
+/// protocol: a `bytearray`, a numpy array, a torch tensor's storage) and fills it in place.
+/// Python must never loop over environments -- that loop is the whole cost the port exists
+/// to remove (PLAN.md §8.3).
+#[pyclass(name = "VecEnv", module = "ttr_rust")]
+pub struct PyVecEnv {
+    inner: VecEnv,
+}
+
+#[pymethods]
+impl PyVecEnv {
+    #[new]
+    #[pyo3(signature = (map_name="usa", n_players=2, n_envs=1, base_seed=0, *, track_history=false))]
+    fn new(
+        map_name: &str,
+        n_players: usize,
+        n_envs: usize,
+        base_seed: u64,
+        track_history: bool,
+    ) -> PyResult<Self> {
+        // History off by default here and on by default for a single `Game`: copying the
+        // action list dominates a clone, and no batched consumer wants it.
+        let cfg = RuleConfig {
+            map_name: map_name.to_string(),
+            n_players,
+            track_history,
+            ..RuleConfig::default()
+        };
+        let game = Game::new(cfg).map_err(|e| PyValueError::new_err(e.to_string()))?;
+        Ok(Self {
+            inner: VecEnv::new(game, n_envs, base_seed),
+        })
+    }
+
+    #[getter]
+    fn n_envs(&self) -> usize {
+        self.inner.len()
+    }
+
+    #[getter]
+    fn obs_size(&self) -> usize {
+        self.inner.obs_size()
+    }
+
+    #[getter]
+    fn n_actions(&self) -> usize {
+        self.inner.n_actions()
+    }
+
+    #[getter]
+    fn seeds(&self) -> Vec<u64> {
+        self.inner.seeds().to_vec()
+    }
+
+    fn step(&mut self, actions: Vec<u16>) -> PyResult<()> {
+        self.inner
+            .step(&actions)
+            .map_err(|(index, e)| IllegalAction::new_err(format!("env {index}: {}", e.0)))
+    }
+
+    fn auto_reset(&mut self) -> usize {
+        self.inner.auto_reset()
+    }
+
+    /// Fill `out` with every environment's observation for its acting seat.
+    ///
+    /// `out` is `n_envs * obs_size` float32s, environment-major, written in place.
+    fn observe_current(&mut self, py: Python<'_>, out: &Bound<'_, PyAny>) -> PyResult<()> {
+        let mut buf = PyBuffer::<f32>::get(out)?;
+        let want = self.inner.len() * self.inner.obs_size();
+        // SAFETY: `writable_slice` checks writability, contiguity and length; `buf` keeps
+        // the view alive for the whole call.
+        let slice = unsafe { writable_slice(&mut buf, want, "observation")? };
+        // The GIL goes back while encoding: this is the expensive half of a training step
+        // and it runs across the rayon pool with no interpreter involvement.
+        py.detach(|| self.inner.observe_current(slice));
+        Ok(())
+    }
+
+    /// Fill `out` with every environment's observation from one fixed seat's view.
+    fn observe_seat(
+        &mut self,
+        py: Python<'_>,
+        player: usize,
+        out: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        if player >= self.inner.states()[0].n_players() {
+            return Err(PyValueError::new_err(format!(
+                "seat {player} is out of range"
+            )));
+        }
+        let mut buf = PyBuffer::<f32>::get(out)?;
+        let want = self.inner.len() * self.inner.obs_size();
+        // SAFETY: as above.
+        let slice = unsafe { writable_slice(&mut buf, want, "observation")? };
+        py.detach(|| self.inner.observe_seat(player, slice));
+        Ok(())
+    }
+
+    /// Fill `out` with every environment's legal-action mask: `n_envs * n_actions` bytes.
+    fn legal_masks(&self, py: Python<'_>, out: &Bound<'_, PyAny>) -> PyResult<()> {
+        let mut buf = PyBuffer::<u8>::get(out)?;
+        let want = self.inner.len() * self.inner.n_actions();
+        // SAFETY: as above.
+        let slice = unsafe { writable_slice(&mut buf, want, "mask")? };
+        py.detach(|| self.inner.legal_masks(slice));
+        Ok(())
+    }
+
+    fn current_players(&self) -> Vec<u8> {
+        let mut out = vec![0u8; self.inner.len()];
+        self.inner.current_players(&mut out);
+        out
+    }
+
+    fn terminal_flags(&self) -> Vec<u8> {
+        let mut out = vec![0u8; self.inner.len()];
+        self.inner.terminal_flags(&mut out);
+        out
+    }
+
+    fn state_hashes(&self) -> Vec<u64> {
+        self.inner.states().iter().map(State::state_hash).collect()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "<ttr_rust.VecEnv {} envs, obs={}, actions={}>",
+            self.inner.len(),
+            self.inner.obs_size(),
+            self.inner.n_actions()
+        )
+    }
+}
+
+/// Play `games` uniformly-random games entirely inside Rust.
+///
+/// One FFI call for the whole batch, on purpose: a Python-driven loop pays a few
+/// microseconds per step in call overhead, which on a sub-microsecond engine is the only
+/// thing it would measure. Returns `(games, steps, seconds)`.
+#[pyfunction]
+#[pyo3(signature = (map_name, n_players, games, base_seed=0, threads=1))]
+fn random_playouts(
+    py: Python<'_>,
+    map_name: &str,
+    n_players: usize,
+    games: u64,
+    base_seed: u64,
+    threads: usize,
+) -> PyResult<(u64, u64, f64)> {
+    let cfg = RuleConfig {
+        map_name: map_name.to_string(),
+        n_players,
+        track_history: false,
+        ..RuleConfig::default()
+    };
+    let game = Game::new(cfg).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    // Release the GIL: this is pure Rust and may run for seconds across several threads.
+    py.detach(|| {
+        let start = std::time::Instant::now();
+        let stats = if threads <= 1 {
+            ttr_core::vecenv::random_playouts(&game, games, base_seed)
+        } else {
+            ttr_core::vecenv::random_playouts_parallel(&game, games, base_seed, threads)
+        };
+        Ok((stats.games, stats.steps, start.elapsed().as_secs_f64()))
+    })
+}
+
+/// The worker-thread count batched work uses. See `ttr_core::vecenv` for why this is a
+/// pool *size* rather than the P-core pinning PLAN.md §8.3 asks for.
+#[pyfunction]
+fn performance_threads() -> usize {
+    ttr_core::vecenv::performance_threads()
+}
+
 /// The frozen-contract version this build implements. Python asserts it matches
 /// `ticket_to_ride.engine.contract.CONTRACT_VERSION`.
 #[pyfunction]
@@ -361,8 +591,11 @@ fn obs_version() -> u32 {
 fn ttr_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(contract_version, m)?)?;
     m.add_function(wrap_pyfunction!(obs_version, m)?)?;
+    m.add_function(wrap_pyfunction!(random_playouts, m)?)?;
+    m.add_function(wrap_pyfunction!(performance_threads, m)?)?;
     m.add_class::<PyGame>()?;
     m.add_class::<PyState>()?;
+    m.add_class::<PyVecEnv>()?;
     m.add("IllegalAction", m.py().get_type::<IllegalAction>())?;
     Ok(())
 }
