@@ -5,6 +5,242 @@ session. Decisions that deviate from [PLAN.md](PLAN.md) belong here, with the re
 
 ---
 
+## 2026-07-27 — Phase 3: the agent ladder and the evaluation harness
+
+Complete. `make lint type test` green, `cargo test` green (97 Rust tests), 10k paired games
+across five agents in 12.6 s on the USA map.
+
+### Three decisions taken before writing much code
+
+**1. The Elo anchor is pinned by *behaviour*, not by its constants.** §11 makes H3 the
+permanent zero of the rating scale, which only works if H3 is the same player months apart.
+Putting its constants in a struct is necessary and not sufficient: it pins the numbers and
+leaves the code around them free. A reordered tiebreak, a changed
+`MAX_STEINER_TERMINALS`, a fixed bug in path reconstruction — each moves H3's play with the
+params hash unmoved, and every rating ever recorded silently re-bases.
+
+So an agent's identity is a **behaviour hash**: its action sequence over ten frozen
+`(map, seats, seed)` probes, played to the end, in self-play *and* against random — the
+second because it lands the agent in ragged positions it would never reach on its own,
+where the branches that never otherwise run live. `params_hash` survives as provenance.
+The property this buys was exercised for real: every H4 change in this phase left H3's hash
+at `5b906156d4b1204b`, because H3 cannot read those code paths. A params hash would have
+demanded an anchor re-base for a change H3 never sees.
+
+The corollary is the tuning workflow. A retuned H3 is a **new agent** (`h3@config.toml`),
+rated *against* the anchor; it never becomes the anchor. That is the entire mechanism by
+which ratings accumulate.
+
+**One correction to §11 while implementing it: `git_sha` must not be part of agent
+identity.** §11 suggests content-addressing on `(checkpoint_path, config_hash, git_sha)`.
+A hundred commits that never touch the heuristics would leave a hundred "different" H3s,
+each holding a slice of the games and none with a usable rating — shattering exactly the
+accumulation the scheme exists for. It is recorded on the *match*.
+
+**2. Building all four statistics, not three.** Paired blocks, BT-MLE and the block
+bootstrap are load-bearing for the exit criteria. SPRT was the one worth arguing about,
+since its headline consumer is Phase 5's promotion gate. It is built, because its stopping
+rule is validatable by simulation *without* a promotion loop — which is a stronger test than
+any Phase 5 usage would give it — and because `ttr arena --sprt` makes heuristic tuning the
+interactive loop §8.1 promised. Over 3000 simulated experiments at nominal α = β = 0.05:
+**0.045 under H0, 0.072 under H1**, median 405 blocks to decide at Δ = 0 and 115 at +60 Elo.
+β above nominal is expected — Wald's bounds ignore overshoot and the variance is estimated —
+and is recorded rather than rounded away. It stops on **block boundaries only**: half a
+block is one seating, which is the mirrored fiction the whole design exists to avoid.
+
+Deferred, with consumers named: the parquet per-turn store and msgpack replay sampling
+(nothing reads them until Phase 6; the SQLite summary rows are the ACID part that matters),
+the BR-probe (needs PPO), and the training-side diagnostics — entropy, `mask_violations`,
+value calibration. The action/ticket/route diagnostics *are* collected, because they are the
+evidence for the coverage criterion rather than a separate feature.
+
+**3. Recompute ratings; never accumulate them.** Bradley-Terry is an exponential family
+whose sufficient statistic is the pairwise win-count matrix, so however many games pile up
+they reduce to an `A×A` table and the fit is `O(A²)` per Newton step. Measured on synthetic
+rows, so this is the store and the fit rather than the engine:
+
+| games | read | reduce + fit | bootstrap | total | db |
+| --- | --- | --- | --- | --- | --- |
+| 10,000 | 0.02 s | 0.04 s | 0.35 s | 0.39 s | 2 MB |
+| 100,000 | 0.23 s | 0.38 s | 2.67 s | 3.05 s | 21 MB |
+| 1,000,000 | 2.44 s | 4.03 s | 27.34 s | 31.37 s | 213 MB |
+
+Linear, and **the fit is not what grows — the bootstrap is**, because it scales with blocks
+rather than with agents. So no maintained `pair_stat` table: it would be a cache in front of
+a grouped sum. `--resamples` is the knob if a million games ever needs one. Incremental Elo
+would have been strictly worse — order-dependent, drifting against the batch fit, and buying
+nothing, because the expensive object was already small.
+
+### The ladder, measured
+
+10k paired games per configuration, every rotation played, 1000-resample block bootstraps.
+§11's predicted ladder is in the last column.
+
+| agent | usa 2P | mini 2P | usa 4P | predicted |
+| --- | --- | --- | --- | --- |
+| **h4** | −4 [−20, +14] | **+21 [+8, +33]** | −21 [−28, −14] | +130 |
+| **h3** | 0 (anchor) | 0 (anchor) | 0 (anchor) | 0 |
+| **h2** | −100 [−119, −82] | −117 [−137, −99] | −120 [−129, −111] | −120 |
+| **h1** | −726 [−778, −684] | −545 [−582, −510] | −724 [−744, −706] | −400 |
+| **h0** | −1276 [−1348, −1217] | −816 [−858, −782] | −1252 [−1279, −1223] | −900 |
+
+**The ordering holds everywhere; the spacings do not.** H2 lands on its prediction on all
+three boards, which is a good sign the scale is calibrated. H1 and H0 are far weaker than
+predicted and H4 far weaker — H4 is the one that matters, because §14's Phase 6 target is
+"beats H4 ≥65%", and an H4 that is level with H3 makes that target easier than intended.
+Reported rather than reconciled.
+
+`cycle_fraction` is 0.00 on all three: the scripted ladder is transitive, as it should be.
+
+### Throughput
+
+| configuration | games | wall | engine |
+| --- | --- | --- | --- |
+| usa 2P | 10,000 | 12.6 s | 11.9 s |
+| mini 2P | 10,000 | 0.5 s | 0.3 s |
+| usa 4P | 10,000 | 23.8 s | 23.6 s |
+
+§14 asks for "10k paired games across 5 agents in **seconds**". Met. Python never loops per
+decision: one FFI call plays a whole lineup across the rayon pool and returns two columnar
+tables that go straight into SQLite.
+
+### What the exit criteria caught, and it was not the tests
+
+Three bugs, and every one of them was the published prior art's failure wearing new clothes.
+None produced an error; each looked like a strategy.
+
+**The ticket-keep filter §7 specifies is blind to the train budget.** `marginal_steiner_cost
+≤ points` accepts everything on TTR-mini, where ticket points *are* shortest-path costs by
+construction so marginal always equals points. Measured: 3 opening tickets costing **22 train
+cars against a 20-train supply**, in 59 of 60 games — after which the agent correctly refused
+to draw another all game, because the plan it had just accepted was already unaffordable.
+`draw_tickets` fired **zero times across 30 mini games** while the USA board drew freely.
+That is the paper's symptom reached from the opposite direction: not a gate that can never
+fire, but one that always does. Replaced by expected settlement against the train budget —
+`points × (2·odds − 1)` — one model shared by keeping *and* drawing, since they are the same
+question asked twice. It costs one parameter fewer than the rule it replaces.
+
+**The ticket-draw model priced the mean of the deck, not the best of the three offered.**
+With `draw_ticket_keep_min = 1` you keep the cheapest of the offer, so the expected marginal
+cost is the expected *minimum* of `deal` draws, not the mean. Using `2/(deal+1)` — derived
+from the board's own deal size, not fitted — is what finally made mini 2P draw tickets at
+all. It is rare there (3 draws per 40 games) and that is correct: forcing eagerness measured
+catastrophically, at −0.66 and −1.00 mean return.
+
+**The threatened-edge primitive priced the sum of the two components instead of the
+bottleneck.** Merging a 2-car stub into a 20-car trunk gains an opponent two cars of trail,
+not twenty-two. Summing made denial worth ~12 points against a 15-point route, and **H4 lost
+to H3 at 92.5%** while claiming 30% more routes and drawing a third as many tickets. §1's
+four pricing rules were absent as well; they are in now.
+
+### Blocking is a two-player idea, and the seat count is what proves it
+
+The most interesting measurement of the phase. At 10k games H4 was **+21 Elo on mini 2P and
+−50 [−58, −42] on USA 4P** — same code, same constants, opposite signs. Ablating at 4P and
+5P localised it: threat alone −12.9 at 4P, hoarding alone −12.3 at 5P, and with both off
+exactly **+0.0** (it plays as H3, which is its own consistency check).
+
+Both mechanisms assume two players. Cars spent denying one opponent help every *other* rival
+as much as they help me, so the share I capture is about `1/(P−1)`; and "waiting costs
+nothing" fails for the same reason, since more rivals means the parallel route is likelier
+gone when I come back. Dividing both by the rival count took USA 4P from −50 to −6 and 5P
+from −19.5 to −15.6, with 2P unchanged because the divisor is 1 there.
+
+It is still mildly negative above two seats, and that is where it is being left. The residual
+is a real design gap rather than a tuning one: **the free-rider structure says to block the
+leader, and H4 blocks whoever is most blockable.** A 3–5P opponent model needs to know who
+is winning, which is a different primitive. §13 targets 2P first and §14's H4 gate is a 2P
+gate, so this is aligned with the plan rather than a deviation from it — but it is a real
+limitation and is not going to fix itself.
+
+Two earlier readings were noise and are worth naming so nobody trusts the method that
+produced them: at 80 seed blocks the standard error on a mean return is ~0.08, which is
+±30 Elo, and every H4 ablation "difference" at that size was inside it. The seat-count
+result only became visible at 10k games.
+
+### H3's per-decision cost is a Phase 5 constraint, measured now rather than discovered later
+
+`ttr bench --suite agents`, single-threaded because the number is read as a latency:
+
+| map | seats | h0 | h1 | h2 | h3 | h4 |
+| --- | --- | --- | --- | --- | --- | --- |
+| usa | 2 | 1.07 | 1.00 | 95.48 | **76.34** | 79.60 |
+| usa | 4 | 0.46 | 0.48 | 97.96 | **85.12** | 92.67 |
+| mini | 2 | 0.26 | 0.30 | 3.21 | **3.46** | 3.67 |
+
+microseconds per decision. **H3 doubles as the ISMCTS rollout policy** (§7, §8.3), and a
+rollout from mid-game is ~100 decisions — so 1000 sims is **~7.6 s per move** on the USA
+board. §7.2's S2 tier (SO-ISMCTS, 800–2000 iters, "strong with zero NNs") is not reachable
+with this rollout policy. That is a Phase 5 design constraint discovered in Phase 3, which
+is the cheap place to discover it. When it is addressed, the cheaper policy gets **its own
+name and its own rating** — never a silent substitution for the agent the anchor is defined
+by. Two optimizations already took H3 from 76 to 26 µs at the smaller plan sizes it had
+before retuning: pricing a detour by re-routing the segment's own endpoints instead of
+re-solving the plan, and keeping a plan across any claim that misses it (claims only remove
+options, so a surviving plan is still optimal).
+
+### The seat-flatness criterion is half right, and the half matters
+
+§14 asks for "seat win rate flat within CI" and §11 calls it the canary that mirroring
+works. With cyclic rotation each *agent* occupies each seat equally often, so agent ratings
+carry no seat bias **by construction** — that is the harness property, and the arena asserts
+it directly. The raw per-seat win rate is a different thing, and at 10k games it is **not**
+flat:
+
+| configuration | seat 0 | expected if flat |
+| --- | --- | --- |
+| usa 2P | 0.5070 [0.5003, 0.5137] | 0.5 |
+| mini 2P | 0.5197 [0.5110, 0.5290] | 0.5 |
+| usa 4P | 0.2640 [0.2532, 0.2737] | 0.25 |
+
+The intervals exclude the flat value. That is **first-player advantage — a real property of
+Ticket to Ride, not a harness bug** — and at 10k games it is finally resolvable: about +0.7
+points of win rate on USA 2P and +2.0 on mini, where the shorter game gives the tempo less
+time to wash out. So the harness reports it with an interval instead of asserting it away.
+Conflating the two would have made a genuine finding look like a broken arena.
+
+### Deviations from PLAN.md, all deliberate
+
+- **The H3 ticket-keep filter is expected settlement, not `marginal_steiner_cost ≤ points`**
+  (§7), for the measurement above. Strictly the same idea with the missing budget constraint
+  put back, and one parameter fewer.
+- **`ticket_keep_ratio` was removed** rather than kept as a knob the better model makes
+  redundant. `plan_utilization_target` now governs keeping *and* drawing, because a board
+  where those two disagree is one where the agent takes on commitments it then refuses to
+  extend.
+- **H4's threat and hoard terms are divided by the rival count** — §1's pricing rules do not
+  mention the seat count, and the measurement says they must.
+- **§14's "H3 > H2 > H1 > random by predicted margins" is met as an ordering and missed as
+  spacings**, as tabulated above.
+- **`keep_extra` and `claim_wild` are reported but not required** by the coverage test.
+  Requiring them would assert a strategy rather than detect a dead branch: H2 minimizes added
+  track, so keeping the minimum *is* its rule, and declining to pay a route entirely in
+  locomotives is defensible play. `draw_tickets` **is** required, on every map — that is the
+  one the prior art never reached.
+
+### Also found
+
+`cargo test --workspace` has been aborting on macOS since Phase 2 and nobody noticed. The
+ttr-py cdylib's test harness links — thanks to the `-undefined dynamic_lookup` already in
+`.cargo/config.toml` — and then dies at load with `symbol not found in flat namespace
+'_PyBaseObject_Type'`, because `extension-module` deliberately does not link libpython. The
+four ttr-core suites pass and print first, so the command reads as green until you scroll
+past a page of passes to the `SIGABRT`. Nothing was lost — that crate converts types and
+holds no logic by design — but `test = false` makes the failure impossible rather than
+merely harmless.
+
+And a smaller one: **SQLite's `INTEGER` is signed 64-bit**, so a `u64` `state_hash` above
+2⁶³ raises `OverflowError` on insert. Stored as hex text; the two's-complement view would
+work and would print as a negative number matching nothing the engine ever reports.
+
+### Next
+
+**Phase 4 — the terminal client.** The ladder it will be played against is measured and
+anchored, so "you lose to H3 at least once" is a criterion with a known opponent behind it.
+Phase 5 should read the per-decision table above before choosing a sim count.
+
+---
+
 ## 2026-07-27 — Phase 2: the Rust core
 
 Complete. `make lint type test` green, `cargo test` green (70 Rust tests), and the Rust

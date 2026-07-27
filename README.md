@@ -12,8 +12,8 @@ training reinforcement learning agents against it via self-play.
 | 0 | Project scaffolding | done |
 | 1 | Python reference engine | done |
 | 2 | Rust core + differential harness | done |
-| 3 | Heuristic agents + arena + Elo | next |
-| 4 | Terminal client | |
+| 3 | Heuristic agents + arena + Elo | done |
+| 4 | Terminal client | next |
 | 5 | Determinization + ISMCTS | |
 | 6 | PPO self-play + league | |
 | 7 | ISMCTS + learned priors | |
@@ -30,8 +30,25 @@ every step:
 | Rust, 8 performance cores | 0.021 | ~303,000 |
 
 Measured back to back in one process on an M2 Max; the Python baseline drifts 10–15%
-between sessions, so `ttr bench` only ever compares within a run. ~500 Python tests plus
-70 Rust tests, engine coverage 98%.
+between sessions, so `ttr bench` only ever compares within a run. ~530 Python tests plus
+97 Rust tests, engine coverage 98%.
+
+Five scripted agents, H0–H4, rated over 10,000 paired games in 12.6 s. **H3 is the permanent
+Elo zero**, and its identity is a hash of what it *plays* over a frozen probe set rather than
+of its constants — a params hash would leave a reordered tiebreak or a fixed bug free to move
+the anchor and silently re-base every rating ever recorded.
+
+| agent | usa 2P | mini 2P | usa 4P |
+| --- | --- | --- | --- |
+| h4 | −4 [−20, +14] | +21 [+8, +33] | −21 [−28, −14] |
+| **h3** | **0** (anchor) | **0** | **0** |
+| h2 | −100 [−119, −82] | −117 [−137, −99] | −120 [−129, −111] |
+| h1 | −726 [−778, −684] | −545 [−582, −510] | −724 [−744, −706] |
+| h0 | −1276 [−1348, −1217] | −816 [−858, −782] | −1252 [−1279, −1223] |
+
+Bradley–Terry MLE, 95% intervals from a bootstrap that resamples **seed blocks** rather than
+games — games inside a block share a deck, and treating them as independent inflates
+significance by about √P. Both seatings of every block are played, never one mirrored.
 
 ## Quickstart
 
@@ -43,7 +60,13 @@ make rust              # build the Rust core into .venv (not part of `uv sync`)
 make rust-test         # ttr-core's standalone tests -- no Python interpreter involved
 uv run ttr map         # board data and the invariants it satisfies
 uv run ttr bench       # both engines, side by side
+uv run ttr bench --suite agents   # microseconds per decision, per heuristic
+uv run ttr arena       # round robin over h0-h4, recorded to runs/results.db
+uv run ttr leaderboard # refit ratings over everything recorded
 ```
+
+`ttr arena --sprt h4,h3` stops as soon as a sequential test decides, on block boundaries
+only — half a block is one seating.
 
 The Rust core is a separate distribution, `ttr_rust`, and `ticket_to_ride.engine` never
 imports it. That is enforced, not just intended: the Python engine is the permanent

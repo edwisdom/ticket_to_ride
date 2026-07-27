@@ -239,6 +239,72 @@ contention, complete with a `PerformanceRegression` traceback that names your co
 Measured, not hypothesised. The absolute figures are only meaningful on a quiet box, which
 is also why the gate is local-only and CI asserts a *ratio* instead.
 
+### `cargo test --workspace` was aborting on macOS and reading as green
+
+The fourth member of the `extension-module` family below, and the nastiest, because it
+**passed inspection for a whole phase**. `cargo test` builds a test executable from the
+ttr-py cdylib. It links, because `.cargo/config.toml` supplies `-undefined dynamic_lookup`;
+then it dies at load with `dyld: symbol not found in flat namespace '_PyBaseObject_Type'`,
+because `extension-module` deliberately does not link libpython and nothing is hosting an
+interpreter. The four ttr-core suites run first and all pass, so the output is a page of
+`ok` followed by a `SIGABRT` you have to scroll to.
+
+`[lib] test = false` in `crates/ttr-py/Cargo.toml`. That crate converts types and holds no
+logic by design; its behaviour is covered from Python by `tests/unit/rust/`. **Do not remove
+it to "add a quick unit test there"** — the test would be unrunnable, and its failure would
+hide behind everything that passes.
+
+### SQLite's `INTEGER` is signed, and a `u64` hash overflows it
+
+`state_hash()` is a `u64`. Anything above 2⁶³ raises
+`OverflowError: Python int too large to convert to SQLite INTEGER` on insert. Storing the
+two's-complement view would work and would print as a negative number that matches nothing
+the engine ever reports, so `game.final_hash` is 16 hex characters instead.
+
+### A heuristic constant that transfers can still fail to transfer
+
+The prior-art lesson is "express thresholds as fractions of a board quantity". Necessary,
+and **not sufficient** — this project hit the same failure twice with perfectly
+board-relative constants:
+
+- The keep filter PLAN.md §7 specifies, `marginal_steiner_cost <= points`, has no fraction
+  in it at all and looks board-independent. On TTR-mini, where ticket points *are*
+  shortest-path costs by construction, marginal always equals points, so it accepts
+  everything: 3 opening tickets costing 22 train cars against a 20-train supply, in 59 of
+  60 games. `draw_tickets` then fired **zero times in 30 mini games** — correctly, because
+  the plan was already unaffordable.
+- Pricing a ticket draw off the *mean* of the deck rather than the best of the three
+  actually offered. On a board where a ticket costs half your trains, the difference between
+  the mean and the expected minimum of three decides whether the action ever fires.
+
+The check that works is the one §14 asks for: **count the action types an agent actually
+reaches, on every map**. `crates/ttr-core/tests/heuristics.rs` does it over 40 games per
+(map, seat count). Both bugs surfaced as `draw_tickets == 0` on mini and nothing else.
+
+### A blocking heuristic tuned at 2P gets worse as seats are added
+
+H4 measured **+21 Elo on TTR-mini 2P and −50 on USA 4P** — the same code and the same
+constants, opposite signs. Ablation localised it exactly: threat alone −12.9 at 4P, hoarding
+alone −12.3 at 5P, both off exactly 0.0.
+
+The cause is structural, not a mis-tune. Cars spent denying one opponent help every *other*
+rival as much as they help you, so the share you capture is about `1/(P−1)`; and
+"waiting costs nothing" fails for the same reason, because more rivals means the parallel
+route is likelier gone when you come back. Both terms are divided by the rival count, which
+took 4P from −50 to −6.
+
+It is still mildly negative above two seats, and the remaining gap is a design gap: **the
+free-rider structure says block the leader, and H4 blocks whoever is most blockable.** Any
+3–5P opponent model needs to know who is winning.
+
+### 80 seed blocks cannot resolve a 30-Elo difference
+
+The standard error on a mean return over `n` paired blocks is about `1/sqrt(2n)`, so 80
+blocks is ±0.08 — roughly ±30 Elo. Every H4 ablation "difference" measured at that size was
+inside it, and the seat-count result above only became visible at 10k games. If a difference
+matters, measure it with the arena and read the CI; do not eyeball a mean return from a
+scratch harness.
+
 ### PyO3: `extension-module` breaks a plain `cargo build` on macOS
 
 The feature deliberately does not link libpython. maturin passes
@@ -266,7 +332,12 @@ has now done that reimplementation**, and every one of them held: the Rust engin
 byte-identical to the Python oracle across every map and seat count. They stay because
 Phase 5's search and Phase 6's vectorized env will touch the same rules again.
 
-Everything after "Never report a mirrored win-rate matrix" is still ahead.
+**Phase 3 handled the three evaluation traps** -- mirrored matrices, block aggregation, and
+config-driven heuristic constants. The last of those was hit twice on the way, in a form
+the note as written did not cover; see "A heuristic constant that transfers can still fail
+to transfer" in Part 1.
+
+Everything from "Potential-based shaping" onward is still ahead.
 
 ### The 3-locomotive flush can hang forever  ✅ handled
 
@@ -303,6 +374,23 @@ players score the +10 bonus.** It's NP-hard in general but bounded here (≤25 s
 the component-split + Eulerian-shortcut layers matter: without them the adversarial case is
 ~126 ms, which shows up as a p99.9 latency spike in self-play workers. PLAN.md §5.6.
 
+### The Elo anchor is pinned by behaviour, and moving it re-bases every stored rating
+
+H3 is the permanent zero of the rating scale (PLAN.md §11). Its identity is the **behaviour
+hash** in `crates/ttr-core/src/heuristic/probe.rs` -- its action sequence over ten frozen
+probes -- not its constants, because a params hash pins the numbers and leaves a reordered
+tiebreak or a fixed bug free to move its play.
+
+`crates/ttr-core/tests/heuristics.rs::the_h3_anchor_has_not_moved` holds it. **If that test
+fails, do not refresh the literal to go green.** Either register the new H3 as a separate
+agent (`h3@config.toml`) rated against the old anchor, which is the supported path, or move
+the anchor deliberately and record the re-basing in the worklog -- every stored rating
+predating it is then on a different scale and the leaderboard cannot tell.
+
+The converse is a feature and was exercised in Phase 3: every H4 change left H3's hash
+untouched, because H3 cannot read those code paths. A params hash would have demanded an
+anchor re-base for a change H3 never sees.
+
 ### Potential-based shaping requires `Φ(terminal) ≡ 0`
 
 If `Φ(s)` = "score if the game froze here" and the terminal potential isn't zeroed, the
@@ -323,26 +411,55 @@ Without it, a hand of pure locomotives makes all 8 gray-color pay slots legal *a
 identical*, so eight distinct action ids denote the same payment and the policy distribution
 is poisoned. With it, action ids map bijectively to payments.
 
-### Never report a mirrored win-rate matrix
+### Never report a mirrored win-rate matrix  ✅ handled
 
 If every off-diagonal pair sums to exactly 1.00, you reported one seating and its complement
 rather than measuring both — and first-player advantage is confounded into every cell. This
 is a real flaw in the published prior art. Measure both seatings.
 
-### Aggregate to seed blocks before computing statistics
+**Done: every rotation of every seed block is played** (`crates/ttr-core/src/arena.rs`), and
+a test asserts each agent occupies each seat the same number of times — which is the
+property that makes the resulting symmetry honest rather than assumed.
+
+One follow-on that was not obvious in advance. §14 also asks for a **flat seat win rate**
+and calls it the canary that mirroring works. That is half right: rotation removes seat bias
+from *agent* ratings by construction, while the raw per-seat rate stays a property of the
+game. Measured at 10k games it is **not** flat — seat 0 wins 0.5070 [0.5003, 0.5137] on USA
+2P and 0.5197 [0.5110, 0.5290] on mini — and that is genuine first-player advantage, not a
+broken harness. Report it with an interval; asserting it flat turns a finding into a failing
+test.
+
+### Aggregate to seed blocks before computing statistics  ✅ handled
 
 Games within a paired seed block are correlated. Aggregate to a per-block score first, then
 treat **blocks** as the i.i.d. units; bootstrap CIs must resample blocks, never games.
 Treating paired games as independent inflates significance by ~√P and manufactures
 improvements that aren't there.
 
-### Heuristic constants must be config-driven and re-tuned per map
+**Done: `ticket_to_ride/eval/stats.py` takes a block index everywhere and never accepts a
+flat list of games**, and a test measures the difference rather than trusting it -- a
+game-level bootstrap over perfectly-correlated blocks produces intervals dramatically
+narrower than the block-level one.
+
+Two follow-ons. **SPRT must stop on block boundaries too**: half a block is one seating, so
+an early stop mid-block reports exactly the mirrored result blocks exist to prevent. And
+blocks are keyed by their **seed**, not by the match that recorded them -- block seeds are
+`seed_root + i`, so two runs at the same root replay the same decks, and counting them as
+distinct blocks would quietly restore the independence assumption.
+
+### Heuristic constants must be config-driven and re-tuned per map  ✅ handled
 
 The published prior art's baselines were invalidated by hard-coded thresholds (`draw a
 ticket only if trains > 15`) carried onto a 10-train map, where the condition could never
 fire — so every "well-designed heuristic" played its opening tickets and never drew more.
 Ship a test asserting each heuristic actually exercises **every action type** on **every
 map**, including drawing extra tickets.
+
+**Done: every constant lives in `HeuristicParams`, and the coverage test is
+`crates/ttr-core/tests/heuristics.rs`.** It earned its place immediately — it caught two
+separate bugs, both of which had perfectly board-relative constants and still failed to
+transfer. See "A heuristic constant that transfers can still fail to transfer" in Part 1:
+the fractions are necessary, and the *test* is what actually catches it.
 
 ### Freeze the PRNG, draw procedure, and `state_hash` *before* writing Rust  ✅ handled
 
