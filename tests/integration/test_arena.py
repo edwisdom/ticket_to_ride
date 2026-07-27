@@ -206,10 +206,15 @@ def test_ten_thousand_paired_games_across_five_agents_take_seconds(tmp_path: Pat
     """The §14 exit criterion, measured rather than quoted.
 
     Ten lineups over five agents at two seats; 500 blocks each is 1000 games per lineup and
-    10,000 in total. The budget is generous because this runs alongside the rest of the
-    suite under `-n auto`, where core contention is real -- the same effect that makes
-    `make bench-check` report a 40-80% regression on a busy machine. The honest figure is
-    in docs/WORKLOG.md, measured on an idle box.
+    10,000 in total.
+
+    **The budget is a smoke test, not the measurement.** This runs in the nightly under
+    `-n auto` on a two-core runner, where the rayon pool is a quarter of a development
+    machine's and core contention is real -- the same effect that makes `make bench-check`
+    report a 40-80% regression on a busy box. What it catches is an order-of-magnitude
+    regression: the arena falling back to a per-decision FFI loop, or the plan cache being
+    invalidated every turn. The figure that answers the exit criterion is in
+    docs/WORKLOG.md, measured on an idle machine (12.6 s wall, 11.9 s engine).
     """
     lineups = round_robin(len(LADDER), 2)
     blocks = 10_000 // (len(lineups) * 2)
@@ -223,4 +228,4 @@ def test_ten_thousand_paired_games_across_five_agents_take_seconds(tmp_path: Pat
     elapsed = time.perf_counter() - start
 
     assert played == 10_000, played
-    assert elapsed < 120.0, f"{played} games took {elapsed:.1f}s wall ({engine:.1f}s engine)"
+    assert elapsed < 300.0, f"{played} games took {elapsed:.1f}s wall ({engine:.1f}s engine)"
