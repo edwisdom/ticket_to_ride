@@ -23,7 +23,14 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from ticket_to_ride.data.board import BOARDS  # noqa: E402
-from ticket_to_ride.rl.encode.spec import OBS_VERSION, obs_spec  # noqa: E402
+from ticket_to_ride.rl.encode.spec import (  # noqa: E402
+    COST_BUCKETS,
+    HAND_BUCKETS,
+    OBS_VERSION,
+    OPPONENT_SLOTS,
+    TRAIN_BUCKETS,
+    obs_spec,
+)
 
 OUT = REPO_ROOT / "crates" / "ttr-core" / "src" / "obs_spec_gen.rs"
 
@@ -48,6 +55,19 @@ def emit() -> str:
         "// rewrite each other forever, and the file-wide inner form does not compile.",
         "",
         f"pub const OBS_VERSION: u32 = {OBS_VERSION};",
+        "",
+        "// The thermometer bucket edges and the opponent-slot count. Emitted rather than",
+        "// re-typed in Rust: the generated tables already guarantee the two encoders agree",
+        "// on a thermometer's *width*, and without these they could still disagree about",
+        "// where its steps fall -- a divergence that shows up as a wrong feature value with",
+        "// a perfectly correct layout, which is the hardest kind to find.",
+        f"pub const HAND_BUCKETS: [u8; {len(HAND_BUCKETS)}] = {list(HAND_BUCKETS)};",
+        f"pub const COST_BUCKETS: [u16; {len(COST_BUCKETS)}] = {list(COST_BUCKETS)};",
+        f"pub const TRAIN_BUCKETS: [u8; {len(TRAIN_BUCKETS)}] = {list(TRAIN_BUCKETS)};",
+        "",
+        "/// Opponent slots are pinned at the maximum table size so one network plays any",
+        "/// seat count; unused slots are zeroed and carry a `present` flag.",
+        f"pub const OPPONENT_SLOTS: usize = {OPPONENT_SLOTS};",
         "",
         "pub struct ObsField {",
         "    pub name: &'static str,",

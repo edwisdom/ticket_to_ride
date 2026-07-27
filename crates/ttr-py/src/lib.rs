@@ -213,6 +213,25 @@ impl PyState {
         ttr_core::scoring::longest_trails(&self.inner)
     }
 
+    // -- observation -------------------------------------------------------
+
+    #[getter]
+    fn observation_size(&self) -> usize {
+        ttr_core::obs::observation_size(&self.inner)
+    }
+
+    /// Encode from `player`'s point of view and return the floats.
+    ///
+    /// Returns a list rather than writing into a caller buffer: this exists for the
+    /// differential harness, which compares against a pure-Python oracle that has no
+    /// numpy. The zero-copy path that training actually uses is `VecEnv::observe`.
+    fn observation(&mut self, player: usize) -> PyResult<Vec<f32>> {
+        self.check_seat(player)?;
+        let mut out = vec![0.0f32; ttr_core::obs::observation_size(&self.inner)];
+        ttr_core::obs::encode(&mut self.inner, player, &mut out);
+        Ok(out)
+    }
+
     fn hand_of(&self, player: usize) -> PyResult<Vec<u8>> {
         self.check_seat(player)?;
         Ok(self.inner.hand_of(player).to_vec())
@@ -331,9 +350,17 @@ fn contract_version() -> u8 {
     ttr_core::CONTRACT_VERSION
 }
 
+/// The observation-layout version. Baked into every checkpoint, so the two encoders must
+/// report the same one or a checkpoint could load against a layout it was not trained on.
+#[pyfunction]
+fn obs_version() -> u32 {
+    ttr_core::obs::obs_version()
+}
+
 #[pymodule]
 fn ttr_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(contract_version, m)?)?;
+    m.add_function(wrap_pyfunction!(obs_version, m)?)?;
     m.add_class::<PyGame>()?;
     m.add_class::<PyState>()?;
     m.add("IllegalAction", m.py().get_type::<IllegalAction>())?;

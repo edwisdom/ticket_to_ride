@@ -24,6 +24,13 @@ use std::sync::OnceLock;
 
 use crate::board_gen::{MAPS, RawMap};
 
+/// A city index. `u8` because the largest map has 36 cities.
+pub type CityId = u8;
+
+/// A segment index. `u16` because the largest map has 100 segments and the sibling table's
+/// sentinel has to live outside that range.
+pub type SegmentId = u16;
+
 /// "Any single colour" -- a segment with no required colour. Also the sentinel for "no
 /// twin" in [`Board::sibling`]; both are u8 ids and 255 is out of range for either.
 pub const GRAY: u8 = 255;

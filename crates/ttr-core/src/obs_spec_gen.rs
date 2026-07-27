@@ -14,6 +14,19 @@
 
 pub const OBS_VERSION: u32 = 1;
 
+// The thermometer bucket edges and the opponent-slot count. Emitted rather than
+// re-typed in Rust: the generated tables already guarantee the two encoders agree
+// on a thermometer's *width*, and without these they could still disagree about
+// where its steps fall -- a divergence that shows up as a wrong feature value with
+// a perfectly correct layout, which is the hardest kind to find.
+pub const HAND_BUCKETS: [u8; 7] = [1, 2, 3, 4, 5, 6, 7];
+pub const COST_BUCKETS: [u16; 6] = [1, 3, 5, 8, 12, 17];
+pub const TRAIN_BUCKETS: [u8; 7] = [1, 3, 6, 10, 15, 25, 35];
+
+/// Opponent slots are pinned at the maximum table size so one network plays any
+/// seat count; unused slots are zeroed and carry a `present` flag.
+pub const OPPONENT_SLOTS: usize = 4;
+
 pub struct ObsField {
     pub name: &'static str,
     /// Offset within one entity of the enclosing block.
