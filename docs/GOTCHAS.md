@@ -179,6 +179,73 @@ connects the terminals will happily report a worse tree than the DP found. The c
 actually works for three terminals is the closed form: `min over v of d(v,a)+d(v,b)+d(v,c)`
 in the shortest-path metric.
 
+### `sum()` in CPython is not naive summation
+
+Since 3.12 the builtin `sum()` takes a **Neumaier compensated** fast path for floats.
+Rust's `Iterator::sum` adds left to right with no compensation. They disagree in the last
+ULP on inputs as ordinary as `[0.0, 1.0, 2/3, 1/3]` — Python gives exactly `2.0`, Rust
+gives `1.9999999999999998` — and the gap propagates through any mean computed from them.
+It surfaced as every seat's `returns()` differing in the 16th digit.
+
+The giveaway probe:
+
+```python
+sum([1e16, 1.0, -1e16])   # 1.0 in Python; 0.0 with a naive fold
+```
+
+`crates/ttr-core/src/numeric.rs` transcribes Neumaier and `returns()` uses it. **It was
+only caught because the harness compares returns exactly rather than within a tolerance** —
+and a tolerance would equally have hidden a real difference in the formula, which is the
+whole reason not to use one.
+
+### `cargo fmt` rewrites generated Rust, and the file-wide opt-out does not compile
+
+rustfmt explodes the generated board and obs-spec tables to one entry per line (+894 lines)
+and sets up a permanent fight: `make board` writes the compact form, the fmt hook rewrites
+it, and `gen_board.py --check` then fails on a file nobody edited. Same class as `ruff
+format` rewriting Python inside `docs/*.md`.
+
+The fix is a **per-item outer** `#[rustfmt::skip]`, emitted by the generators. The obvious
+file-wide `#![rustfmt::skip]` is a *custom inner attribute*: rustfmt honours it, and rustc
+rejects it as unstable ([rust-lang/rust#54726]) — so the crate silently formats fine and
+then does not build.
+
+[rust-lang/rust#54726]: https://github.com/rust-lang/rust/issues/54726
+
+### A differential fast tier that only drives USA 2P is worthless
+
+Deleting the end-of-turn refill from the Rust engine — a real bug, and the one Phase 1
+found the hard way — survives **60 seeds of USA 2P, 3P and 4P undetected**. Reaching it
+requires the deck *and* the discard to run dry, which those configurations rarely do in a
+random game. It is caught at mini seed 0 (3P and 4P) and USA 5P seed 8.
+
+So `FAST_CONFIGS` in `tests/integration/test_differential.py` weights the small map and the
+full table, and the measurement is recorded next to it. The general lesson: pick the fast
+tier's shape by mutating the engine and seeing what catches, not by taking the biggest map.
+
+### Comparing hashes tells you *that*; comparing fields tells you *where*
+
+Two follow-ons the harness learned the hard way. Diff the serialized image **field-wise
+using each side's own `deck_len`**, not byte-wise: a reshuffle at a different moment
+changes `deck_len`, which changes the image length, and a byte-offset diff then reports
+"the images are different lengths" — which reads like a layout bug and sends you to check
+field widths when the real difference is one value several fields earlier.
+
+### PyO3: `extension-module` breaks a plain `cargo build` on macOS
+
+The feature deliberately does not link libpython. maturin passes
+`-undefined dynamic_lookup` itself; a bare `cargo build`/`cargo test` over the workspace
+does not, and the failure is a wall of undefined `_Py*` symbols that looks like a broken
+toolchain. `.cargo/config.toml` supplies it. Linux needs nothing.
+
+Two more from the same family. `panic = "abort"` must **not** be set in the release
+profile: PyO3 turns a Rust panic into a Python exception by unwinding across the FFI
+boundary, and Cargo does not allow `panic` in a per-package override, so it cannot be set
+globally and exempted for the shim. And a `#[pyclass]` that derives `Clone` gets an
+automatic `FromPyObject` — for an RNG handle that means the stream is **copied at the call
+boundary**, the caller's generator never advances, and every determinization comes out
+identical. `skip_from_py_object` is load-bearing.
+
 ---
 
 ## Part 2 — known traps in the work ahead
@@ -186,8 +253,12 @@ in the shortest-path metric.
 These come from the design work in [PLAN.md](PLAN.md).
 
 The first seven were Phase 1 traps and are now **handled** -- kept here because each one is
-a thing to check when the Rust port reimplements it, and the note is the check. Everything
-after "Never report a mirrored win-rate matrix" is still ahead.
+a thing to check when the Rust port reimplements it, and the note is the check. **Phase 2
+has now done that reimplementation**, and every one of them held: the Rust engine is
+byte-identical to the Python oracle across every map and seat count. They stay because
+Phase 5's search and Phase 6's vectorized env will touch the same rules again.
+
+Everything after "Never report a mirrored win-rate matrix" is still ahead.
 
 ### The 3-locomotive flush can hang forever  ✅ handled
 
@@ -273,10 +344,14 @@ trajectories, which destroys the oracle. This is the gate between Phase 1 and Ph
 PLAN.md §5.8. **Done: [CONTRACT.md](CONTRACT.md) plus `tests/golden/contract_vectors.json`
 and the 84-game `tests/golden/replays.bin` corpus.**
 
-### Compare Python vs Rust at every step, not just at the terminal
+### Compare Python vs Rust at every step, not just at the terminal  ✅ handled
 
 Terminal-only comparison tells you *that* you diverged, never *where*. Assert
 `state_hash()` equality and `legal_actions()` set equality after every single step.
+**Done: `tests/differential.py` also compares `position_hash`, `current_player` and the
+terminal scoring chain, and names the first differing serialized field.** Two follow-ons
+that were not obvious in advance are in Part 1: field-wise diffing, and choosing the fast
+tier's shape by mutation testing rather than by map size.
 
 ### MPS will silently fall back to CPU
 

@@ -11,16 +11,26 @@ training reinforcement learning agents against it via self-play.
 | --- | --- | --- |
 | 0 | Project scaffolding | done |
 | 1 | Python reference engine | done |
-| 2 | Rust core + differential harness | next |
-| 3 | Heuristic agents + arena + Elo | |
+| 2 | Rust core + differential harness | done |
+| 3 | Heuristic agents + arena + Elo | next |
 | 4 | Terminal client | |
 | 5 | Determinization + ISMCTS | |
 | 6 | PPO self-play + league | |
 | 7 | ISMCTS + learned priors | |
 | 8 | Scaling, web UI, human gauntlet | |
 
-The engine plays 2–5 players on the USA map and 2–4 on TTR-mini, at ~5.9 µs/step
-(~1100 full USA 2P random games/s). 450 tests, engine coverage 98%.
+The engine plays 2–5 players on the USA map and 2–4 on TTR-mini. Two implementations,
+byte-identical and compared at every step:
+
+| | µs/step | full USA 2P games/s |
+| --- | --- | --- |
+| Python (the reference, and the permanent oracle) | 6.6 | ~980 |
+| Rust, one thread | 0.14 | ~45,000 |
+| Rust, 8 performance cores | 0.021 | ~303,000 |
+
+Measured back to back in one process on an M2 Max; the Python baseline drifts 10–15%
+between sessions, so `ttr bench` only ever compares within a run. ~500 Python tests plus
+70 Rust tests, engine coverage 98%.
 
 ## Quickstart
 
@@ -28,9 +38,18 @@ The engine plays 2–5 players on the USA map and 2–4 on TTR-mini, at ~5.9 µs
 make setup             # uv sync --all-extras --dev, then install pre-commit hooks
 make test              # fast unit + property tests, no torch
 make lint type         # ruff + ty
+make rust              # build the Rust core into .venv (not part of `uv sync`)
+make rust-test         # ttr-core's standalone tests -- no Python interpreter involved
 uv run ttr map         # board data and the invariants it satisfies
-uv run ttr bench       # engine throughput
+uv run ttr bench       # both engines, side by side
 ```
+
+The Rust core is a separate distribution, `ttr_rust`, and `ticket_to_ride.engine` never
+imports it. That is enforced, not just intended: the Python engine is the permanent
+differential-testing oracle, and an oracle that imports the implementation it validates
+would agree with its own bugs. Tests needing the extension skip when it is unbuilt —
+except under `TTR_REQUIRE_RUST=1`, which CI sets, because a differential harness that
+silently skips reports green having compared nothing.
 
 ```python
 from ticket_to_ride.engine import Game, RuleConfig, final_scores
@@ -55,7 +74,9 @@ ticket_to_ride/
   eval/       paired-seed arena, Bradley-Terry ratings, SPRT, results store
   ui/         terminal and web clients
 tools/        generators: board data, contract vectors, observation spec, golden replays
-crates/       Rust engine core (Phase 2)
+crates/
+  ttr-core/   the Rust engine -- pure Rust, no PyO3, standalone `cargo test`
+  ttr-py/     thin PyO3 shim; contains no game logic
 tests/golden/ frozen artifacts: contract vectors and an 84-game replay corpus
 ```
 

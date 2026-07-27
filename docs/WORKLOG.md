@@ -5,6 +5,163 @@ session. Decisions that deviate from [PLAN.md](PLAN.md) belong here, with the re
 
 ---
 
+## 2026-07-27 — Phase 2: the Rust core
+
+Complete. `make lint type test` green, `cargo test` green (70 Rust tests), and the Rust
+engine is **byte-identical to the Python oracle** across every map and seat count.
+
+### Three decisions taken before writing much code
+
+**1. Layout.** `crates/ttr-core` (pure Rust, no PyO3, standalone `cargo test`) +
+`crates/ttr-py` (thin PyO3 shim) under a workspace at the repo root, per §8. The one thing
+§8 does not decide is how the extension reaches `.venv`, and it matters: the shim is **its
+own distribution**, `ttr_rust`, not a submodule of `ticket_to_ride`. The Python engine is
+the permanent differential-testing oracle, and an oracle that imports the implementation it
+validates is not an oracle — a shared bug would agree with itself and the harness would
+report green. `test_import_boundary.py` now bans `ttr_rust` from `engine/` alongside torch
+and numpy. Consequence: `uv sync --dev` stays Rust-free, `make rust` builds, and
+Rust-dependent tests skip when it is absent — *except* under `TTR_REQUIRE_RUST=1`, which CI
+sets, because a differential harness that silently skips reports green having compared
+nothing.
+
+**2. `chance_mode="explicit"` is deferred to Phase 5, and §14's "both chance modes" is
+amended.** Not because it is unwritten — because the frozen contract does not specify it and
+partly contradicts it. CONTRACT.md §2.1 says the `deck_counts()` view "is never the source
+of a draw", which is exactly what an explicit chance node makes it; and §3.1's serialization
+has no field for a pending chance event. Implementing it means adding serialized state,
+i.e. a `CONTRACT_VERSION` bump that invalidates all 84 golden replays and every vector —
+during the phase whose entire job is to be checked against them. There is also no oracle:
+Python raises `NotImplementedError`, so building it in Rust first would mean writing the
+reference implementation in the language being checked. **When it lands it lands Python
+first, then Rust, then the harness sweeps both.** `ChanceMode::Explicit` exists as a
+declared variant that construction refuses with that reason in the error.
+
+**3. Search hooks.** `clone_into` and `position_hash` ported directly.
+`resample_from_infoset` **built for real**, because it is the one hook that constrains the
+*state layout* — it has to close arithmetically against `certain`/`unknown`/`discard`/
+`faceup`, and discovering it does not in Phase 5 is the expensive version (§8.1 mitigation
+2). It closed. `collect_leaves`/`backup` **neither built nor stubbed**: they are search-tree
+operations, not state operations, and writing them now would mean designing an MCTS before
+one exists — the exact thing mitigation 3 budgets a revision for. A stub with a signature
+nobody validated is worse than an absent one. What *was* built is the substrate they would
+be expensive to retrofit onto: batched `VecEnv::step`, `observe` into caller buffers, and
+arena reuse.
+
+### Throughput — measured, not quoted
+
+On an M2 Max, both engines back to back in one process, median of repeated runs:
+
+| config | python | rust ×1 | rust ×8 |
+| --- | --- | --- | --- |
+| usa 2P | 6.62 µs/step, 979 g/s | 0.143 µs, 45.1k g/s (**46×**) | 0.021 µs, 303k g/s (**311×**) |
+| usa 4P | 6.67 µs/step, 504 g/s | 0.156 µs, 21.7k g/s (**43×**) | 0.023 µs, 149k g/s (**295×**) |
+| mini 2P | 5.24 µs/step, 2.7k g/s | 0.101 µs, 136k g/s (**52×**) | 0.016 µs, 863k g/s (**330×**) |
+
+§14 asks for ≥50× with a batched target of 85–170k games/s. **Batched clears it by ~2×.
+Single-threaded is 46× on USA 2P and 43× on 4P — under the 50× line**; only mini clears it
+on one core. Reported rather than rounded up.
+
+An earlier reading of 50.4× was an artifact: that run's Python baseline came in at 7.47
+µs/step against a stable median of 6.6. The Python engine has been observed at 5.9, 6.5 and
+7.5 µs/step for identical code across sessions, so **a ratio taken against a number recorded
+on another day measures the weather**. `ttr bench` now takes a median of `--repeat` runs and
+interleaves engines per configuration so both see the same thermal state.
+
+One optimization tried and **reverted**. Profiling put the per-length pay-slot table at ~27%
+of a claim scan (48 iterations regardless of the hand), so it was rewritten as bitmasks
+costing `sum(min(reach[c], max_len))`. End to end: 0.145 vs 0.143 µs/step — no change.
+Reverted on the same reasoning Phase 1 used for its sorted-prefix pay table: identical
+measurement, unearned complexity. Recorded so nobody tries it a third time. Legality is
+**81% of a step**, so any real win has to come from there.
+
+### What the differential harness found, and what it taught
+
+Byte-identical over the fast tier and the full nightly sweep; all 84 golden replays
+reproduce their recorded final hash *and* scores. Compared at **every** step: `state_hash`,
+`position_hash`, sorted `legal_actions`, `is_terminal`, `current_player`, and at the
+terminal the longest trails, itemized breakdown, final scores, winners and `returns`.
+
+Two findings worth more than the port itself:
+
+- **CPython's `sum()` is Neumaier-compensated; Rust's `Iterator::sum` is not.** They
+  disagree in the last ULP on `[0.0, 1.0, 2/3, 1/3]`, which propagated into every seat's
+  `returns()`. Caught **only** because returns are compared exactly — a tolerance would have
+  hidden it, and would equally hide a real difference in the formula. Fixed by transcribing
+  Neumaier into `numeric.rs`; Python is the oracle and compensated summation is also strictly
+  more accurate, so this is not a fidelity-for-parity trade. Two plausible culprits were
+  ruled out first: FMA contraction on aarch64, and Rust parsing `if c {1.0} else {0.0} / n`
+  as `if c {1.0} else {0.0/n}` (it does not, but the expression is now parenthesized).
+- **A fast tier that only drives USA 2P is worthless.** Deleting the end-of-turn refill from
+  Rust survives 60 seeds of USA 2P/3P/4P undetected, because reaching it needs deck *and*
+  discard to run dry. It is caught at mini seed 0 and USA 5P seed 8. `FAST_CONFIGS` is
+  shaped by that measurement, which is recorded next to it. **Pick the fast tier's shape by
+  mutating the engine and seeing what catches, not by taking the biggest map.**
+
+The harness reports *where*, not just *that*: a hash mismatch prints the first differing
+serialized **field** and a one-line reproduction. Field-wise using each side's own
+`deck_len`, because a reshuffle at a different moment changes the image length and a
+byte-offset diff then blames the layout for what is a value difference several fields
+earlier.
+
+### Observation encoder
+
+3355 dims on USA, 1169 on mini, driven entirely by the generated feature table. Verified
+over 4463 observations — every seat, every map, every seat count, sampled every 7 steps
+through full games plus the terminal — with **zero differing slots**, compared exactly on
+f32. Sampling through the game is the point: on an opening position `remaining_cost`,
+`fragility`, `on_my_steiner_tree`, `extends_my_chain` and `is_dead` are all identically
+zero.
+
+The **thermometer bucket edges are now generated into Rust** alongside the layout. Before
+this the table guaranteed both encoders agreed on a thermometer's *width* while its step
+positions were re-typed by hand on each side — a divergence that shows up as a wrong value
+under a perfectly correct layout, which is the hardest kind to find.
+
+One documented claim was withdrawn rather than left standing. The encoder header first
+asserted that computing in f32 instead of narrowing from f64 "would disagree in the last
+bits on values as ordinary as 1/45". It does not: over every divisor this encoder uses,
+across the full numerator range, the two are bit-identical, and a mutation to direct-f32
+division was not caught by 20 seeds. The real reason to compute in f64 is that it matches
+Python's arithmetic *structurally*, so agreement does not depend on the ranges being benign.
+That is now a Rust test instead of a sentence.
+
+### Deviations from PLAN.md, all deliberate
+
+- **`State` is `Clone`, not `Copy`** (§5.1 says `Copy`). It carries the action history
+  exactly as Python's does. Everything `Copy` was for still holds: the POD arrays clone as a
+  memcpy, `clone_into` reuses the destination's allocation, and search runs with
+  `track_history` off.
+- **rayon is pool-*sized* to the performance cores, not pinned to them** (§8.3 says pin).
+  macOS exposes no thread-affinity API — no `sched_setaffinity`, only a QoS hint the
+  scheduler may ignore. Sizing from `hw.perflevel0.logicalcpu` is what is achievable, and
+  the difference is recorded in `vecenv.rs` rather than left as an unmet claim.
+- **§14's "both chance modes" is amended to sampled only**, for the reasons above.
+- **§14's ≥50× is met batched and missed single-threaded on the USA map**, as measured
+  above.
+
+### Also shipped
+
+The extension carries a hand-written `.pyi` plus `py.typed`, because a compiled module is
+untyped and every consumer from here to Phase 8 imports it. A test compares the stub against
+the real module in **both** directions — stubbed-but-absent being the dangerous one, since
+it type checks and fails at runtime — and was verified to catch a deliberately bogus entry.
+
+Three PyO3 traps are in GOTCHAS: `extension-module` breaking a bare `cargo build` on macOS,
+`panic = "abort"` being incompatible with unwinding into CPython (and not overridable
+per-package), and a `Clone` pyclass's automatic `FromPyObject` silently copying an RNG
+handle at the call boundary — which would leave the caller's stream unadvanced and make
+every determinization identical.
+
+### Next
+
+**Phase 3 — H0–H4 in Rust with config-driven constants, plus `eval/`.** The engine they run
+on is now ~46× faster single-threaded and ~300× batched, which is what makes a 10k-game
+arena a few seconds rather than a few minutes. Watch the §14 Phase 3 traps: every heuristic
+must exercise every action type on **both** maps (the published prior art's fatal bug), and
+win-rate matrices must measure both seatings rather than mirroring one.
+
+---
+
 ## 2026-07-26 — Phase 1: the Python reference engine
 
 Complete. `make lint type test` green, 450 tests (434 in the fast suite), engine

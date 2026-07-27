@@ -345,3 +345,30 @@ unrealized future.
 - **The action space** — versioned by `ACTION_SPACE_VERSION`.
 - **Anything derived** — adjacency, buckets, distance tables, the DSU. All are pure
   functions of the frozen data and may be reorganized freely for speed.
+- **Determinization** (`resample_from_infoset`) — a *sampler*, not a draw. It never
+  advances `State.rng` and never touches the materialized permutation, so two
+  implementations may legitimately produce different particles. It is validated against
+  the public state by `assert_consistent`, not against another implementation.
+
+---
+
+## 6. What this document does **not** specify: `chance_mode = EXPLICIT`
+
+Recorded here because it is a **gap in the contract, not merely unimplemented code**, and
+the distinction decides who has to fix it.
+
+§2.1 says the `deck_counts()` view "is a *view*; it is never the source of a draw" — which
+is precisely what an explicit chance node would make it. And §3.1's serialization has no
+field for a pending chance event: no phase value, no "which event is owed, for how many
+cards". So explicit mode cannot be implemented against this document as written. It needs
+either new serialized state (a `CONTRACT_VERSION` bump, invalidating every recorded replay)
+or a demonstration that the pending chance is derivable from the existing fields.
+
+Consequently **Phase 2's exit criterion is amended: sampled mode only** (PLAN.md §14 says
+"both chance modes"). `ChanceMode::Explicit` and `chance_mode="explicit"` exist as declared
+values that construction refuses, with that reason in the error rather than a bare
+`NotImplementedError`.
+
+When it is built, the order is forced: **Python first, then Rust, then the harness sweeps
+both.** Building it in Rust first would mean writing the reference implementation in the
+language the reference is used to check.
