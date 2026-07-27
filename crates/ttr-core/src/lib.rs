@@ -29,8 +29,10 @@ pub mod board_gen;
 pub mod config;
 pub mod graph;
 pub mod hashing;
+pub mod numeric;
 pub mod obs_spec_gen;
 pub mod rng;
+pub mod scoring;
 pub mod state;
 
 /// The frozen-contract version, kept in lockstep with

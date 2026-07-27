@@ -171,6 +171,48 @@ impl PyState {
         self.inner.history.clone()
     }
 
+    // -- scoring -----------------------------------------------------------
+    //
+    // `&mut self` because ticket completion is a union-find query and the forest uses path
+    // halving. The DSU is a cache excluded from every hash, so the mutation is invisible to
+    // anything that compares states -- but it is real, so the borrow has to be honest.
+
+    fn final_scores(&mut self) -> Vec<i16> {
+        ttr_core::scoring::final_scores(&mut self.inner)
+    }
+
+    /// One tuple per seat, in the field order of `ticket_to_ride.engine.scoring.Breakdown`.
+    #[allow(clippy::type_complexity)]
+    fn score_breakdown(&mut self) -> Vec<(i16, u8, u8, i16, i16, u16, u8, i16)> {
+        ttr_core::scoring::score_breakdown(&mut self.inner)
+            .into_iter()
+            .map(|b| {
+                (
+                    b.routes,
+                    b.tickets_made,
+                    b.tickets_missed,
+                    b.ticket_points,
+                    b.longest_bonus,
+                    b.longest_trail,
+                    b.completed,
+                    b.total,
+                )
+            })
+            .collect()
+    }
+
+    fn returns(&mut self) -> Vec<f64> {
+        ttr_core::scoring::returns(&mut self.inner)
+    }
+
+    fn winners(&mut self) -> Vec<usize> {
+        ttr_core::scoring::winners(&mut self.inner)
+    }
+
+    fn longest_trails(&self) -> Vec<u16> {
+        ttr_core::scoring::longest_trails(&self.inner)
+    }
+
     fn hand_of(&self, player: usize) -> PyResult<Vec<u8>> {
         self.check_seat(player)?;
         Ok(self.inner.hand_of(player).to_vec())

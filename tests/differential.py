@@ -22,6 +22,14 @@ from typing import TYPE_CHECKING, NamedTuple, Protocol
 from ticket_to_ride.engine.config import PHASE_NAMES, RuleConfig
 from ticket_to_ride.engine.replay import Replay
 from ticket_to_ride.engine.rng import Pcg32, stream
+from ticket_to_ride.engine.scoring import (
+    Breakdown,
+    final_scores,
+    longest_trails,
+    returns,
+    score_breakdown,
+    winners,
+)
 from ticket_to_ride.engine.state import Game, State
 
 if TYPE_CHECKING:
@@ -44,6 +52,11 @@ class RustState(Protocol):
     def is_terminal(self) -> bool: ...
     def current_player(self) -> int: ...
     def history(self) -> list[int]: ...
+    def final_scores(self) -> list[int]: ...
+    def score_breakdown(self) -> list[tuple[int, ...]]: ...
+    def returns(self) -> list[float]: ...
+    def winners(self) -> list[int]: ...
+    def longest_trails(self) -> list[int]: ...
 
 
 class RustGame(Protocol):
@@ -271,7 +284,57 @@ def compare_game(
 
     if py.history_actions() != rs.history():
         raise Divergence(f"{map_name} {n_players}P seed {seed}: recorded histories differ")
+    compare_terminal(py, rs, (map_name, n_players, seed))
     return index
+
+
+def compare_terminal(py: State, rs: RustState, context: tuple[str, int, int]) -> None:
+    """Everything that can only be known once the game is over.
+
+    Not covered by `state_hash`: the terminal hash proves the two engines reached the same
+    *position*, and says nothing about whether they score it the same way. Ticket
+    settlement, the longest trail and the tiebreak chain are all computed from the position
+    rather than stored in it, so they need their own comparison.
+    """
+    map_name, n_players, seed = context
+
+    def fail(detail: str) -> None:
+        raise Divergence(
+            f"{map_name} {n_players}P seed {seed} diverged at the terminal: {detail}\n"
+            f"  reproduce: compare_game({map_name!r}, {n_players}, {seed})"
+        )
+
+    py_trails = longest_trails(py)
+    rs_trails = rs.longest_trails()
+    if py_trails != rs_trails:
+        # Named first because it is the hardest of the three to get right, and a mismatch
+        # here explains both the scores and the tiebreak that follow.
+        fail(f"longest trails: python {py_trails}, rust {rs_trails}")
+
+    py_break = [tuple(b) for b in score_breakdown(py)]
+    rs_break = [tuple(b) for b in rs.score_breakdown()]
+    if py_break != rs_break:
+        fields = Breakdown._fields
+        for seat, (a, b) in enumerate(zip(py_break, rs_break, strict=True)):
+            for name, x, y in zip(fields, a, b, strict=True):
+                if x != y:
+                    fail(f"seat {seat} breakdown field {name!r}: python {x}, rust {y}")
+        fail(f"breakdowns differ: python {py_break}, rust {rs_break}")
+
+    py_scores, rs_scores = final_scores(py), rs.final_scores()
+    if py_scores != rs_scores:
+        fail(f"final scores: python {py_scores}, rust {rs_scores}")
+
+    py_win, rs_win = winners(py), rs.winners()
+    if py_win != rs_win:
+        fail(f"winners: python {py_win}, rust {rs_win}")
+
+    # Exact, not approximate. Both sides evaluate the same IEEE-754 double operations in
+    # the same order, so any drift is a real difference in the formula rather than
+    # floating-point noise -- and a tolerance here would hide exactly that.
+    py_returns, rs_returns = returns(py), rs.returns()
+    if py_returns != rs_returns:
+        fail(f"returns: python {py_returns}, rust {rs_returns}")
 
 
 def _rust(module: ModuleType | None) -> ModuleType:
@@ -315,4 +378,10 @@ def compare_replay(record: Replay, *, rust: ModuleType | None = None) -> int:
         )
     if not rs.is_terminal():
         raise Divergence(f"seed {record.seed}: the replay ended before the rust game did")
+    compare_terminal(py, rs, context)
+    if list(record.final_scores) != rs.final_scores():
+        raise Divergence(
+            f"{record.map_name} {record.n_players}P seed {record.seed}: rust scores "
+            f"{rs.final_scores()} != recorded {list(record.final_scores)}"
+        )
     return len(record.actions)
