@@ -8,6 +8,7 @@ than remembered.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
@@ -28,7 +29,7 @@ runner = CliRunner()
 def test_help_lists_every_command() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    for command in ("version", "map", "bench"):
+    for command in ("version", "map", "bench", "arena", "leaderboard"):
         assert command in result.stdout
 
 
@@ -181,3 +182,32 @@ def test_engine_throughput_floor() -> None:
     assert mini.games_per_second > 2000, f"mini: {mini.games_per_second:.0f} games/s"
     assert usa.games_per_second > 600, f"usa 2P: {usa.games_per_second:.0f} games/s"
     assert usa.microseconds_per_step < 12, f"usa 2P: {usa.microseconds_per_step:.1f} us/step"
+
+
+# ---------------------------------------------------------------------------
+# arena and leaderboard
+# ---------------------------------------------------------------------------
+
+
+def test_a_leaderboard_over_an_empty_store_says_so(tmp_path: Path) -> None:
+    """Rather than fitting ratings over nothing and printing an empty, plausible table."""
+    result = runner.invoke(app, ["leaderboard", "--db", str(tmp_path / "empty.db")])
+    assert result.exit_code != 0
+    assert "ttr arena" in result.output
+
+
+def test_an_arena_with_fewer_agents_than_seats_is_refused(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app, ["arena", "--agents", "h3", "--players", "2", "--db", str(tmp_path / "x.db")]
+    )
+    assert result.exit_code != 0
+    assert "cannot fill" in result.output
+
+
+def test_sprt_needs_two_agents_and_two_seats(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        ["arena", "--sprt", "h3", "--players", "2", "--db", str(tmp_path / "x.db")],
+    )
+    assert result.exit_code != 0
+    assert "challenger,incumbent" in result.output

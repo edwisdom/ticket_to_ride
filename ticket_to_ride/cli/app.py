@@ -10,6 +10,7 @@ from importlib.metadata import version as _version
 
 import typer
 
+from ticket_to_ride.cli.cmd_arena import arena_command, leaderboard_command
 from ticket_to_ride.cli.cmd_bench import bench_command
 from ticket_to_ride.cli.cmd_map import map_command
 
@@ -39,6 +40,8 @@ def version() -> None:
 
 app.command("map")(map_command)
 app.command("bench")(bench_command)
+app.command("arena")(arena_command)
+app.command("leaderboard")(leaderboard_command)
 
 
 def main() -> None:

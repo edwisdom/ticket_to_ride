@@ -107,6 +107,10 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "PLR2004", "ARG", "PLR0915"]
+# A Typer command's options *are* its parameters, and Typer binds them positionally, so
+# there is no keyword-only form to move them to. PLR0913 is already ignored globally for
+# the same reason on RL entry points.
+"ticket_to_ride/cli/**" = ["PLR0917"]
 "tools/**" = ["T201"]
 # rl/ is the one place torch may be imported eagerly, and the one place annotations are
 # relaxed -- torch's own typing is incomplete enough that strict annotation coverage

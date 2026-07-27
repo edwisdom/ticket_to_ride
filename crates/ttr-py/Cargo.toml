@@ -12,6 +12,20 @@ rust-version.workspace = true
 name = "ttr_rust"
 crate-type = ["cdylib"]
 
+# No test harness for this target, and not because there is nothing worth testing here --
+# because the harness *cannot run*. `extension-module` deliberately does not link libpython
+# (the symbols are resolved by the interpreter that loads the `.so`), so the test executable
+# cargo builds from this crate links thanks to `-undefined dynamic_lookup` in
+# `.cargo/config.toml` and then aborts at load with
+# `dyld: symbol not found in flat namespace '_PyBaseObject_Type'`.
+#
+# This has been latent since Phase 2 and was invisible: the four ttr-core suites pass and
+# print first, so `cargo test --workspace` reads as green until you scroll past them to the
+# SIGABRT. Nothing was lost by it -- this crate converts types and holds no logic by
+# design, and its behaviour is covered from Python by `tests/unit/rust/` -- but a command
+# that silently fails after printing a page of passes is worse than one that fails loudly.
+test = false
+
 [dependencies]
 ttr-core = { path = "../ttr-core" }
 pyo3 = { version = "0.29", features = ["extension-module"] }
