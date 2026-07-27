@@ -452,7 +452,13 @@ impl Heuristic {
         if on_plan && self.plan.detour_cost(state, segment) == 0 {
             let pending = self.max_unaffordable_detour(state, ctx);
             if f64::from(pending) >= p.hoard_safety_margin {
-                extra -= p.contest_weight * f64::from(pending);
+                // Divided by the rival count for the same reason the threat is: "waiting
+                // costs nothing" is a two-player premise. A detour of zero means *a*
+                // parallel route exists, and the more rivals there are the likelier one of
+                // them takes it while you wait. Measured, holding everything else fixed:
+                // hoarding alone cost -12.3 Elo at USA 5P and was neutral at 4P and 2P.
+                let rivals = f64::from(state.rules.n_players.saturating_sub(1).max(1));
+                extra -= p.contest_weight * f64::from(pending) / rivals;
             }
         }
         extra
@@ -506,7 +512,15 @@ impl Heuristic {
             let crowd = 1.0 + p.threat_crowding_penalty * f64::from(self.threats[o].max(1) - 1);
             best = best.max(severed / crowd);
         }
-        best * ctx.points_per_car * ctx.progress
+        // **Blocking has a free-rider problem, and it scales with the seat count.** The
+        // cars I spend denying one opponent help every *other* opponent as much as they
+        // help me, so the share of the denial I actually capture is about one over the
+        // number of rivals. Measured before this term existed: H4 was -50 Elo against H3 at
+        // USA 4P (95% CI [-58, -42]) while being +21 at TTR-mini 2P -- same code, same
+        // constants, opposite signs. A blocking heuristic that ignores the seat count is
+        // not mis-tuned; it is solving a two-player problem at every table.
+        let rivals = f64::from(state.rules.n_players.saturating_sub(1).max(1));
+        best * ctx.points_per_car * ctx.progress / rivals
     }
 
     /// How many free segments would merge two components of `player`'s network right now.

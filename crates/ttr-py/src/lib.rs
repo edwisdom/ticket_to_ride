@@ -834,6 +834,9 @@ pub struct PyArenaGames {
     pub block_seed: Vec<u64>,
     pub rotation: Vec<u8>,
     pub turns: Vec<u16>,
+    /// Decisions across every seat. The denominator for microseconds-per-decision, which
+    /// is what sets the sim budget of every Phase 5 search.
+    pub decisions: Vec<u32>,
     pub final_hash: Vec<u64>,
     pub seconds: f64,
 }
@@ -907,6 +910,7 @@ fn run_arena(
         block_seed: Vec::with_capacity(out.len()),
         rotation: Vec::with_capacity(out.len()),
         turns: Vec::with_capacity(out.len()),
+        decisions: Vec::with_capacity(out.len()),
         final_hash: Vec::with_capacity(out.len()),
         seconds,
     };
@@ -944,6 +948,7 @@ fn run_arena(
         games.block_seed.push(outcome.block_seed);
         games.rotation.push(outcome.rotation);
         games.turns.push(outcome.turns);
+        games.decisions.push(outcome.decisions);
         games.final_hash.push(outcome.final_hash);
         for (s, row) in outcome.seats.iter().enumerate() {
             seats.game.push(g as u32);

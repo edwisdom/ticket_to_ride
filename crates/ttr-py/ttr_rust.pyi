@@ -149,6 +149,8 @@ class ArenaGames:
     block_seed: list[int]
     rotation: list[int]
     turns: list[int]
+    #: Decisions across every seat; the denominator for microseconds-per-decision.
+    decisions: list[int]
     #: The final `state_hash`, so a re-run is verifiable rather than merely repeatable.
     final_hash: list[int]
     seconds: float

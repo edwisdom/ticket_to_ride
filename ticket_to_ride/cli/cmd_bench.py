@@ -95,6 +95,40 @@ def rust_playouts(map_name: str, n_players: int, games: int, threads: int = 1) -
     return BenchResult(map_name, n_players, played, steps, seconds, engine)
 
 
+#: The scripted ladder, in order.
+TIERS = ("h0", "h1", "h2", "h3", "h4")
+
+
+class AgentBench(NamedTuple):
+    """What one heuristic costs per decision."""
+
+    map_name: str
+    n_players: int
+    tier: str
+    decisions: int
+    seconds: float
+
+    @property
+    def microseconds_per_decision(self) -> float:
+        return self.seconds / self.decisions * 1e6
+
+
+def agent_playouts(map_name: str, n_players: int, tier: str, blocks: int) -> AgentBench:
+    """Self-play a tier and time its decisions.
+
+    **Single-threaded, deliberately.** This number is a per-decision cost, and it is read
+    as one: H3 is the ISMCTS rollout policy from Phase 5, so a rollout's sim budget is set
+    by exactly this figure on one core. Dividing a parallel wall-clock by the decision count
+    would report a throughput and call it a latency.
+    """
+    import ttr_rust  # noqa: PLC0415
+
+    games, _ = ttr_rust.run_arena(
+        map_name, n_players, [(tier, None, 1)], [0] * n_players, 0, blocks, 1
+    )
+    return AgentBench(map_name, n_players, tier, sum(games.decisions), games.seconds)
+
+
 def median_result(runs: list[BenchResult]) -> BenchResult:
     """The median run by microseconds per step. Medians, because a single sample of the
     Python engine varies by 10-15% and that swamps the difference being measured."""
@@ -137,13 +171,16 @@ def _collect(
 
 
 def bench_command(
-    suite: Annotated[str, typer.Option("--suite", help="engine | all")] = "engine",
+    suite: Annotated[str, typer.Option("--suite", help="engine | agents | all")] = "engine",
     games: Annotated[int, typer.Option("--games", help="Python games per configuration.")] = 300,
     repeat: Annotated[int, typer.Option("--repeat", help="Runs per engine; median wins.")] = 3,
     engines: Annotated[str, typer.Option("--engines", help="python | rust | both")] = "both",
     output: Annotated[str, typer.Option("--format", help="table | json")] = "table",
 ) -> None:
     """Measure engine throughput with uniformly random play."""
+    if suite == "agents":
+        _bench_agents(games=max(20, games // 10), repeat=repeat)
+        return
     if suite == "engine":
         configurations = [("usa", 2), ("usa", 4), ("mini", 2)]
     elif suite == "all":
@@ -153,7 +190,7 @@ def bench_command(
             for n in range(board.raw.min_players, board.raw.max_players + 1)
         ]
     else:
-        raise typer.BadParameter(f"unknown suite {suite!r}; use engine or all")
+        raise typer.BadParameter(f"unknown suite {suite!r}; use engine, agents or all")
     if engines not in ("python", "rust", "both"):
         raise typer.BadParameter(f"unknown engines {engines!r}; use python, rust or both")
 
@@ -227,3 +264,34 @@ def bench_command(
     Console().print(table)
     if engines == "both" and not want_rust:
         Console().print("[yellow]ttr_rust is not built; showing python only. `make rust`.[/]")
+
+
+def _bench_agents(*, games: int, repeat: int) -> None:
+    """`ttr bench --suite agents`: microseconds per decision for each scripted tier.
+
+    Why this has its own suite: **H3 doubles as the ISMCTS rollout policy** (PLAN.md §7,
+    §8.3), so its per-decision cost is what sets the sim budget of every Phase 5 search. It
+    is far more expensive than a step -- a plan rebuild is a Steiner solve -- and
+    discovering that in Phase 5 would be the expensive version.
+    """
+    if not _rust_available():
+        raise typer.BadParameter("ttr_rust is not built; run `make rust`")
+
+    configurations = [("usa", 2), ("usa", 4), ("mini", 2)]
+    table = Table(title=f"heuristic cost, self-play, single-threaded (median of {repeat})")
+    table.add_column("map", style="cyan")
+    table.add_column("seats", justify="right")
+    for tier in TIERS:
+        table.add_column(tier, justify="right")
+    for map_name, n_players in configurations:
+        row = [map_name, str(n_players)]
+        for tier in TIERS:
+            runs = [agent_playouts(map_name, n_players, tier, games) for _ in range(repeat)]
+            median = sorted(runs, key=lambda r: r.microseconds_per_decision)[len(runs) // 2]
+            row.append(f"{median.microseconds_per_decision:.2f}")
+        table.add_row(*row)
+    Console().print(table)
+    Console().print(
+        "[dim]microseconds per decision. H3 is the Phase 5 rollout policy, so its column "
+        "is the one that bounds a search's sim count.[/]"
+    )

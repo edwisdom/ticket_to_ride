@@ -69,6 +69,9 @@ pub struct GameOutcome {
     pub block_seed: u64,
     pub rotation: u8,
     pub turns: u16,
+    /// Decisions taken across every seat. The denominator for per-decision cost, which is
+    /// what sets the sim budget of every Phase 5 search -- H3 is the ISMCTS rollout policy.
+    pub decisions: u32,
     /// The final `state_hash`. Stored so a re-run is *verifiable* rather than merely
     /// repeatable: two runs of the same seed root that agree on ratings but disagree here
     /// played different games and happened to tie.
@@ -141,9 +144,11 @@ fn play_one(
 
     let mut state = game.new_initial_state(block_seed);
     let mut coverage = vec![Coverage::default(); seats];
+    let mut decisions = 0u32;
     while !state.is_terminal() {
         let seat = state.current_player() as usize;
         let action = players[seat].act(&mut state);
+        decisions += 1;
         coverage[seat].record(&state, action);
         state
             .step(action)
@@ -185,6 +190,7 @@ fn play_one(
         block_seed,
         rotation,
         turns: state.turn,
+        decisions,
         final_hash: state.state_hash(),
         seats: outcomes,
     }
