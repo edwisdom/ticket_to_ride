@@ -29,6 +29,7 @@ pub mod board_gen;
 pub mod config;
 pub mod graph;
 pub mod hashing;
+pub mod heuristic;
 pub mod numeric;
 pub mod obs;
 pub mod obs_spec_gen;

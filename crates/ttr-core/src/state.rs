@@ -652,37 +652,11 @@ impl State {
             return illegal!("one player may not own both tracks of a double route");
         }
 
-        let k = board.n_card_types;
-        let base = cur as usize * k;
-        let loco = board.locomotive;
         let pay = pay as u8;
-        let (colored, wilds) = if pay == loco {
-            if self.hand[base + loco as usize] < length {
-                return illegal!("not enough locomotives");
-            }
-            (0, length)
-        } else {
-            let required = board.seg_color[seg];
-            if required != GRAY && required != pay {
-                return illegal!(
-                    "route needs {}, not {}",
-                    board.color_name(required),
-                    board.color_name(pay)
-                );
-            }
-            let have = self.hand[base + pay as usize];
-            // The `have >= 1` guard is what keeps action ids bijective with payments: a
-            // hand of pure locomotives would otherwise make all eight gray pay slots legal
-            // *and identical*, which poisons the policy distribution.
-            if have < 1 || have + self.hand[base + loco as usize] < length {
-                return illegal!("cannot pay {length} with {}", board.color_name(pay));
-            }
-            let colored = have.min(length);
-            (colored, length - colored)
-        };
+        let (colored, wilds) = self.payment_for(seg, length, pay)?;
 
         self.spend(pay, colored);
-        self.spend(loco, wilds);
+        self.spend(board.locomotive, wilds);
 
         self.seg_owner[seg] = cur;
         if self.rules.doubles_locked && sibling != NO_SIBLING {
@@ -695,6 +669,43 @@ impl State {
         self.board_version += 1;
         self.end_turn(false);
         Ok(())
+    }
+
+    /// How the current seat would pay `pay` for a route of `length` on `seg`: `(coloured
+    /// cards, locomotives)`.
+    ///
+    /// Split out of [`State::claim`] so the heuristics can price a payment without
+    /// restating the rule. A second copy of this arithmetic in the agents would drift from
+    /// the engine's, and the symptom would be an agent that scores a claim it cannot
+    /// actually make -- silently, since it would simply never pick that action again.
+    /// The check order and every message are `claim`'s, unchanged.
+    pub fn payment_for(&self, seg: usize, length: u8, pay: u8) -> Result<(u8, u8), IllegalAction> {
+        let board = self.board;
+        let base = self.cur as usize * board.n_card_types;
+        let loco = board.locomotive;
+        if pay == loco {
+            if self.hand[base + loco as usize] < length {
+                return illegal!("not enough locomotives");
+            }
+            return Ok((0, length));
+        }
+        let required = board.seg_color[seg];
+        if required != GRAY && required != pay {
+            return illegal!(
+                "route needs {}, not {}",
+                board.color_name(required),
+                board.color_name(pay)
+            );
+        }
+        let have = self.hand[base + pay as usize];
+        // The `have >= 1` guard is what keeps action ids bijective with payments: a hand of
+        // pure locomotives would otherwise make all eight gray pay slots legal *and
+        // identical*, which poisons the policy distribution.
+        if have < 1 || have + self.hand[base + loco as usize] < length {
+            return illegal!("cannot pay {length} with {}", board.color_name(pay));
+        }
+        let colored = have.min(length);
+        Ok((colored, length - colored))
     }
 
     /// Pay `count` cards and keep the public knowledge of this hand consistent.
