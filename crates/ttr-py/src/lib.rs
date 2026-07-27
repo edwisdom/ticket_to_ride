@@ -18,6 +18,8 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 
 use ttr_core::config::RuleConfig;
+use ttr_core::resample::{assert_consistent, resample_from_infoset};
+use ttr_core::rng::Pcg32;
 use ttr_core::state::{Game, State};
 use ttr_core::vecenv::VecEnv;
 
@@ -151,6 +153,96 @@ impl PyGame {
     }
 }
 
+/// A PCG-XSH-RR 64/32 stream. **Frozen** -- see docs/CONTRACT.md §1.
+///
+/// Exposed so a Python-side driver can hold and advance a stream across many
+/// determinizations rather than reseeding per call, which would make consecutive samples
+/// correlated in a way that is invisible until the search is quietly worse.
+// `skip_from_py_object` is not lint appeasement. PyO3 gives `Clone` pyclasses an automatic
+// `FromPyObject`, which would let `Rng` be taken *by value* -- silently cloning the stream
+// at the call boundary, so the caller's generator never advanced. Determinizations would
+// then be identical every time, which is exactly the failure this class exists to prevent.
+// Methods take `&mut PyRng`, so the conversion is never wanted.
+#[pyclass(name = "Rng", module = "ttr_rust", skip_from_py_object)]
+#[derive(Clone)]
+pub struct PyRng {
+    inner: Pcg32,
+}
+
+#[pymethods]
+impl PyRng {
+    #[new]
+    fn new(state: u64, inc: u64) -> Self {
+        Self {
+            inner: Pcg32::new(state, inc),
+        }
+    }
+
+    /// `pcg32_srandom_r(initstate, initseq)`.
+    #[staticmethod]
+    fn seeded(initstate: u64, initseq: u64) -> Self {
+        Self {
+            inner: Pcg32::seeded(initstate, initseq),
+        }
+    }
+
+    /// A named derived stream, matching `ticket_to_ride.engine.rng.stream`.
+    ///
+    /// Parts are text or integers and the two encode differently, so `1` and `"1"` name
+    /// different streams -- exactly as the contract vectors pin down.
+    #[staticmethod]
+    #[pyo3(signature = (root, *parts))]
+    fn stream(root: u64, parts: Vec<StreamPart>) -> Self {
+        let owned: Vec<ttr_core::rng::Part> = parts
+            .iter()
+            .map(|p| match p {
+                StreamPart::Text(s) => ttr_core::rng::Part::Str(s.as_str()),
+                StreamPart::Int(i) => ttr_core::rng::Part::Int(*i),
+            })
+            .collect();
+        Self {
+            inner: ttr_core::rng::stream(root, &owned),
+        }
+    }
+
+    fn next_u32(&mut self) -> u32 {
+        self.inner.next_u32()
+    }
+
+    fn below(&mut self, bound: u32) -> PyResult<u32> {
+        if bound == 0 {
+            return Err(PyValueError::new_err("bound must be positive"));
+        }
+        Ok(self.inner.below(bound))
+    }
+
+    #[getter]
+    fn state(&self) -> u64 {
+        self.inner.state
+    }
+
+    #[getter]
+    fn inc(&self) -> u64 {
+        self.inner.inc
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Rng(state=0x{:016x}, inc=0x{:016x})",
+            self.inner.state, self.inner.inc
+        )
+    }
+}
+
+/// One component of a derived stream name.
+#[derive(FromPyObject)]
+enum StreamPart {
+    #[pyo3(transparent, annotation = "int")]
+    Int(u64),
+    #[pyo3(transparent, annotation = "str")]
+    Text(String),
+}
+
 /// One position. Cloneable, hashable, and steppable.
 #[pyclass(name = "State", module = "ttr_rust")]
 pub struct PyState {
@@ -263,6 +355,31 @@ impl PyState {
 
     fn longest_trails(&self) -> Vec<u16> {
         ttr_core::scoring::longest_trails(&self.inner)
+    }
+
+    // -- search hooks ------------------------------------------------------
+
+    /// Sample a state consistent with everything `observer` can see (PLAN.md §5.5).
+    ///
+    /// Opponents' blind-drawn cards and the undrawn deck are resampled; the observer's
+    /// hand, the discard, the display, ticket holdings and every public counter are
+    /// reproduced exactly. Two documented approximations -- reshuffle-boundary correlation
+    /// and the ticket ring's return order -- are described in `ttr_core::resample`.
+    fn resample_from_infoset(&self, observer: usize, rng: &mut PyRng) -> PyResult<Self> {
+        self.check_seat(observer)?;
+        Ok(Self {
+            inner: resample_from_infoset(&self.inner, observer, &mut rng.inner),
+        })
+    }
+
+    /// Check a determinization against the public state it claims to match.
+    ///
+    /// `self` is the sample, `public` the state it was drawn from. Raises on the first
+    /// broken conservation law; release builds do not check automatically, so a caller
+    /// running a validator sweep calls this itself.
+    fn assert_consistent(&self, public: &PyState, observer: usize) -> PyResult<()> {
+        assert_consistent(&self.inner, &public.inner, observer)
+            .map_err(|e| PyRuntimeError::new_err(e.0))
     }
 
     // -- observation -------------------------------------------------------
@@ -596,6 +713,7 @@ fn ttr_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyGame>()?;
     m.add_class::<PyState>()?;
     m.add_class::<PyVecEnv>()?;
+    m.add_class::<PyRng>()?;
     m.add("IllegalAction", m.py().get_type::<IllegalAction>())?;
     Ok(())
 }

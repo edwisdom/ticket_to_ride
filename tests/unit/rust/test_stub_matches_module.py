@@ -64,7 +64,7 @@ def test_no_stubbed_function_is_missing_from_the_module(rust: ModuleType) -> Non
     assert not extra, f"{STUB} promises functions the module does not have: {sorted(extra)}"
 
 
-@pytest.mark.parametrize("class_name", ["Game", "State", "VecEnv"])
+@pytest.mark.parametrize("class_name", ["Game", "State", "VecEnv", "Rng"])
 def test_class_members_agree(class_name: str, rust: ModuleType) -> None:
     stub = _stub_classes()
     assert class_name in stub, f"{STUB} does not describe {class_name}"

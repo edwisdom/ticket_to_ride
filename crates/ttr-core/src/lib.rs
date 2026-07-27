@@ -32,6 +32,7 @@ pub mod hashing;
 pub mod numeric;
 pub mod obs;
 pub mod obs_spec_gen;
+pub mod resample;
 pub mod rng;
 pub mod scoring;
 pub mod state;
