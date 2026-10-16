@@ -5,8 +5,9 @@ resolver = "3"
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-# Pinned rather than floating: this crate is the twin of a differential-testing oracle,
-# so a toolchain upgrade that changes any observable behaviour must be a deliberate act.
+# Pinned rather than floating: the engine is checked against a golden corpus and a frozen
+# build of itself, so a toolchain upgrade that changes any observable behaviour must be a
+# deliberate act.
 rust-version = "1.85"
 
 [workspace.dependencies]

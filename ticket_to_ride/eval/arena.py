@@ -8,13 +8,14 @@ agent identically on a command line, in a config file and in a leaderboard row.
 
 from __future__ import annotations
 
-import importlib.util
 import subprocess
 import tomllib
 from dataclasses import dataclass
 from itertools import combinations
 from pathlib import Path
 from typing import Any
+
+import ttr_rust
 
 from ticket_to_ride.eval.store import AgentRow, MatchRow, Store
 
@@ -25,17 +26,6 @@ TIERS = ("h0", "h1", "h2", "h3", "h4", "random")
 #: The permanent Elo anchor (PLAN.md §11). Its identity is held by
 #: `ttr_rust.behaviour_hash`, not by this string.
 ANCHOR_FAMILY = "h3"
-
-
-class RustMissingError(RuntimeError):
-    """The Rust extension is not built."""
-
-    def __init__(self) -> None:
-        super().__init__("ttr_rust is not built; run `make rust`")
-
-
-def rust_available() -> bool:
-    return importlib.util.find_spec("ttr_rust") is not None
 
 
 @dataclass(frozen=True)
@@ -74,8 +64,6 @@ def parse_spec(text: str, seed: int = 0) -> Spec:
 
 def agent_row(spec: Spec) -> AgentRow:
     """The store identity for a spec: what it plays, not where it came from."""
-    import ttr_rust  # noqa: PLC0415 - optional; built by `make rust`, not `uv sync`
-
     overrides = spec.overrides or None
     return AgentRow(
         spec=spec.text,
@@ -139,10 +127,6 @@ def run_match(
     Every rotation of every block is played inside Rust and returned as two columnar
     tables; the only per-row Python here is the translation into the store.
     """
-    if not rust_available():
-        raise RustMissingError
-    import ttr_rust  # noqa: PLC0415
-
     game = ttr_rust.Game(map_name, n_players)
     config_id = store.config_id(
         map_name,

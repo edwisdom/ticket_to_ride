@@ -17,23 +17,21 @@ use common::{
 use ttr_core::board::{Board, FACEUP_SLOTS, MAX_PLAYERS, NO_SIBLING, all_boards};
 use ttr_core::config::{CLOSED, PHASE_MAIN};
 use ttr_core::obs::{encode, obs_version, observation_size, spec_for};
-use ttr_core::obs_spec_gen::{OBS_SPECS, OPPONENT_SLOTS, ObsBlock, ObsSpec};
+use ttr_core::obs_spec::{OPPONENT_SLOTS, ObsBlock, ObsSpec};
 use ttr_core::state::State;
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// The Python spec's `block(name)`.
+/// The Python spec's `block(name)`, panicking on a typo rather than returning `None`.
 trait SpecExt {
-    fn block(&self, name: &str) -> &ObsBlock;
+    fn named(&self, name: &str) -> &ObsBlock;
 }
 
 impl SpecExt for ObsSpec {
-    fn block(&self, name: &str) -> &ObsBlock {
-        self.blocks
-            .iter()
-            .find(|b| b.name == name)
+    fn named(&self, name: &str) -> &ObsBlock {
+        self.block(name)
             .unwrap_or_else(|| panic!("the {} spec has no block {name:?}", self.map))
     }
 }
@@ -138,7 +136,7 @@ fn blocks_tile_the_vector_exactly() {
     for board in all_boards() {
         let spec = spec_for(board.name);
         let mut cursor = 0;
-        for block in spec.blocks {
+        for block in &spec.blocks {
             assert_eq!(
                 block.offset, cursor,
                 "{}: {} starts at {}, not {cursor}",
@@ -147,7 +145,7 @@ fn blocks_tile_the_vector_exactly() {
             let widths: usize = block.fields.iter().map(|f| f.width).sum();
             assert_eq!(widths, block.stride, "{}: {}", spec.map, block.name);
             let mut field_cursor = 0;
-            for field in block.fields {
+            for field in &block.fields {
                 assert_eq!(
                     field.offset, field_cursor,
                     "{}: {}.{}",
@@ -165,9 +163,9 @@ fn blocks_tile_the_vector_exactly() {
 fn field_offsets_resolve_for_every_entity() {
     for board in all_boards() {
         let spec = spec_for(board.name);
-        for block in spec.blocks {
+        for block in &spec.blocks {
             for entity in 0..block.count {
-                for field in block.fields {
+                for field in &block.fields {
                     let offset = block.at(entity, field.name);
                     let place = format!("{}: {}[{entity}].{}", spec.map, block.name, field.name);
                     assert!(offset < spec.size, "{place} starts past the end");
@@ -181,9 +179,9 @@ fn field_offsets_resolve_for_every_entity() {
     }
 }
 
-/// Python built and cached one resolved spec per board. Here each spec is a `&'static`
-/// table fixed at compile time, so the caching is structural; what carries over is that
-/// the lookup is per board and the spec names its board.
+/// Python built and cached one resolved spec per board, and so does Rust (resolved once at
+/// first use); what carries over is that the lookup is per board, the spec names its board,
+/// and asking twice hands back the same resolved table.
 #[test]
 fn spec_is_cached_per_board() {
     for board in all_boards() {
@@ -191,17 +189,17 @@ fn spec_is_cached_per_board() {
     }
     assert_eq!(spec_for("usa").map, "usa");
     assert_eq!(spec_for("mini").map, "mini");
+    assert!(std::ptr::eq(spec_for("usa"), spec_for("usa")));
 }
 
-/// Block names are unique within a spec, and field names within a block. The Python
-/// table also required a doc string on every field; `ObsField` carries none, so that
-/// half has nothing to check here.
+/// Block names are unique within a spec, field names within a block, and every field has a
+/// doc string -- the doc is the only description of what a feature means.
 #[test]
-fn block_names_are_unique() {
-    for spec in OBS_SPECS {
+fn block_names_are_unique_and_documented() {
+    for spec in all_boards().iter().map(|b| spec_for(b.name)) {
         let names: HashSet<&str> = spec.blocks.iter().map(|b| b.name).collect();
         assert_eq!(names.len(), spec.blocks.len(), "{}", spec.map);
-        for block in spec.blocks {
+        for block in &spec.blocks {
             let fields: HashSet<&str> = block.fields.iter().map(|f| f.name).collect();
             assert_eq!(
                 fields.len(),
@@ -210,6 +208,15 @@ fn block_names_are_unique() {
                 spec.map,
                 block.name
             );
+            for field in &block.fields {
+                assert!(
+                    !field.doc.trim().is_empty(),
+                    "{}: {}.{} is undocumented",
+                    spec.map,
+                    block.name,
+                    field.name
+                );
+            }
         }
     }
 }
@@ -221,9 +228,9 @@ fn opponent_slots_are_fixed_so_one_network_plays_any_table() {
     // Python derived the slot count from the largest table; the Rust constant is written
     // out, so check it still agrees.
     assert_eq!(OPPONENT_SLOTS, MAX_PLAYERS - 1);
-    for spec in OBS_SPECS {
+    for spec in all_boards().iter().map(|b| spec_for(b.name)) {
         assert_eq!(
-            spec.block("opponents").count,
+            spec.named("opponents").count,
             OPPONENT_SLOTS,
             "{}",
             spec.map
@@ -316,7 +323,7 @@ fn opponents_are_ordered_by_distance_in_turn_order() {
             ..Rig::default()
         },
     );
-    let block = spec_for(state.board.name).block("opponents");
+    let block = spec_for(state.board.name).named("opponents");
     let supply = f64::from(state.board.raw.trains_per_player);
 
     let mut trains_seen = |observer: usize| -> Vec<i64> {
@@ -332,7 +339,7 @@ fn opponents_are_ordered_by_distance_in_turn_order() {
 #[test]
 fn unused_opponent_slots_are_absent_and_zero() {
     let mut state = in_main(2);
-    let block = spec_for(state.board.name).block("opponents");
+    let block = spec_for(state.board.name).named("opponents");
     let view = observe(&mut state, 0);
     assert_eq!(view[block.at(0, "present")], 1.0);
     for slot in 1..OPPONENT_SLOTS {
@@ -349,7 +356,7 @@ fn unused_opponent_slots_are_absent_and_zero() {
 fn segment_owner_one_hot_tracks_claims() {
     let mut state = in_main(3);
     let board = state.board;
-    let block = spec_for(board.name).block("segment_dynamic");
+    let block = spec_for(board.name).named("segment_dynamic");
     let segment = segment_named(board, "Atlanta", "Miami", 0);
     let owner = block.at(segment, "owner");
 
@@ -374,7 +381,7 @@ fn segment_owner_one_hot_tracks_claims() {
 fn closed_is_distinct_from_owned() {
     let mut state = in_main(2);
     let board = state.board;
-    let block = spec_for(board.name).block("segment_dynamic");
+    let block = spec_for(board.name).named("segment_dynamic");
     let segment = segment_named(board, "Boston", "Montreal", 0);
     state.seg_owner[segment] = CLOSED;
     let view = observe(&mut state, 0);
@@ -390,7 +397,7 @@ fn closed_is_distinct_from_owned() {
 fn twin_locked_marks_the_other_half_of_my_double() {
     let mut state = in_main(4);
     let board = state.board;
-    let block = spec_for(board.name).block("segment_dynamic");
+    let block = spec_for(board.name).named("segment_dynamic");
     let segment = segment_named(board, "Boston", "Montreal", 0);
     let twin = board.sibling[segment];
     assert_ne!(twin, NO_SIBLING, "Boston-Montreal is a double route");
@@ -405,7 +412,7 @@ fn twin_locked_marks_the_other_half_of_my_double() {
 fn can_afford_now_and_cards_short_track_the_hand() {
     let mut state = in_main(2);
     let board = state.board;
-    let block = spec_for(board.name).block("segment_dynamic");
+    let block = spec_for(board.name).named("segment_dynamic");
     let segment = segment_named(board, "Atlanta", "Miami", 0);
     assert_eq!(
         (board.seg_len[segment], board.seg_color[segment]),
@@ -447,7 +454,7 @@ fn can_afford_now_and_cards_short_track_the_hand() {
 fn required_colour_is_a_feature_not_an_embedding() {
     let mut state = in_main(2);
     let board = state.board;
-    let block = spec_for(board.name).block("segment_static");
+    let block = spec_for(board.name).named("segment_static");
     let view = observe(&mut state, 0);
     let blue = usize::from(color(board, "blue"));
     let colored = segment_named(board, "Atlanta", "Miami", 0);
@@ -465,7 +472,7 @@ fn required_colour_is_a_feature_not_an_embedding() {
 fn remaining_cost_falls_as_the_route_gets_built() {
     let mut state = in_main(2);
     let board = state.board;
-    let block = spec_for(board.name).block("tickets");
+    let block = spec_for(board.name).named("tickets");
     let ticket = shortest_ticket(board);
     hold_only(&mut state, ticket);
 
@@ -483,7 +490,7 @@ fn remaining_cost_falls_as_the_route_gets_built() {
 fn a_completed_ticket_reads_connected_at_zero_cost() {
     let mut state = in_main(2);
     let board = state.board;
-    let block = spec_for(board.name).block("tickets");
+    let block = spec_for(board.name).named("tickets");
     let ticket = shortest_ticket(board);
     hold_only(&mut state, ticket);
 
@@ -504,7 +511,7 @@ fn a_completed_ticket_reads_connected_at_zero_cost() {
 fn a_cut_ticket_reads_dead() {
     let mut state = in_main(2);
     let board = state.board;
-    let block = spec_for(board.name).block("tickets");
+    let block = spec_for(board.name).named("tickets");
     let boston = city(board, "Boston");
     let ticket = (0..board.n_tickets)
         .find(|&t| board.ticket_a[t] == boston)
@@ -527,7 +534,7 @@ fn a_cut_ticket_reads_dead() {
 fn fragility_rises_when_a_route_hangs_on_one_edge() {
     let mut state = in_main(2);
     let board = state.board;
-    let block = spec_for(board.name).block("tickets");
+    let block = spec_for(board.name).named("tickets");
     let (denver, el_paso) = (city(board, "Denver"), city(board, "El Paso"));
     let ticket = (0..board.n_tickets)
         .find(|&t| {
@@ -556,7 +563,7 @@ fn fragility_rises_when_a_route_hangs_on_one_edge() {
 fn faceup_one_hot_marks_empty_slots() {
     let mut state = in_main(2);
     let board = state.board;
-    let block = spec_for(board.name).block("faceup");
+    let block = spec_for(board.name).named("faceup");
     force(
         &mut state,
         Rig {
@@ -584,7 +591,7 @@ fn faceup_one_hot_marks_empty_slots() {
 fn unseen_counts_reach_the_observation() {
     let mut state = played();
     let board = state.board;
-    let block = spec_for(board.name).block("piles");
+    let block = spec_for(board.name).named("piles");
     let view = observe(&mut state, 0);
     for (c, &unseen) in state.unseen_counts(0).iter().enumerate() {
         let expected = f64::from(unseen) / f64::from(board.cards_per_type(c as u8));
@@ -600,7 +607,7 @@ fn unseen_counts_reach_the_observation() {
 #[test]
 fn certain_knowledge_of_an_opponent_shows_up() {
     let mut state = in_main(2);
-    let block = spec_for(state.board.name).block("opponents");
+    let block = spec_for(state.board.name).named("opponents");
     let before = observe(&mut state, 0);
 
     // Seat 1 takes a face-up card; seat 0 now knows one of its cards for certain.
@@ -621,7 +628,7 @@ fn certain_knowledge_of_an_opponent_shows_up() {
 #[test]
 fn clock_block_tracks_the_endgame() {
     let mut state = in_main(2);
-    let block = spec_for(state.board.name).block("clock");
+    let block = spec_for(state.board.name).named("clock");
     assert_eq!(observe(&mut state, 0)[block.at(0, "final_triggered")], 0.0);
 
     state.final_left = 2;
@@ -634,7 +641,7 @@ fn clock_block_tracks_the_endgame() {
 #[test]
 fn score_rank_and_gap_to_leader() {
     let mut state = in_main(3);
-    let block = spec_for(state.board.name).block("clock");
+    let block = spec_for(state.board.name).named("clock");
     state.score[..3].copy_from_slice(&[10, 50, 30]);
 
     let leader = observe(&mut state, 1);
@@ -649,7 +656,7 @@ fn score_rank_and_gap_to_leader() {
 #[test]
 fn steiner_block_reports_slack_and_exactness() {
     let mut state = in_main(2);
-    let block = spec_for(state.board.name).block("steiner");
+    let block = spec_for(state.board.name).named("steiner");
     let view = observe(&mut state, 0);
     assert_eq!(view[block.at(0, "exact")], 1.0);
     assert!(view[block.at(0, "remaining_cost")] > 0.0);

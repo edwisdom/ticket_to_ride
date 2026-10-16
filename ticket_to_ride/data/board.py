@@ -1,17 +1,18 @@
-"""Derived board tables, built once at import from the generated constants.
+"""Board tables for the Python side, built once at import from the generated constants.
 
-Everything here is a pure function of `board_gen.py`, so it is deliberately *not*
-generated: regenerating derived tables into two languages would double the surface area
-for no gain, and these are all cheap to recompute (~1 ms for the USA map).
+The engine is Rust (`crates/ttr-core/src/board.rs` derives its own tables from the same
+generated data). What remains here serves `ttr map` -- which prints the board's counts and
+invariants as an independent look at the generated constants -- and, from Phase 4, the
+UI. Everything is a pure function of `board_gen.py`, cheap to recompute (~1 ms for the
+USA map), and deliberately not generated:
 
-The tables exist because the engine's hot loops must not do graph work:
+* `sibling` -- the double-route pairs.
+* `buckets` -- segments grouped by `(length, colour)`, the shape of the engine's claim scan.
+* `dist` -- the all-pairs shortest path in train cars.
 
-* `sibling` turns the double-route rules into an array lookup.
-* `buckets` turns claim masking into ~33 affordability tests plus a short scan of only the
-  affordable buckets, instead of a 900-way action scan (PLAN.md §5.3).
-* `dist` is the all-pairs shortest path in train cars, the base of every ticket heuristic.
-
-No torch, no numpy -- this module is imported by `engine/`.
+Note for whoever trims this: these derived tables are now a second derivation of what
+`board.rs` computes, kept because `ttr map` reports them. They are candidates for deletion
+once the UI arrives and decides what it reads.
 """
 
 from __future__ import annotations

@@ -10,9 +10,10 @@
 //!
 //! The giveaway probe: `sum([1e16, 1.0, -1e16])` is `1.0` in Python and `0.0` naively.
 //!
-//! Matching Python rather than the other way round, for two reasons. The Python engine is
-//! the oracle, so the port follows it; and compensated summation is strictly *more*
-//! accurate, so this is not a fidelity-for-parity trade.
+//! Matching Python rather than the other way round, for two reasons. The Python engine was
+//! the oracle when this was written, and `returns()` computed this way is what the golden
+//! corpus and `oracle-v1` were signed under; and compensated summation is strictly *more*
+//! accurate, so this was never a fidelity-for-parity trade.
 
 /// Neumaier compensated summation -- CPython's `sum()` over floats, transcribed.
 ///

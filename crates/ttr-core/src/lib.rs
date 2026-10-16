@@ -1,27 +1,30 @@
 //! The Ticket to Ride engine core.
 //!
-//! This crate is a port, not a redesign. [`ticket_to_ride.engine`] in Python is the
-//! permanent oracle, and `docs/CONTRACT.md` is normative for the three things that must
-//! agree bit for bit: the PRNG, the draw procedure, and the byte image behind
-//! `state_hash()`. **Where this code and the Python engine disagree, the contract decides
-//! which one is wrong** -- neither implementation is automatically right.
+//! The only implementation. It began as a port of a Python reference engine, was verified
+//! byte-identical to it over 700k games compared at every step, and replaced it in Phase
+//! 3.1 (PLAN.md §14.1). `docs/CONTRACT.md` is normative for the three things that are
+//! frozen bit for bit: the PRNG, the draw procedure, and the byte image behind
+//! `state_hash()`.
 //!
-//! Two consequences worth stating, because they are the difference between a port that
-//! can be trusted and one that merely passes today:
+//! **How it is checked without a second implementation:** the golden corpus in
+//! `tests/golden/` (signed off by the Python engine before it was deleted), a per-step
+//! differential against `oracle-v1` -- this crate frozen at the last Python-verified
+//! commit -- in `crates/ttr-tools`, the naive in-crate references (`naive_graph`,
+//! `naive_legal`), and mutation testing over the rules, scoring, graph and encoder.
+//!
+//! Two consequences of the contract worth stating:
 //!
 //! * Anything the contract freezes is transcribed, not reinvented. Fisher-Yates runs
 //!   descending; bounded draws reject rather than multiply-shift; the locomotive is card
 //!   type `n_colors`, never a hard-coded 8. Each of these has an equally correct
-//!   alternative that produces different -- still perfectly legal -- trajectories, which
-//!   is precisely what destroys a differential-testing oracle.
+//!   alternative that produces different -- still perfectly legal -- trajectories, and
+//!   every recorded replay and the corpus would stop reproducing.
 //! * Anything the contract explicitly leaves free (§5: adjacency, buckets, distance
 //!   tables, the union-find) may be reorganised for speed without ceremony, because none
 //!   of it reaches the hash.
 //!
 //! No PyO3 here. The bindings live in `crates/ttr-py`, so this crate builds and tests
 //! with a plain `cargo test` and nothing about it depends on a Python interpreter.
-//!
-//! [`ticket_to_ride.engine`]: https://github.com/edwisdom/ticket_to_ride
 
 pub mod actions;
 pub mod arena;
@@ -33,7 +36,7 @@ pub mod hashing;
 pub mod heuristic;
 pub mod numeric;
 pub mod obs;
-pub mod obs_spec_gen;
+pub mod obs_spec;
 pub mod replay;
 pub mod resample;
 pub mod rng;
@@ -50,10 +53,9 @@ mod naive_legal;
 #[cfg(test)]
 mod naive_obs;
 
-/// The frozen-contract version, kept in lockstep with
-/// `ticket_to_ride.engine.contract.CONTRACT_VERSION`.
+/// The frozen-contract version (docs/CONTRACT.md).
 ///
-/// A test asserts the two agree. If they ever drift, every replay recorded under the old
-/// value is unreplayable and the differential harness is comparing two different games --
-/// so this is a hard failure rather than a warning.
+/// Every replay, the contract vectors and the golden corpus record it, and refuse to
+/// replay under a different one: a bump is a deliberate, versioned event that invalidates
+/// them all, never a side effect.
 pub const CONTRACT_VERSION: u8 = 1;

@@ -42,11 +42,11 @@ exclude_re = [
     # `used | bit` and `used ^ bit` agree because the bit is known to be clear.
     'graph\.rs:434:73: replace \| with \^ in best_from',
     # OBS_VERSION is 1.
-    'obs\.rs:60:5: replace obs_version -> u32 with 1',
+    'obs\.rs:48:5: replace obs_version -> u32 with 1',
     # Treating an unheld colour's reach as the wilds alone: every reach is `.max(wilds)`
     # afterwards anyway.
-    'obs\.rs:589:22: replace > with >= in segment_dynamic',
+    'obs\.rs:572:22: replace > with >= in segment_dynamic',
     # The early return for a finished or dead ticket: a finished one has no free segment to
     # close (fragility 0 either way), and a dead one never reaches this function.
-    'obs\.rs:711:22: replace \|\| with && in fragility',
+    'obs\.rs:694:22: replace \|\| with && in fragility',
 ]

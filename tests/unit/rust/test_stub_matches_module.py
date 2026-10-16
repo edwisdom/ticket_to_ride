@@ -54,6 +54,15 @@ def _stub_functions() -> set[str]:
     return {n.name for n in _stub_tree().body if isinstance(n, ast.FunctionDef)}
 
 
+def _stub_constants() -> set[str]:
+    """Module-level annotations, e.g. `CONTRACT_VERSION: int`."""
+    return {
+        n.target.id
+        for n in _stub_tree().body
+        if isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name)
+    }
+
+
 def _public(obj: object) -> set[str]:
     return {name for name in dir(obj) if not name.startswith("_")}
 
@@ -71,6 +80,25 @@ def test_every_module_function_is_stubbed(rust: ModuleType) -> None:
 def test_no_stubbed_function_is_missing_from_the_module(rust: ModuleType) -> None:
     extra = _stub_functions() - _public(rust)
     assert not extra, f"{STUB} promises functions the module does not have: {sorted(extra)}"
+
+
+def test_module_constants_agree(rust: ModuleType) -> None:
+    """Constants, which the function and class checks never looked at.
+
+    The stub declared `CONTRACT_VERSION: int` for a whole phase while the module never
+    defined it: it type checked, and failed at import the first time anything used it.
+    """
+    actual = {
+        name
+        for name in _public(rust)
+        if not callable(getattr(rust, name))
+        and not isinstance(getattr(rust, name), (type, ModuleType))  # maturin's inner module
+    }
+    stubbed = _stub_constants()
+    assert stubbed == actual, (
+        f"stub-only constants {sorted(stubbed - actual)} (they type check and fail at runtime), "
+        f"module-only constants {sorted(actual - stubbed)}"
+    )
 
 
 @pytest.mark.parametrize(

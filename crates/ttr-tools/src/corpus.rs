@@ -43,7 +43,7 @@ use blake2b_simd::{Params, State as Hasher};
 use rayon::prelude::*;
 use ttr_core::board::all_boards;
 use ttr_core::heuristic::{Heuristic, HeuristicParams, Tier};
-use ttr_core::obs_spec_gen::OBS_SPECS;
+use ttr_core::obs_spec::{Kind, spec_for};
 use ttr_core::rng::{Part, stream};
 
 use crate::engine::{Engine, Live, Terminal};
@@ -62,111 +62,29 @@ pub const SAMPLE_EVERY: u8 = 7;
 /// A game that has not ended by now is a hang, not a long game.
 const MAX_STEPS: usize = 20_000;
 
-/// Observation fields whose values are ratios rather than 0/1 flags.
-///
-/// Both lists are explicit, and a field in neither is a panic: a new feature has to be
-/// classified on purpose, since the classification decides which tolerance it gets.
-const CONTINUOUS: &[(&str, &str)] = &[
-    ("own_hand", "counts"),
-    ("tickets", "remaining_cost"),
-    ("tickets", "points"),
-    ("tickets", "fragility"),
-    ("steiner", "remaining_cost"),
-    ("steiner", "cost_minus_trains"),
-    ("piles", "deck_size"),
-    ("piles", "discard_size"),
-    ("piles", "ticket_deck_size"),
-    ("piles", "discard_composition"),
-    ("piles", "unseen"),
-    ("opponents", "trains"),
-    ("opponents", "score"),
-    ("opponents", "hand_size"),
-    ("opponents", "ticket_count"),
-    ("opponents", "blind_draws"),
-    ("opponents", "segments_claimed"),
-    ("opponents", "longest_chain"),
-    ("opponents", "certain"),
-    ("opponents", "max_possible"),
-    ("clock", "final_countdown"),
-    ("clock", "turn"),
-    ("clock", "my_trains"),
-    ("clock", "my_score"),
-    ("clock", "my_ticket_count"),
-    ("clock", "score_rank"),
-    ("clock", "gap_to_leader"),
-];
-
-/// One-hots, flags and thermometers: every slot holds exactly 0.0 or 1.0, which the drive
-/// asserts on every observation it digests.
-const DISCRETE: &[(&str, &str)] = &[
-    ("segment_static", "required_color"),
-    ("segment_dynamic", "owner"),
-    ("segment_dynamic", "closed"),
-    ("segment_dynamic", "twin_locked"),
-    ("segment_dynamic", "can_afford_now"),
-    ("segment_dynamic", "cards_short"),
-    ("segment_dynamic", "on_my_steiner_tree"),
-    ("segment_dynamic", "extends_my_chain"),
-    ("own_hand", "thermometer"),
-    ("own_hand", "thermometer2"),
-    ("own_hand", "thermometer3"),
-    ("own_hand", "thermometer4"),
-    ("own_hand", "thermometer5"),
-    ("own_hand", "thermometer6"),
-    ("tickets", "held"),
-    ("tickets", "connected"),
-    ("tickets", "cost_thermometer"),
-    ("tickets", "is_dead"),
-    ("steiner", "exact"),
-    ("faceup", "card"),
-    ("opponents", "present"),
-    ("opponents", "trains_thermometer"),
-    ("clock", "phase"),
-    ("clock", "seats"),
-    ("clock", "draws_left"),
-    ("clock", "final_triggered"),
-    ("clock", "my_trains_thermometer"),
-];
-
 /// Which observation slots are continuous, per board.
 pub struct ObsMask {
     pub continuous: Vec<bool>,
 }
 
 impl ObsMask {
+    /// From the spec's field kinds: ratios are the continuous half, flags the discrete.
+    ///
+    /// The kinds are part of the `OBS_VERSION`ed table, so a reclassification is a version
+    /// bump and a re-sign, never a silent change to which half a slot feeds. They were
+    /// checked equal to the lists the corpus was first generated under when the table
+    /// moved into Rust.
     pub fn for_map(map: &str) -> Self {
-        let spec = OBS_SPECS
-            .iter()
-            .find(|s| s.map == map)
-            .unwrap_or_else(|| panic!("no observation spec for {map}"));
+        let spec = spec_for(map);
         let mut continuous = vec![false; spec.size];
-        let mut covered = vec![false; spec.size];
-        for block in spec.blocks {
-            for field in block.fields {
-                let key = (block.name, field.name);
-                let is_continuous = if CONTINUOUS.contains(&key) {
-                    true
-                } else if DISCRETE.contains(&key) {
-                    false
-                } else {
-                    panic!(
-                        "observation field {}.{} is in neither CONTINUOUS nor DISCRETE",
-                        block.name, field.name
-                    );
-                };
+        for block in &spec.blocks {
+            for field in &block.fields {
                 for entity in 0..block.count {
                     let start = block.offset + entity * block.stride + field.offset;
-                    for slot in start..start + field.width {
-                        continuous[slot] = is_continuous;
-                        covered[slot] = true;
-                    }
+                    continuous[start..start + field.width].fill(field.kind == Kind::Ratio);
                 }
             }
         }
-        assert!(
-            covered.iter().all(|&c| c),
-            "the {map} spec's fields do not tile the observation"
-        );
         Self { continuous }
     }
 }

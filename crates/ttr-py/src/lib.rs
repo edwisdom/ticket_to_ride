@@ -2,14 +2,11 @@
 //!
 //! Deliberately thin: this crate converts types and nothing else. Every rule, every draw,
 //! every hash lives in `ttr-core`, which is testable with a plain `cargo test` and has no
-//! idea Python exists. Logic that leaked in here would be logic the standalone Rust tests
-//! never see -- and the differential harness would then be comparing the Python engine
-//! against a mixture of the two languages rather than against Rust.
+//! idea Python exists. Logic that leaked in here would be logic the Rust suite, the golden
+//! corpus and the `oracle-v1` differential never see.
 //!
-//! The module is `ttr_rust`, a distribution of its own rather than a submodule of
-//! `ticket_to_ride`. That separation is load-bearing: `ticket_to_ride.engine` is the
-//! permanent differential-testing oracle, and an oracle that imports the implementation it
-//! validates is not an oracle. `tests/unit/engine/test_import_boundary.py` enforces it.
+//! The module is `ttr_rust`, a uv workspace member that `ticket_to_ride` depends on and
+//! re-exports as `ticket_to_ride.engine`. `uv sync` builds it in the release profile.
 
 use pyo3::buffer::{Element, PyBuffer};
 use pyo3::create_exception;
@@ -393,9 +390,8 @@ impl PyState {
 
     /// Encode from `player`'s point of view and return the floats.
     ///
-    /// Returns a list rather than writing into a caller buffer: this exists for the
-    /// differential harness, which compares against a pure-Python oracle that has no
-    /// numpy. The zero-copy path that training actually uses is `VecEnv::observe`.
+    /// Returns a list rather than writing into a caller buffer: a convenience for tests and
+    /// interactive use. The zero-copy path that training uses is `VecEnv::observe_*`.
     fn observation(&mut self, player: usize) -> PyResult<Vec<f32>> {
         self.check_seat(player)?;
         let mut out = vec![0.0f32; ttr_core::obs::observation_size(&self.inner)];
@@ -981,24 +977,60 @@ fn run_arena(
     Ok((games, seats))
 }
 
-/// The frozen-contract version this build implements. Python asserts it matches
-/// `ticket_to_ride.engine.contract.CONTRACT_VERSION`.
+/// The frozen-contract version this build implements (docs/CONTRACT.md).
 #[pyfunction]
 fn contract_version() -> u8 {
     ttr_core::CONTRACT_VERSION
 }
 
-/// The observation-layout version. Baked into every checkpoint, so the two encoders must
-/// report the same one or a checkpoint could load against a layout it was not trained on.
+/// The observation-layout version. Baked into every checkpoint, so a checkpoint can never
+/// load against a layout it was not trained on.
 #[pyfunction]
 fn obs_version() -> u32 {
     ttr_core::obs::obs_version()
+}
+
+/// One observation block: name, entity count, floats per entity, absolute offset, fields.
+type BlockRow = (&'static str, usize, usize, usize, Vec<FieldRow>);
+/// One field: name, offset within an entity, width, kind (`"flag"` or `"ratio"`), doc.
+type FieldRow = (&'static str, usize, usize, &'static str, &'static str);
+
+/// The observation layout for a board, resolved from the feature table in
+/// `ttr_core::obs_spec` -- the one place it is declared. Python reads it here rather than
+/// keeping a copy: a network that splits the vector into entity blocks needs the offsets,
+/// and two copies of a layout is how they drift.
+#[pyfunction]
+#[pyo3(signature = (map_name="usa"))]
+fn obs_spec(map_name: &str) -> PyResult<Vec<BlockRow>> {
+    if ttr_core::board::get_board(map_name).is_none() {
+        return Err(PyValueError::new_err(format!("unknown map {map_name:?}")));
+    }
+    let spec = ttr_core::obs::spec_for(map_name);
+    Ok(spec
+        .blocks
+        .iter()
+        .map(|b| {
+            let fields = b
+                .fields
+                .iter()
+                .map(|f| {
+                    let kind = match f.kind {
+                        ttr_core::obs_spec::Kind::Flag => "flag",
+                        ttr_core::obs_spec::Kind::Ratio => "ratio",
+                    };
+                    (f.name, f.offset, f.width, kind, f.doc)
+                })
+                .collect();
+            (b.name, b.count, b.stride, b.offset, fields)
+        })
+        .collect())
 }
 
 #[pymodule]
 fn ttr_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(contract_version, m)?)?;
     m.add_function(wrap_pyfunction!(obs_version, m)?)?;
+    m.add_function(wrap_pyfunction!(obs_spec, m)?)?;
     m.add_function(wrap_pyfunction!(random_playouts, m)?)?;
     m.add_function(wrap_pyfunction!(performance_threads, m)?)?;
     m.add_function(wrap_pyfunction!(default_params, m)?)?;
@@ -1012,5 +1044,6 @@ fn ttr_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyVecEnv>()?;
     m.add_class::<PyRng>()?;
     m.add("IllegalAction", m.py().get_type::<IllegalAction>())?;
+    m.add("CONTRACT_VERSION", ttr_core::CONTRACT_VERSION)?;
     Ok(())
 }

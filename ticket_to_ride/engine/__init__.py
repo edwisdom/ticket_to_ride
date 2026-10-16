@@ -1,63 +1,39 @@
-"""The Ticket to Ride rules engine.
+"""The Ticket to Ride rules engine: a thin re-export of the Rust core, `ttr_rust`.
 
-**Imports without torch or numpy, and holds zero global mutable state.** Ten self-play
-workers each importing torch costs ~1.5 s and ~300 MB RSS; a torch-free engine starts in
-~50 ms, and CI runs the whole unit and property suite with no torch and no CUDA download.
-That boundary is enforced three ways: torch is an optional extra, ruff bans module-level
-torch imports here, and a test imports the engine in a subprocess with an import hook that
-raises.
+The engine is `crates/ttr-core`; this package only gives it a stable Python import path, so
+agent, CLI and UI code reads `from ticket_to_ride.engine import Game` whatever the
+extension module is called. There is no Python engine -- it was retired in Phase 3.1 once
+the Rust build could stand as its own oracle (docs/PLAN.md §14.1) -- and nothing here may
+grow game logic: a second implementation is exactly what the retirement removed.
 
 The frozen parts -- PRNG, draw procedure, `state_hash()` -- are specified in
-docs/CONTRACT.md and pinned by test vectors. Nothing here may change them without a
-`CONTRACT_VERSION` bump.
+docs/CONTRACT.md and pinned by test vectors and the golden corpus in `tests/golden/`.
 """
 
 from __future__ import annotations
 
-from ticket_to_ride.engine.actions import ACTION_SPACE_VERSION, ActionSpace, action_space
-from ticket_to_ride.engine.config import (
-    CLOSED,
-    FREE,
-    PHASE_DRAW_SECOND,
-    PHASE_INITIAL_TICKETS,
-    PHASE_MAIN,
-    PHASE_NAMES,
-    PHASE_TERMINAL,
-    PHASE_TICKET_KEEP,
-    RuleConfig,
+from ttr_rust import (
+    CONTRACT_VERSION,
+    Game,
+    IllegalAction,
+    Rng,
+    State,
+    VecEnv,
+    obs_spec,
+    obs_version,
 )
-from ticket_to_ride.engine.contract import CONTRACT_VERSION
-from ticket_to_ride.engine.scoring import (
-    Breakdown,
-    final_scores,
-    longest_trails,
-    returns,
-    score_breakdown,
-    winners,
-)
-from ticket_to_ride.engine.state import Game, IllegalAction, State
+
+#: The observation-layout version, baked into every checkpoint.
+OBS_VERSION = obs_version()
 
 __all__ = [
-    "ACTION_SPACE_VERSION",
-    "CLOSED",
     "CONTRACT_VERSION",
-    "FREE",
-    "PHASE_DRAW_SECOND",
-    "PHASE_INITIAL_TICKETS",
-    "PHASE_MAIN",
-    "PHASE_NAMES",
-    "PHASE_TERMINAL",
-    "PHASE_TICKET_KEEP",
-    "ActionSpace",
-    "Breakdown",
+    "OBS_VERSION",
     "Game",
     "IllegalAction",
-    "RuleConfig",
+    "Rng",
     "State",
-    "action_space",
-    "final_scores",
-    "longest_trails",
-    "returns",
-    "score_breakdown",
-    "winners",
+    "VecEnv",
+    "obs_spec",
+    "obs_version",
 ]

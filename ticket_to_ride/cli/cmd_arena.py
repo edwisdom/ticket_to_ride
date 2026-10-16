@@ -16,7 +16,6 @@ from rich.console import Console
 from rich.table import Table
 
 from ticket_to_ride.eval.arena import (
-    RustMissingError,
     agent_row,
     parse_spec,
     round_robin,
@@ -73,35 +72,32 @@ def arena_command(
     if len(specs) < n_players:
         raise typer.BadParameter(f"{len(specs)} agents cannot fill {n_players} seats")
 
-    try:
-        with Store(database) as store:
-            if sprt_pair:
-                _run_sprt(
-                    console,
-                    store,
-                    map_name=map_name,
-                    n_players=n_players,
-                    pair=sprt_pair,
-                    agent_seed=agent_seed,
-                    blocks=blocks,
-                    seed_root=seed_root,
-                    threads=threads,
-                    elo1=elo1,
-                    batch=batch,
-                    database=database,
-                )
-                return
-            summaries = run_round_robin(
+    with Store(database) as store:
+        if sprt_pair:
+            _run_sprt(
+                console,
                 store,
-                map_name,
-                n_players,
-                specs,
-                seed_root=seed_root,
+                map_name=map_name,
+                n_players=n_players,
+                pair=sprt_pair,
+                agent_seed=agent_seed,
                 blocks=blocks,
+                seed_root=seed_root,
                 threads=threads,
+                elo1=elo1,
+                batch=batch,
+                database=database,
             )
-    except RustMissingError as exc:
-        raise typer.BadParameter(str(exc)) from exc
+            return
+        summaries = run_round_robin(
+            store,
+            map_name,
+            n_players,
+            specs,
+            seed_root=seed_root,
+            blocks=blocks,
+            threads=threads,
+        )
 
     games = sum(s.games for s in summaries)
     engine = sum(s.seconds for s in summaries)

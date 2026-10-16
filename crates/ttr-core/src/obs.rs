@@ -1,21 +1,17 @@
-//! The observation encoder. The fast twin of `ticket_to_ride/rl/encode/observation.py`.
+//! The observation encoder.
 //!
-//! Layout comes entirely from [`crate::obs_spec_gen`], generated from the same declarative
-//! table as the Python oracle, so the two cannot disagree about *where* a feature goes --
-//! only about the value written into a slot, which is exactly what the differential
-//! harness checks (PLAN.md §8.2).
+//! Layout comes entirely from [`crate::obs_spec`], the declarative feature table, so the
+//! encoder decides only the *value* written into a slot, never where it goes (PLAN.md
+//! §8.2).
 //!
-//! **Arithmetic follows Python's, deliberately.** The output buffer is `f32` because the
-//! oracle writes into an `array("f")`, but every intermediate is computed in `f64` and
-//! narrowed on store, because Python computes in doubles and narrows on store. That makes
-//! agreement a property of the construction rather than of the inputs.
-//!
-//! Dividing directly in `f32` would in fact agree over every divisor this encoder uses --
-//! `double_rounding_does_not_bite_over_the_ranges_used` tests exactly that, so the claim
-//! is checked rather than assumed. The point is that it agrees *by luck of the ranges*: a
-//! new feature with a different divisor could double-round differently, and would do so
-//! silently in one slot out of 3355. Matching Python's arithmetic costs nothing and
-//! removes the question.
+//! **Arithmetic: computed in `f64`, narrowed on store.** The buffer is `f32`; every
+//! intermediate is an integer or an `f64`, and each feature is narrowed once. This began as
+//! a match for the retired Python encoder, which computed in doubles and narrowed on store,
+//! and it is now what the golden corpus and `oracle-v1` were signed under. Dividing
+//! directly in `f32` happens to agree over every divisor used today --
+//! `double_rounding_does_not_bite_over_the_ranges_used` checks that rather than assuming it
+//! -- but it agrees by luck of the ranges, and a new feature with a different divisor could
+//! double-round differently in one slot out of 3355.
 //!
 //! One thing that reads oddly and is correct: this takes `&mut State`. Two of the features
 //! need it -- the union-find roots are read through path halving, and `fragility` re-prices
@@ -27,14 +23,14 @@ use std::collections::HashMap;
 use crate::board::{CityId, GRAY, NO_SIBLING, SegmentId, UNREACHABLE};
 use crate::config::{CLOSED, EMPTY_SLOT, FREE, NOT_TRIGGERED, PHASE_DRAW_SECOND};
 use crate::graph::{MIN_TERMINALS, longest_trail, remaining_costs_from, steiner_cost_exact};
-use crate::obs_spec_gen::{
-    COST_BUCKETS, HAND_BUCKETS, OBS_SPECS, OBS_VERSION, OPPONENT_SLOTS, ObsBlock, ObsSpec,
-    TRAIN_BUCKETS,
+pub use crate::obs_spec::spec_for;
+use crate::obs_spec::{
+    COST_BUCKETS, HAND_BUCKETS, OBS_VERSION, OPPONENT_SLOTS, ObsBlock, ObsSpec, TRAIN_BUCKETS,
 };
 use crate::state::State;
 
 /// Score and gap-to-leader are normalized by this; the scale is a rough game maximum, not
-/// a bound, so the feature may exceed 1. Matches the oracle.
+/// a bound, so the feature may exceed 1.
 const SCORE_SCALE: f64 = 100.0;
 
 /// Turn index is clipped here before normalizing. The analytical 4P bound is ~335 turns,
@@ -43,14 +39,6 @@ const TURN_CLIP: f64 = 200.0;
 
 /// The number of `own_hand` thermometer levels: "at least one" through "at least six".
 const HAND_THERMOMETER_LEVELS: usize = 6;
-
-pub fn spec_for(map: &str) -> &'static ObsSpec {
-    OBS_SPECS
-        .iter()
-        .copied()
-        .find(|s| s.map == map)
-        .expect("every board has a generated observation spec")
-}
 
 pub fn observation_size(state: &State) -> usize {
     spec_for(state.board.name).size
@@ -66,9 +54,8 @@ pub fn obs_version() -> u32 {
 
 /// One block's geometry plus its field offsets, resolved by name **once** per board.
 ///
-/// The generated spec is a table of `&'static str` names; looking a field up by name on
-/// every write would cost more than the encoding. This resolves them at first use and
-/// caches per board.
+/// The spec is a table of names; looking a field up by name on every write would cost more
+/// than the encoding. This resolves them at first use and caches per board.
 #[derive(Clone, Copy)]
 struct Blk {
     stride: usize,
@@ -82,18 +69,14 @@ impl Blk {
     }
 }
 
-fn block_of(spec: &'static ObsSpec, name: &str) -> &'static ObsBlock {
-    spec.blocks
-        .iter()
-        .find(|b| b.name == name)
-        .unwrap_or_else(|| panic!("the generated spec has no block {name:?}"))
+fn block_of<'a>(spec: &'a ObsSpec, name: &str) -> &'a ObsBlock {
+    spec.block(name)
+        .unwrap_or_else(|| panic!("the spec has no block {name:?}"))
 }
 
-fn field_of(block: &'static ObsBlock, name: &str) -> usize {
+fn field_of(block: &ObsBlock, name: &str) -> usize {
     block
-        .fields
-        .iter()
-        .find(|f| f.name == name)
+        .field(name)
         .unwrap_or_else(|| panic!("block {:?} has no field {name:?}", block.name))
         .offset
 }
@@ -171,7 +154,7 @@ struct Layout {
 }
 
 impl Layout {
-    fn build(spec: &'static ObsSpec) -> Self {
+    fn build(spec: &ObsSpec) -> Self {
         let (seg_static, required_color) =
             resolve!(spec, "segment_static", { required_color: "required_color" });
         let (
@@ -200,7 +183,7 @@ impl Layout {
         let counts = field_of(hand_block, "counts");
         let mut hand_therm = [0usize; HAND_THERMOMETER_LEVELS];
         for (level, slot) in hand_therm.iter_mut().enumerate() {
-            // The oracle names level 1 "thermometer" and the rest "thermometerN".
+            // The spec names level 1 "thermometer" and the rest "thermometerN".
             *slot = if level == 0 {
                 field_of(hand_block, "thermometer")
             } else {
@@ -361,9 +344,9 @@ fn layout_for(map: &str) -> &'static Layout {
     use std::sync::OnceLock;
     static CACHE: OnceLock<Vec<(&'static str, Layout)>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| {
-        OBS_SPECS
+        crate::board::all_boards()
             .iter()
-            .map(|spec| (spec.map, Layout::build(spec)))
+            .map(|board| (board.name, Layout::build(spec_for(board.name))))
             .collect()
     });
     &cache
@@ -903,6 +886,7 @@ fn clock(view: &View, state: &State, l: &Layout, out: &mut [f32]) {
 mod tests {
     use super::*;
     use crate::config::RuleConfig;
+    use crate::rng::{Part, stream};
     use crate::state::Game;
 
     #[test]
@@ -918,20 +902,17 @@ mod tests {
     fn the_layout_resolves_for_every_board() {
         // The name lookups happen once, at first use, and a typo in a field name would
         // otherwise panic the first time some rare feature was written.
-        for spec in OBS_SPECS {
-            let layout = layout_for(spec.map);
-            assert_eq!(layout.size, spec.size);
+        for board in crate::board::all_boards() {
+            assert_eq!(layout_for(board.name).size, spec_for(board.name).size);
         }
     }
 
     #[test]
     fn double_rounding_does_not_bite_over_the_ranges_used() {
-        // Checks the claim in this module's header. Computing in f64 and narrowing is what
-        // makes agreement with Python structural; this asserts that the cheaper direct-f32
-        // form would *also* agree today, so the reason to keep f64 is the guarantee rather
-        // than a difference anyone can currently observe. If a new feature introduces a
-        // divisor where these disagree, this test says so instead of the harness finding
-        // one wrong slot out of 3355.
+        // Checks the claim in this module's header: the cheaper direct-f32 form would
+        // *also* agree today, so the reason to keep f64 is the guarantee rather than a
+        // difference anyone can currently observe. If a new feature introduces a divisor
+        // where these disagree, this test says so instead of one wrong slot out of 3355.
         let divisors: [f64; 8] = [12.0, 45.0, 20.0, 110.0, 54.0, 100.0, 30.0, 200.0];
         for &d in &divisors {
             for n in -400i32..=400 {
@@ -946,34 +927,35 @@ mod tests {
     fn encoding_is_deterministic_and_leaves_the_position_alone() {
         // `encode` takes &mut State -- path halving and the fragility probe both mutate.
         // Both must restore what they touched, or the observation would silently change
-        // the game it was observing.
+        // the game it was observing. Mid-game, with tickets held, so the fragility probe's
+        // close-and-restore of seg_owner actually runs; at setup nobody holds a ticket.
         let game = Game::new(RuleConfig::new("usa", 3).unwrap()).unwrap();
         let mut state = game.new_initial_state(5);
+        let mut rng = stream(5, &[Part::Str("obs"), Part::Str("policy")]);
+        for _ in 0..60 {
+            let action = state.sample_legal(&mut rng).expect("not over yet");
+            state.step(action).unwrap();
+        }
+        assert!(
+            (0..3).all(|p| state.tickets[p] != 0),
+            "every seat holds tickets"
+        );
         let before = state.state_hash();
+        let owners = state.seg_owner;
         let size = observation_size(&state);
 
-        let mut first = vec![0.0f32; size];
-        encode(&mut state, 0, &mut first);
-        assert_eq!(state.state_hash(), before, "encoding moved the state");
+        for player in 0..3 {
+            let mut first = vec![0.0f32; size];
+            encode(&mut state, player, &mut first);
+            assert_eq!(state.state_hash(), before, "encoding moved the state");
+            assert_eq!(
+                state.seg_owner, owners,
+                "the fragility probe left a segment closed"
+            );
 
-        let mut second = vec![0.0f32; size];
-        encode(&mut state, 0, &mut second);
-        assert_eq!(first, second, "encoding is not deterministic");
-        assert_eq!(state.state_hash(), before);
-    }
-
-    #[test]
-    fn the_buffer_is_reused_rather_than_appended_to() {
-        // `encode` zeroes first. Without that, a reused buffer would carry stale one-hots
-        // from the previous position -- which looks like a plausible observation and is
-        // wrong in exactly the features that changed.
-        let game = Game::new(RuleConfig::new("mini", 2).unwrap()).unwrap();
-        let mut state = game.new_initial_state(1);
-        let size = observation_size(&state);
-        let mut buffer = vec![7.0f32; size];
-        encode(&mut state, 0, &mut buffer);
-        let mut fresh = vec![0.0f32; size];
-        encode(&mut state, 0, &mut fresh);
-        assert_eq!(buffer, fresh);
+            let mut second = vec![0.0f32; size];
+            encode(&mut state, player, &mut second);
+            assert_eq!(first, second, "encoding is not deterministic");
+        }
     }
 }

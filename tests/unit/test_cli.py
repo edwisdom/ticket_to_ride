@@ -10,11 +10,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from typer.testing import CliRunner
 
 from ticket_to_ride.cli.app import app
-from ticket_to_ride.cli.cmd_bench import random_playouts
 from ticket_to_ride.cli.cmd_map import summary
 from ticket_to_ride.data.board import MINI, USA
 
@@ -101,53 +99,26 @@ def test_summary_reports_the_invariants_the_engine_is_sized_against() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_bench_runs_and_reports_both_numbers() -> None:
-    result = runner.invoke(app, ["bench", "--games", "3", "--repeat", "1", "--format", "json"])
+def test_bench_runs_and_reports_its_numbers() -> None:
+    result = runner.invoke(app, ["bench", "--games", "50", "--repeat", "1", "--format", "json"])
     assert result.exit_code == 0
     rows = json.loads(result.stdout)
     assert {row["map"] for row in rows} == {"usa", "mini"}
     for row in rows:
         assert row["games_per_second"] > 0
         assert row["microseconds_per_step"] > 0
-        assert row["engine"]
+        assert row["engine"].startswith("rust-")
 
 
 def test_bench_all_covers_every_configuration() -> None:
-    """Every (map, seats) pair appears, however many engines each is measured with.
-
-    Counting *rows* would make this depend on whether `ttr_rust` happens to be built,
-    which has nothing to do with what the test is checking.
-    """
+    """Every (map, seats) pair appears, however many figures each is measured with."""
     result = runner.invoke(
-        app, ["bench", "--suite", "all", "--games", "1", "--repeat", "1", "--format", "json"]
+        app, ["bench", "--suite", "all", "--games", "5", "--repeat", "1", "--format", "json"]
     )
     assert result.exit_code == 0
     rows = json.loads(result.stdout)
     covered = {(row["map"], row["players"]) for row in rows}
     assert covered == {("usa", n) for n in range(2, 6)} | {("mini", n) for n in range(2, 5)}
-
-
-def test_bench_python_only_reports_one_row_per_configuration() -> None:
-    result = runner.invoke(
-        app,
-        [
-            "bench",
-            "--suite",
-            "all",
-            "--games",
-            "1",
-            "--repeat",
-            "1",
-            "--engines",
-            "python",
-            "--format",
-            "json",
-        ],
-    )
-    assert result.exit_code == 0
-    rows = json.loads(result.stdout)
-    assert len(rows) == 4 + 3  # usa 2-5P, mini 2-4P
-    assert {row["engine"] for row in rows} == {"python"}
 
 
 def test_bench_rejects_an_unknown_suite() -> None:
@@ -156,32 +127,9 @@ def test_bench_rejects_an_unknown_suite() -> None:
 
 
 def test_bench_table_output() -> None:
-    result = runner.invoke(app, ["bench", "--games", "2"])
+    result = runner.invoke(app, ["bench", "--games", "20", "--repeat", "1"])
     assert result.exit_code == 0
     assert "us/step" in result.stdout
-
-
-# ---------------------------------------------------------------------------
-# The throughput floor
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.bench
-def test_engine_throughput_floor() -> None:
-    """The Phase 1 exit criterion, measured rather than assumed.
-
-    PLAN.md §14 asks for >=2000 random playouts/s/core. TTR-mini clears it; the USA map
-    does not, at ~1000 full games/s (~6 us/step) in pure CPython. Profiling shows no
-    remaining hotspot -- claim legality is about a third and the rest is spread across a
-    dozen small functions -- so the gap is what the Rust core in Phase 2 exists to close.
-    The floors here are set below the measured values so a real regression fails while
-    ordinary machine-to-machine variation does not.
-    """
-    usa = random_playouts("usa", 2, 200)
-    mini = random_playouts("mini", 2, 200)
-    assert mini.games_per_second > 2000, f"mini: {mini.games_per_second:.0f} games/s"
-    assert usa.games_per_second > 600, f"usa 2P: {usa.games_per_second:.0f} games/s"
-    assert usa.microseconds_per_step < 12, f"usa 2P: {usa.microseconds_per_step:.1f} us/step"
 
 
 # ---------------------------------------------------------------------------

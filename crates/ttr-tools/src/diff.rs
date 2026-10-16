@@ -212,13 +212,13 @@ pub fn compare_observation<A: Engine, B: Engine>(
 /// `block[entity].field[i]` for an observation slot, from the spec.
 pub fn slot_name(map: &str, slot: usize) -> String {
     let spec = ttr_core::obs::spec_for(map);
-    for block in spec.blocks {
+    for block in &spec.blocks {
         if slot < block.offset || slot >= block.offset + block.count * block.stride {
             continue;
         }
         let within = slot - block.offset;
         let (entity, inside) = (within / block.stride, within % block.stride);
-        for field in block.fields {
+        for field in &block.fields {
             if (field.offset..field.offset + field.width).contains(&inside) {
                 return if block.count > 1 {
                     format!(

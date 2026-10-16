@@ -1,9 +1,9 @@
 """Type stubs for the Rust core.
 
 A compiled extension carries no type information, so without this every consumer --
-`ttr bench`, the differential harness, and everything Phases 5-8 build on top -- is
-untyped from `ty`'s point of view, and a typo in a method name is a runtime failure
-instead of a build failure.
+`ttr bench`, the arena, and everything Phases 5-8 build on top -- is untyped from `ty`'s
+point of view, and a typo in a method name is a runtime failure instead of a build
+failure.
 
 Kept next to `Cargo.toml` and shipped by maturin. It is hand-written, so it can drift from
 `src/lib.rs`; `tests/unit/rust/test_stub_matches_module.py` asserts the two agree.
@@ -18,6 +18,12 @@ class IllegalAction(Exception):  # noqa: N818 - mirrors engine.state.IllegalActi
 
 def contract_version() -> int: ...
 def obs_version() -> int: ...
+def obs_spec(
+    map_name: str = "usa",
+) -> list[tuple[str, int, int, int, list[tuple[str, int, int, str, str]]]]:
+    """The observation layout: `(block, count, stride, offset, fields)` per block, each field
+    `(name, offset, width, kind, doc)` with `kind` in `"flag"` / `"ratio"`."""
+
 def performance_threads() -> int: ...
 def default_params() -> dict[str, float | int | bool]:
     """The Elo anchor's heuristic constants. The one place Python reads them from."""

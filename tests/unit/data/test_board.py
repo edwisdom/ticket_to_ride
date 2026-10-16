@@ -1,8 +1,9 @@
-"""Board data invariants -- the generated constants and everything derived from them.
+"""Board data invariants -- the generated constants, and the Python data module's tables.
 
 `test_rules_md_invariants.py` checks the markdown; this checks that the generator
-transcribed it faithfully and that the derived tables agree with the raw data. The two
-overlap on purpose: the whole point of the City Index cross-check is redundancy.
+transcribed it faithfully into both languages and that `ticket_to_ride/data/board.py`'s
+derived tables agree with the raw data. The engine's own tables are tested in Rust
+(`crates/ttr-core/tests/board.rs`).
 """
 
 from __future__ import annotations
@@ -27,9 +28,9 @@ ALL_BOARDS = pytest.mark.parametrize("board", list(BOARDS.values()), ids=list(BO
 def test_generated_files_are_not_stale(repo_root: Path) -> None:
     """`board_gen.{py,rs}` and usa.toml must reproduce byte-identically.
 
-    This is the check that makes "the Python and Rust engines cannot disagree about the
-    board" true rather than aspirational -- both files come out of one canonicalized spec,
-    and drift in either is a hard failure here.
+    Both files come out of one canonicalized spec, which is what keeps the Rust engine and
+    the Python data module from disagreeing about the board; drift in either is a hard
+    failure here.
     """
     result = subprocess.run(
         [sys.executable, "tools/gen_board.py", "--check"],
@@ -44,8 +45,8 @@ def test_generated_files_are_not_stale(repo_root: Path) -> None:
 def test_rust_and_python_agree_on_every_constant(repo_root: Path) -> None:
     """Parse the generated Rust back out and diff it against the Python tuples.
 
-    Cheap, and it catches an emitter bug that would otherwise only surface in Phase 2 as a
-    mysterious differential-test failure.
+    Cheap, and it catches an emitter bug that would otherwise surface as `ttr map` and the
+    engine quietly describing different boards.
     """
     rust = (repo_root / "crates" / "ttr-core" / "src" / "board_gen.rs").read_text()
     for board in BOARDS.values():

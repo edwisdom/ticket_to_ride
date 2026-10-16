@@ -27,7 +27,7 @@ use crate::board::{GRAY, NO_SIBLING, UNREACHABLE};
 use crate::config::{CLOSED, EMPTY_SLOT, FREE, NO_TICKET, NOT_TRIGGERED, PHASE_DRAW_SECOND};
 use crate::graph::{longest_trail, steiner_cost_exact};
 use crate::obs::spec_for;
-use crate::obs_spec_gen::{COST_BUCKETS, HAND_BUCKETS, OPPONENT_SLOTS, TRAIN_BUCKETS};
+use crate::obs_spec::{COST_BUCKETS, HAND_BUCKETS, OPPONENT_SLOTS, TRAIN_BUCKETS};
 use crate::state::State;
 
 /// Offsets by name, from the spec (whose layout is pinned separately).

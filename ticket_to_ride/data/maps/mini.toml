@@ -15,7 +15,7 @@
 # Geography is the real western USA sub-map, so lat/lon can be shared with usa later.
 # max_players is 4, not 5: 5 x 3 initial tickets would exceed the 14-ticket deck.
 # Ticket points are the shortest-path cost in train cars between the two cities, which is
-# asserted by tests/unit/engine/test_board.py.
+# asserted by tests/unit/data/test_board.py.
 schema = 1
 name = "mini"
 trains_per_player = 20
