@@ -1,0 +1,13 @@
+[package]
+name = "ttr-tools"
+description = "Generators and checkers for the golden artifacts. Never shipped."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+ttr-core = { path = "../ttr-core" }
+blake2b_simd.workspace = true
+rayon = "1.12.0"
+

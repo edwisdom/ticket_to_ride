@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/ttr-core", "crates/ttr-py"]
+members = ["crates/ttr-core", "crates/ttr-py", "crates/ttr-tools"]
 resolver = "3"
 
 [workspace.package]
