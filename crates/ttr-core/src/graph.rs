@@ -391,10 +391,23 @@ fn component_longest_trail(
         edges.len()
     );
 
+    // Mask bits are numbered within the component, not across every segment the seat owns.
+    // Numbering globally let a seat with more than 32 segments in total shift past bit 31
+    // even when every component fits the mask -- a panic in debug builds and a silently
+    // short trail in release. Unreachable in play (a seat can own at most 27 segments on
+    // the USA map), and found by the brute-force reference in `naive_graph`.
+    let mut locals: Vec<usize> = edges.keys().copied().collect();
+    locals.sort_unstable();
+    let bit_of: HashMap<usize, u32> = locals
+        .iter()
+        .enumerate()
+        .map(|(i, &local)| (local, 1u32 << i))
+        .collect();
+
     let mut memo: HashMap<(u8, u32), u16> = HashMap::new();
     let mut overall = 0;
     for &start in component {
-        overall = overall.max(best_from(adjacency, &mut memo, start, 0));
+        overall = overall.max(best_from(adjacency, &bit_of, &mut memo, start, 0));
         if overall == total {
             break; // layer 4: cannot do better than every edge
         }
@@ -404,6 +417,7 @@ fn component_longest_trail(
 
 fn best_from(
     adjacency: &HashMap<u8, Vec<(u8, usize, u16)>>,
+    bit_of: &HashMap<usize, u32>,
     memo: &mut HashMap<(u8, u32), u16>,
     v: u8,
     used: u32,
@@ -413,11 +427,11 @@ fn best_from(
     }
     let mut best = 0;
     for &(nb, local, w) in &adjacency[&v] {
-        let bit = 1u32 << local;
+        let bit = bit_of[&local];
         if used & bit != 0 {
             continue;
         }
-        best = best.max(w + best_from(adjacency, memo, nb, used | bit));
+        best = best.max(w + best_from(adjacency, bit_of, memo, nb, used | bit));
     }
     memo.insert((v, used), best);
     best
@@ -459,6 +473,24 @@ mod tests {
         for v in [1, 3, 7, 9] {
             assert_eq!(dsu_find(&mut p, v), 1);
         }
+    }
+
+    #[test]
+    fn a_seat_with_more_than_32_segments_still_gets_its_whole_trail() {
+        // The mask is per component. A seat owning 33 segments, none of its components
+        // wider than the mask, used to overflow the shift: a panic in debug builds and a
+        // trail of 37 instead of 48 in release. 48 is what the exhaustive reference and the
+        // retired Python engine both report.
+        let board = crate::board::get_board("usa").unwrap();
+        let owned = [
+            3, 5, 8, 9, 10, 11, 12, 13, 14, 18, 27, 29, 32, 39, 45, 53, 54, 58, 62, 64, 66, 67, 70,
+            72, 73, 75, 80, 82, 83, 85, 88, 95, 97,
+        ];
+        let mut seg_owner = vec![FREE; board.n_segments];
+        for s in owned {
+            seg_owner[s] = 0;
+        }
+        assert_eq!(longest_trail(board, &seg_owner, 0), 48);
     }
 
     #[test]

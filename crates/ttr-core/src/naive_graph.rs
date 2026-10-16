@@ -722,10 +722,12 @@ fn segment_named(board: &Board, a: &str, b: &str, which: usize) -> usize {
 ///
 /// Sizes are capped per map. TTR-mini at 16 of 30 segments is already a tangle of cycles and
 /// doubles that no seat could own (9 is the most its train supply buys), and the exhaustive
-/// search grows steeply past it. USA goes to [`MAX_TRAIL_EDGES`] = 32, the most segments
-/// `longest_trail` can index: an edge's bit in its `u32` DFS mask is its index among *all*
-/// the seat's segments, not within its component, so a 33rd segment can overflow the mask
-/// even when every component is small. Unreachable in play, where a seat owns at most 25.
+/// search grows steeply past it. USA goes to [`MAX_TRAIL_EDGES`] = 32, so no random set can
+/// form a component wider than the DFS mask, which is a documented panic. (This reference
+/// found that `longest_trail` used to number mask bits across *all* the seat's segments
+/// rather than within a component, so a 33rd segment overflowed the shift even when every
+/// component was small; fixed, and pinned by
+/// `graph::tests::a_seat_with_more_than_32_segments_still_gets_its_whole_trail`.)
 fn check_random_track(seeds: std::ops::Range<u64>, per_seed: usize) {
     for (name, max_size) in [("usa", MAX_TRAIL_EDGES), ("mini", 16)] {
         let b = board(name);
