@@ -517,6 +517,7 @@ version = "0.1.0"
 dependencies = [
  "blake2b_simd",
  "rayon",
+ "serde_json",
  "ttr-core 0.1.0",
  "ttr-core 0.1.0 (git+https://github.com/edwisdom/ticket_to_ride?rev=7923e282367804ec1b6432f9b1da1aecbfb8abab)",
 ]
