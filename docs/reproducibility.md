@@ -5,8 +5,8 @@ Every run records which level it achieved.
 
 | Level | Promise | Scope | Enforced by |
 | --- | --- | --- | --- |
-| **L0 — Replay** | Bitwise, always | A recorded game replays to the same `state_hash()` and the same scores | [`engine/replay.py`](../ticket_to_ride/engine/replay.py), the 84-game corpus in `tests/golden/replays.bin`, and `tests/integration/test_golden_replays.py` |
-| **L1 — Rerun** | Bitwise, given the same seed + `uv.lock` + git sha | Engine, heuristics and (from Phase 5) search | `test_the_same_seed_replays_bitwise` runs a seed twice and diffs the action logs |
+| **L0 — Replay** | Bitwise, always | A recorded game replays to the same `state_hash()` and the same scores | [`replay.rs`](../crates/ttr-core/src/replay.rs), the 84-game corpus in `tests/golden/replays.bin` (`crates/ttr-core/tests/golden_replays.rs`), and the 71,400-game golden corpus in `tests/golden/corpus/` (`crates/ttr-tools/tests/golden_corpus.rs`) |
+| **L1 — Rerun** | Bitwise, given the same seed + `Cargo.lock` + `uv.lock` + git sha | Engine, heuristics and (from Phase 5) search | `properties::the_same_seed_replays_bitwise` runs a seed twice and diffs the action logs |
 | **L2 — Statistical** | Same distribution, same curve within noise | Neural-network training | Not bitwise, and not claimed to be |
 
 ## Why L2 is not L1
@@ -33,7 +33,8 @@ The exact encoding is frozen in [CONTRACT.md §1.3](CONTRACT.md). Four non-negot
    shuffled permutation, not a lazy sample from card counts. If it were sampled lazily, an
    agent that drew three cards and one that drew five would realize *different shuffles*
    from the same seed, and the entire variance-reduction scheme would evaporate with no
-   error anywhere. `test_environment_randomness_does_not_depend_on_agent_behaviour` pins it.
+   error anywhere. `properties::environment_randomness_does_not_depend_on_agent_behaviour`
+   pins it.
 3. **Agent stochasticity is a separate per-seat stream**, `("agent", seat, game_id)`, so
    draining one agent's randomness cannot move the environment's.
 4. **Worker streams come from a spawn**, so results do not depend on scheduling order.

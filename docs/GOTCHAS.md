@@ -22,7 +22,7 @@ cells = [c.strip().replace("\x00", "|") for c in protected.strip("|").split("|")
 ```
 
 Cost me one wrong answer before I noticed the counts disagreed with RULES.md's own header.
-`tests/unit/engine/test_rules_md_invariants.py` asserts the counts precisely so this can't
+`tests/unit/data/test_rules_md_invariants.py` asserts the counts precisely so this can't
 regress silently.
 
 ### `torch>=2.13` is load-bearing, not a style preference
@@ -132,14 +132,14 @@ it (two states differing only in dealt-card *order* are the same position).
 Appending the action first leaves a phantom entry when the action is rejected, and the
 replay of that game then diverges. Every `_step_*` path validates before it mutates, so the
 history has to follow the same rule. Caught by
-`test_a_rejected_action_leaves_the_state_untouched`.
+`properties::a_rejected_action_leaves_the_state_untouched` (crates/ttr-core/tests/).
 
 ### A colour only has twelve cards
 
-Rigging a test deck as `[0] * 20` asks for twenty black cards when the box holds twelve.
-`tests/rig.py` raises rather than silently truncating, and `rig.filler()` produces a legal
+Rigging a test deck as `[0; 20]` asks for twenty black cards when the box holds twelve.
+The test rig (`crates/ttr-core/tests/common/mod.rs`) panics rather than silently truncating, and `filler()` produces a legal
 run. The same arithmetic bites when handing several seats the same colour: use
-`rig.spread_hands()`.
+`spread_hands()`.
 
 ### `ty` rule names are not guessable, and a wrong one fails the build
 
@@ -164,7 +164,7 @@ Three, all harmless but worth not rediscovering: the claim-mask buckets are **45
 (§5.3); the observation is **3355** dims on the USA map, not ~2000-2800 (§6.1), because the
 100x9 required-colour block is genuinely needed as an input; and the engine reaches ~1100
 random USA 2P games/s, not the 2000 in the §14 exit criterion. TTR-mini clears 2000. See
-the throughput note in `tests/unit/test_cli.py`.
+the Phase 1 entry in WORKLOG.md (the Python engine and its throughput floor are retired).
 
 ### Path halving does not flatten a chain in one pass
 
@@ -219,7 +219,7 @@ found the hard way — survives **60 seeds of USA 2P, 3P and 4P undetected**. Re
 requires the deck *and* the discard to run dry, which those configurations rarely do in a
 random game. It is caught at mini seed 0 (3P and 4P) and USA 5P seed 8.
 
-So `FAST_CONFIGS` in `tests/integration/test_differential.py` weights the small map and the
+So the fast tier of the differential (`FAST` in `crates/ttr-tools/tests/oracle.rs`, now against `oracle-v1`) weights the small map and the
 full table, and the measurement is recorded next to it. The general lesson: pick the fast
 tier's shape by mutating the engine and seeing what catches, not by taking the biggest map.
 
@@ -320,6 +320,65 @@ automatic `FromPyObject` — for an RNG handle that means the stream is **copied
 boundary**, the caller's generator never advances, and every determinization comes out
 identical. `skip_from_py_object` is load-bearing.
 
+### uv only rebuilds a maturin package when its cache keys say so
+
+`ttr_rust` is a uv workspace member built by maturin. uv decides whether a local package is
+stale from its `cache-keys`, which default to Python metadata (`pyproject.toml`,
+`setup.py`, `setup.cfg`) -- so **a Rust edit leaves the old extension installed, with no
+warning**. Verified: an edit to ttr-core changed nothing until
+`crates/ttr-py/pyproject.toml` listed the Rust sources, including ttr-core's through `../`.
+The keys compare modification times, so even a `touch` rebuilds; cargo's incremental cache
+keeps that cheap. Add a new crate the extension depends on, add its sources to the list.
+
+### `cargo -p ttr-core` can be ambiguous
+
+`oracle-v1` is ttr-core itself, pulled in as a git dev-dependency of ttr-tools, so the
+dependency graph holds two packages named `ttr-core`. `cargo clippy -p ttr-core -p
+ttr-tools` fails with "specification `ttr-core` is ambiguous"; `--workspace` (what the
+Makefile, CI and pre-commit use) is fine, as is `-p ttr-core` alone in most commands. When
+it bites, name the path: `-p "path+file://$PWD/crates/ttr-core#0.1.0"`.
+
+### The test profile is opt-level 1 on purpose
+
+`[profile.test] opt-level = 1` in the workspace `Cargo.toml`. Unoptimized, `cargo test -p
+ttr-core` took ~145 s, nearly all of it `heuristics.rs` playing H3 games; at opt-level 1 it
+is ~20 s, and mutation testing runs the whole suite once per mutant. Debug assertions and
+overflow checks stay on. Do not "restore the default" without measuring.
+
+### Coverage needs rustup's toolchain, not Homebrew's
+
+`cargo llvm-cov` needs the `llvm-tools` component, which a Homebrew Rust does not have. On
+this machine Homebrew's `cargo` is first on `PATH`; `make rust-cov` runs
+`RUSTUP_TOOLCHAIN=stable cargo llvm-cov`, which uses rustup's stable toolchain (1.87 here,
+inside the workspace's 1.85 floor) with `llvm-tools-preview` installed.
+
+### A stub constant nobody checks
+
+`ttr_rust.pyi` declared `CONTRACT_VERSION: int` from Phase 2 on, and the module never
+defined it: it type checked, and failed at import the first time anything used it (the
+thin `ticket_to_ride.engine` re-export, in Phase 3.1). The stub test compared functions and
+classes in both directions and never looked at module constants. It does now.
+
+### A ported test can be weaker than it looks
+
+Porting the Python suite turned up two of its tests that could not fail for the reason
+they were written: the flush-guard test passed with the guard deleted (re-flushing an
+all-locomotive pool deals five locomotives straight back, so the display "didn't change"),
+and the sweep's flush detector compared face-up slots with `FREE` (255, a *segment*
+sentinel) instead of `EMPTY_SLOT` (-1), so its condition was always true. Both were found by
+breaking the engine on purpose and watching which test failed. The Rust ports check the
+deck cursor and discard, and use the right sentinel. **A test is only evidence once
+something has been seen to make it fail.**
+
+### `longest_trail` numbered its mask bits across the whole network
+
+Found by the exhaustive reference in `naive_graph`, not by any game: each edge's bit in the
+`u32` DFS mask was its index among *all* the seat's segments, so a seat owning more than 32
+overflowed the shift even when every component fit -- a debug panic, and a short trail in
+release. Unreachable in play (a seat can buy at most 27 USA segments), and fixed: bits are
+numbered per component. The general lesson is the one the naive references exist for: the
+fast path's guards and limits are where a brute force finds things random play never does.
+
 ---
 
 ## Part 2 — known traps in the work ahead
@@ -328,9 +387,10 @@ These come from the design work in [PLAN.md](PLAN.md).
 
 The first seven were Phase 1 traps and are now **handled** -- kept here because each one is
 a thing to check when the Rust port reimplements it, and the note is the check. **Phase 2
-has now done that reimplementation**, and every one of them held: the Rust engine is
-byte-identical to the Python oracle across every map and seat count. They stay because
-Phase 5's search and Phase 6's vectorized env will touch the same rules again.
+did that reimplementation**, and every one of them held: the Rust engine was
+byte-identical to the Python reference across every map and seat count, which is what let
+Phase 3.1 retire the Python engine. They stay because Phase 5's search and Phase 6's
+vectorized env will touch the same rules again.
 
 **Phase 3 handled the three evaluation traps** -- mirrored matrices, block aggregation, and
 config-driven heuristic constants. The last of those was hit twice on the way, in a form
@@ -469,14 +529,16 @@ trajectories, which destroys the oracle. This is the gate between Phase 1 and Ph
 PLAN.md §5.8. **Done: [CONTRACT.md](CONTRACT.md) plus `tests/golden/contract_vectors.json`
 and the 84-game `tests/golden/replays.bin` corpus.**
 
-### Compare Python vs Rust at every step, not just at the terminal  ✅ handled
+### Compare against the oracle at every step, not just at the terminal  ✅ handled
 
 Terminal-only comparison tells you *that* you diverged, never *where*. Assert
 `state_hash()` equality and `legal_actions()` set equality after every single step.
-**Done: `tests/differential.py` also compares `position_hash`, `current_player` and the
-terminal scoring chain, and names the first differing serialized field.** Two follow-ons
-that were not obvious in advance are in Part 1: field-wise diffing, and choosing the fast
-tier's shape by mutation testing rather than by map size.
+**Done, twice:** Phase 2's Python-versus-Rust harness, and since Phase 3.1 the live crate
+against `oracle-v1` (`crates/ttr-tools/tests/oracle.rs`), which also compares
+`position_hash`, `current_player`, observations, every heuristic's choice and the terminal
+scoring chain, and names the first differing serialized field. Two follow-ons that were not
+obvious in advance are in Part 1: field-wise diffing, and choosing the fast tier's shape by
+mutation testing rather than by map size.
 
 ### MPS will silently fall back to CPU
 

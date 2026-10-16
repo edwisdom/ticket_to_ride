@@ -896,12 +896,16 @@ In order:
 1. **Python's last word, a golden corpus.** On the last commit where Python and Rust agree, generate:
    - for 10k seeds × every (map, seat count) × both chance modes: final scores, plus a per-game
      **hash chain** over the `state_hash` after every step (one u64 per game, about 1.5 MB total);
+     *(done 2026-10-16, sampled mode only -- explicit mode was never specified, as Phase 2
+     recorded -- and extended with 200 H3 games per configuration; see WORKLOG)*
    - observation digests at sampled steps, for `OBS_VERSION` 1.
 
    The existing 84-game `replays.bin` and `contract_vectors.json` stay as frozen fixtures, and their
    regeneration moves into Rust behind `CONTRACT_VERSION`.
 2. **A frozen Rust oracle.** Tag that commit `oracle-v1`. Add `ttr-oracle = { package = "ttr-core",
-   git = <this repo>, tag = "oracle-v1" }` as a **dev-dependency only**. The differential harness is
+   git = <this repo>, tag = "oracle-v1" }` as a **dev-dependency only**. *(Done 2026-10-16 with
+   `rev = "7923e28…"` in place of `tag`: a SHA cannot be moved, and it resolves whether or not
+   the tag is pushed. The tag exists locally. The dev-dependency lives in `crates/ttr-tools`.)* The differential harness is
    rewritten as new-vs-frozen Rust and still compares **at every step**: state hash, legal actions,
    observation, final scores. That keeps the property that a divergence names its step. It costs
    nothing to maintain, since nobody edits a tag. If a git dependency proves awkward in CI, vendor
