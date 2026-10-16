@@ -2,8 +2,8 @@
 # that there is only one implementation? Rules, scoring, graph and the observation
 # encoder are mutated; see docs/WORKLOG.md for the runs and how survivors were triaged.
 #
-#   cargo mutants -j 4                         # ttr-core's own tests
-#   cargo mutants -j 4 --test-package ttr-core --test-package ttr-tools   # + oracle, corpus
+#   cargo mutants -j 4                          # ttr-core's own tests
+#   cargo mutants -j 4 --test-workspace=true    # + the oracle-v1 differential and corpus
 examine_globs = [
     "crates/ttr-core/src/state.rs",
     "crates/ttr-core/src/scoring.rs",
@@ -11,3 +11,42 @@ examine_globs = [
     "crates/ttr-core/src/obs.rs",
 ]
 test_package = ["ttr-core"]
+
+# Equivalent mutants: each changes no observable result, only speed or a branch that cannot
+# be reached. Pinned to file:line:col on purpose -- when the code moves, they stop matching
+# and come back as "missed", to be triaged again rather than excluded by habit.
+exclude_re = [
+    # dsu_union returns early when ra == rb, so `>` and `>=` differ only where unreachable.
+    'graph\.rs:51:11: replace > with >= in dsu_union',
+    # Dijkstra's stale-entry skip, inverted: stale entries get processed, and a stale
+    # distance can never improve a neighbour. Speed only.
+    'graph\.rs:113:14: replace > with < in remaining_costs_from',
+    'graph\.rs:247:14: replace > with < in relax',
+    # The single-terminal skip in the Steiner DP: these stop skipping single-terminal masks,
+    # whose rows are already shortest paths, so recomputing them changes nothing.
+    'graph\.rs:202:17: replace & with \| in steiner_cost_exact',
+    'graph\.rs:202:17: replace & with \^ in steiner_cost_exact',
+    'graph\.rs:202:25: replace - with / in steiner_cost_exact',
+    # The submask enumeration starting at `mask` (or above it) instead of its largest proper
+    # submask: the extra first step reads the row being built (empty) or a not-yet-built row
+    # (unreachable), and every proper submask is still visited.
+    'graph\.rs:209:34: replace & with \| in steiner_cost_exact',
+    'graph\.rs:209:29: replace - with / in steiner_cost_exact',
+    # `<` versus `<=` where the two sides are then equal: same value stored, same total.
+    'graph\.rs:214:29: replace < with <= in steiner_cost_exact',
+    'graph\.rs:276:46: replace < with <= in mst_bound',
+    # Seeding the heap with sentinel-distance cities too: they relax nothing.
+    'graph\.rs:243:30: replace < with <= in relax',
+    # Never taking the Eulerian shortcut: the exhaustive search returns the same total.
+    'graph\.rs:383:17: replace \|\| with && in component_longest_trail',
+    # `used | bit` and `used ^ bit` agree because the bit is known to be clear.
+    'graph\.rs:434:73: replace \| with \^ in best_from',
+    # OBS_VERSION is 1.
+    'obs\.rs:60:5: replace obs_version -> u32 with 1',
+    # Treating an unheld colour's reach as the wilds alone: every reach is `.max(wilds)`
+    # afterwards anyway.
+    'obs\.rs:589:22: replace > with >= in segment_dynamic',
+    # The early return for a finished or dead ticket: a finished one has no free segment to
+    # close (fragility 0 either way), and a dead one never reaches this function.
+    'obs\.rs:711:22: replace \|\| with && in fragility',
+]

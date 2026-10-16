@@ -268,22 +268,33 @@ fn plans_survive_a_real_game() {
 }
 
 /// A finished ticket is not a terminal: holding one beside an open ticket prices the tree
-/// on the open ticket alone. (With the finished ticket's cities in the terminal set the
-/// tree would have to reach them too.)
+/// on the open ticket alone. The pair is chosen so it matters -- a tree that also had to
+/// reach the finished ticket's cities would cost strictly more.
 #[test]
 fn a_finished_ticket_does_not_stretch_the_tree() {
+    use ttr_core::graph::steiner_cost;
     let board = game("usa", 2).board;
     let tickets = long_tickets(board);
-    let done = tickets[0];
-    let mut state = holding(2, &[done]);
-    for s in plan(&mut state) {
-        give(&mut state, 0, s);
-    }
-    let ends = [board.ticket_a[done], board.ticket_b[done]];
-    let open = *tickets[1..]
+    let (done, open, mut state) = tickets
         .iter()
-        .find(|&&t| !ends.contains(&board.ticket_a[t]) && !ends.contains(&board.ticket_b[t]))
-        .expect("a ticket elsewhere");
+        .find_map(|&done| {
+            let mut state = holding(2, &[done]);
+            for s in plan(&mut state) {
+                give(&mut state, 0, s);
+            }
+            let owners = &state.seg_owner[..board.n_segments];
+            let (da, db) = (board.ticket_a[done], board.ticket_b[done]);
+            tickets
+                .iter()
+                .find_map(|&open| {
+                    let (a, b) = (board.ticket_a[open], board.ticket_b[open]);
+                    let alone = steiner_cost(board, owners, 0, &[a, b], true);
+                    let stretched = steiner_cost(board, owners, 0, &[da, db, a, b], true);
+                    (open != done && alone > 0 && stretched > alone).then_some(open)
+                })
+                .map(|open| (done, open, state.clone()))
+        })
+        .expect("a pair where the finished ticket's cities would stretch the tree");
     state.tickets[0] |= 1 << open;
 
     let (a, b) = (board.ticket_a[open], board.ticket_b[open]);
@@ -299,57 +310,76 @@ fn a_finished_ticket_does_not_stretch_the_tree() {
 /// On an empty board the route walk has no own track to trip on, so the plan is the route.
 #[test]
 fn fragility_is_the_worst_single_closure_on_the_route() {
-    use ttr_core::board::UNREACHABLE;
-    use ttr_core::config::CLOSED;
     let board = game("usa", 2).board;
     for &ticket in &long_tickets(board)[..6] {
-        let (a, b) = (board.ticket_a[ticket], board.ticket_b[ticket]);
         let mut state = holding(2, &[ticket]);
         let route = plan(&mut state);
-        let baseline = distance(board, ticket);
-        let mut worst = 0u16;
-        let mut cut = false;
-        for &s in &route {
-            let mut owners = state.seg_owner;
-            owners[s] = CLOSED;
-            let cost = remaining_costs_from(board, &owners[..board.n_segments], 0, a, true)
-                [usize::from(b)];
-            if cost >= UNREACHABLE {
-                cut = true;
-            } else {
-                worst = worst.max(cost - baseline);
-            }
-        }
-        let want = if cut { 1.0 } else { f64::from(worst) / 45.0 };
         let view = observe(&mut state, 0);
         assert_eq!(
             view[at("usa", "tickets", ticket, "fragility")],
-            want as f32,
+            fragility_over(&state, ticket, &route, true),
             "ticket {ticket}"
         );
     }
 }
 
+/// Fragility over a set of free segments: the worst extra cost of closing any one of them,
+/// over the train supply; 1.0 if one closure cuts the ticket dead.
+fn fragility_over(state: &State, ticket: usize, route: &BTreeSet<usize>, locked: bool) -> f32 {
+    use ttr_core::board::UNREACHABLE;
+    use ttr_core::config::CLOSED;
+    let board = state.board;
+    let (a, b) = (board.ticket_a[ticket], board.ticket_b[ticket]);
+    let baseline = remaining_costs_from(board, &state.seg_owner[..board.n_segments], 0, a, locked)
+        [usize::from(b)];
+    let mut worst = 0u16;
+    for &s in route {
+        let mut owners = state.seg_owner;
+        owners[s] = CLOSED;
+        let cost =
+            remaining_costs_from(board, &owners[..board.n_segments], 0, a, locked)[usize::from(b)];
+        if cost >= UNREACHABLE {
+            return 1.0;
+        }
+        worst = worst.max(cost - baseline);
+    }
+    (f64::from(worst) / 45.0) as f32
+}
+
 /// At four or more seats a double route's twins are owned independently. When an opponent
-/// holds the twin the plan would otherwise have walked, the plan takes the free twin -- the
-/// enemy's track is not mine to cross, even at the same length.
+/// holds the twin the plan would otherwise have walked, the plan -- and fragility, which
+/// walks the same route -- takes the free twin: the enemy's track is not mine to cross,
+/// even at the same length. The case is chosen so that closing the free twin is what sets
+/// the ticket's fragility, so a walk that crossed the enemy's twin would price it wrongly.
 #[test]
 fn the_plan_walks_the_free_twin_past_an_opponents_track() {
     use ttr_core::board::NO_SIBLING;
     let board = game("usa", 4).board;
-    let (ticket, lo, hi) = long_tickets(board)
-        .into_iter()
-        .find_map(|t| {
-            let mut state = holding(4, &[t]);
-            plan(&mut state).into_iter().find_map(|s| {
+    let mut found = None;
+    'search: for ticket in long_tickets(board) {
+        let candidates: Vec<(usize, usize)> = plan(&mut holding(4, &[ticket]))
+            .into_iter()
+            .filter_map(|s| {
                 let twin = board.sibling[s];
-                (twin != NO_SIBLING && usize::from(twin) > s).then(|| (t, s, usize::from(twin)))
+                (twin != NO_SIBLING && usize::from(twin) > s).then(|| (s, usize::from(twin)))
             })
-        })
-        .expect("some ticket's plan crosses a double route");
-    let mut state = holding(4, &[ticket]);
-    state.seg_owner[lo] = 1;
-    let route = plan(&mut state);
+            .collect();
+        for (lo, hi) in candidates {
+            let mut state = holding(4, &[ticket]);
+            state.seg_owner[lo] = 1;
+            let route = plan(&mut state);
+            let mut without = route.clone();
+            without.remove(&hi);
+            if fragility_over(&state, ticket, &route, false)
+                != fragility_over(&state, ticket, &without, false)
+            {
+                found = Some((ticket, lo, hi, state, route));
+                break 'search;
+            }
+        }
+    }
+    let (ticket, lo, hi, mut state, route) =
+        found.expect("a double route whose free twin decides the ticket's fragility");
     assert!(
         route.contains(&hi),
         "the free twin {hi} is the way through: {route:?}"
@@ -359,5 +389,10 @@ fn the_plan_walks_the_free_twin_past_an_opponents_track() {
         length(board, &route),
         distance(board, ticket),
         "and costs no more"
+    );
+    let view = observe(&mut state, 0);
+    assert_eq!(
+        view[at("usa", "tickets", ticket, "fragility")],
+        fragility_over(&state, ticket, &route, false)
     );
 }
