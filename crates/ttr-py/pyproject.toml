@@ -1,9 +1,6 @@
-# A distribution of its own, installed into the same `.venv` as `ticket_to_ride` but
-# never depended on by it. See crates/ttr-py/src/lib.rs for why the separation matters.
-#
-# Build it with `make rust` (maturin develop --release). It is deliberately NOT part of
-# `uv sync --dev`, so the fast CI job and the pure-Python edit loop never need a Rust
-# toolchain, and the ~40s release build only happens when asked for.
+# The engine's Python face: a uv workspace member that `ticket_to_ride` depends on, built
+# by maturin whenever `uv sync` (or `uv run`) finds it stale. A Rust toolchain is
+# therefore a requirement of every environment that installs the project, CI included.
 
 [build-system]
 requires = ["maturin>=1.9,<2"]
@@ -22,3 +19,22 @@ module-name = "ttr_rust"
 # The workspace's release profile (fat LTO, one codegen unit) is the one self-play runs
 # under, so it is also the one the differential harness and benchmarks must measure.
 profile = "release"
+
+# uv decides whether a local package needs rebuilding from these keys, and by default
+# they are Python metadata only (pyproject.toml, setup.py, setup.cfg). For a maturin
+# package that means a Rust edit leaves the *old* extension installed, silently: verified,
+# an edit to ttr-core changed nothing until this list existed. So it lists every input of
+# the build -- this crate, ttr-core (a path dependency, hence the ../), and the workspace
+# manifest and lockfile. uv compares modification times, so even a `touch` rebuilds;
+# cargo's incremental cache keeps that cheap.
+[tool.uv]
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "Cargo.toml" },
+    { file = "src/**/*.rs" },
+    { file = "ttr_rust.pyi" },
+    { file = "../ttr-core/Cargo.toml" },
+    { file = "../ttr-core/src/**/*.rs" },
+    { file = "../../Cargo.toml" },
+    { file = "../../Cargo.lock" },
+]

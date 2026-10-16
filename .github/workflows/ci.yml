@@ -15,6 +15,8 @@ env:
   UV_FROZEN: "1"
 
 jobs:
+  # ruff only, and the project is not installed (`--no-install-workspace`), so this is the
+  # one job that needs no Rust toolchain -- it stays the fast feedback loop.
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -22,29 +24,51 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-      - run: uv sync --group dev
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
+      - run: uv sync --group dev --no-install-workspace
+      - run: uv run --no-sync ruff check .
+      - run: uv run --no-sync ruff format --check .
 
-  # Split from `lint` because ty must see torch to resolve imports under rl/, and we do
-  # not want that install on the critical path of the fast lint feedback loop.
+  # The engine. Every Rust test's fast tier: the port of the retired Python suite, the
+  # naive in-crate references, the per-step differential against oracle-v1 (a git
+  # dev-dependency fetched from this public repository, no credentials needed), and a
+  # prefix of the golden corpus. Then the frozen fixtures, through their generators.
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - run: cargo run -q --release -p ttr-tools --bin gen-vectors -- --check
+      - run: cargo run -q --release -p ttr-tools --bin gen-replays -- --check
+
+  # ty must see torch to resolve imports under rl/, and ttr_rust (built by `uv sync`) to
+  # resolve the engine -- so this needs a Rust toolchain as well as the torch install.
   # Linux torch comes from the pytorch-cpu index, so this is ~200MB, not ~3GB.
   typecheck:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
       - run: uv sync --all-extras --group dev
       - run: uv run ty check --output-format github
 
-  # The fast job installs NO torch, which is what keeps CI at ~2 minutes instead of ~15
-  # and avoids pulling the CUDA wheels entirely. See pyproject.toml for why that works.
+  # The Python suite, still with NO torch installed: that is what keeps it at a couple of
+  # minutes and avoids the CUDA wheels entirely. `uv sync` builds ttr_rust.
   test-fast:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
@@ -55,41 +79,13 @@ jobs:
           import importlib.util, sys;
           sys.exit(1) if importlib.util.find_spec('torch') else print('torch absent, as intended')"
 
-  # The Rust core. Separate from `test-fast` because it needs a Rust toolchain and a
-  # ~1 min release build, and because `test-fast` exists to prove the pure-Python engine
-  # stands alone -- which it cannot prove if this job's artifacts are lying around.
-  #
-  # TTR_REQUIRE_RUST=1 is the point of this job. Without it, an extension that failed to
-  # build would make every differential test skip and the job would go green having
-  # compared nothing at all.
-  rust:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-      - uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-      - run: cargo fmt --all -- --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      # ttr-core standalone: the contract vectors are validated with no Python in the loop,
-      # so a Rust-side PRNG regression is caught even if the bindings are broken.
-      - run: cargo test --workspace
-      - run: uv sync --group dev
-      - run: uv run maturin develop --release -m crates/ttr-py/Cargo.toml
-      - name: differential and binding tests
-        env:
-          TTR_REQUIRE_RUST: "1"
-        run: uv run pytest -n auto
-
   test-rl:
     runs-on: ubuntu-latest
     if: contains(github.event.pull_request.labels.*.name, 'rl') || github.event_name == 'schedule'
     steps:
       - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
@@ -98,10 +94,14 @@ jobs:
       - run: uv sync --extra rl --group dev
       - run: uv run pytest -n auto -m "torch"
 
+  # The sweeps behind #[ignore]: the live crate against oracle-v1 over 10k seeds x every
+  # (map, seat count) at every step, every heuristic against its frozen self, the whole
+  # golden corpus on both builds, and the naive references at width. Then Python's slow
+  # tier (arena statistics at scale).
   nightly:
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule'
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -109,11 +109,6 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+      - run: cargo test --workspace --release -- --ignored
       - run: uv sync --all-extras --group dev
-      # The full differential sweep (100k seeds x {2,3,4,5}P, compared at every step) lives
-      # behind the `slow` marker, so the nightly needs the extension built or it would run
-      # the sweep against nothing.
-      - run: uv run maturin develop --release -m crates/ttr-py/Cargo.toml
-      - env:
-          TTR_REQUIRE_RUST: "1"
-        run: uv run pytest -n auto -m "slow"
+      - run: uv run pytest -n auto -m "slow"

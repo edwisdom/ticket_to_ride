@@ -1,21 +1,18 @@
 .PHONY: setup fmt lint type test test-all cov bench bench-check board vectors tb clean clean-rust help \
-        rust rust-fmt rust-lint rust-test
+        rust-fmt rust-lint rust-test rust-sweep rust-cov mutants
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-13s\033[0m %s\n", $$1, $$2}'
 
-setup:  ## Install everything and wire up pre-commit
+setup:  ## Install everything (builds the Rust core) and wire up pre-commit
 	uv sync --all-extras --dev
 	uv run pre-commit install
 
 # --- Rust -----------------------------------------------------------------
 #
-# Deliberately not part of `uv sync`: the pure-Python edit loop and the torch-free CI job
-# stay Rust-free, and the ~8s release build only happens when asked for. Tests needing the
-# extension skip when it is absent -- unless TTR_REQUIRE_RUST is set, which CI does.
-
-rust:  ## Build the Rust core and install it into .venv (release, the profile self-play uses)
-	uv run maturin develop --release -m crates/ttr-py/Cargo.toml
+# The engine is crates/ttr-core. `uv sync` (and `uv run`) builds its Python extension,
+# ttr_rust, as a workspace member in the release profile, rebuilding whenever a Rust source
+# changes -- see the cache-keys note in crates/ttr-py/pyproject.toml.
 
 rust-fmt:  ## Format the Rust sources
 	cargo fmt --all
@@ -24,8 +21,18 @@ rust-lint:  ## Rust formatting + clippy, warnings are errors
 	cargo fmt --all -- --check
 	cargo clippy --workspace --all-targets -- -D warnings
 
-rust-test:  ## ttr-core's standalone tests -- no Python interpreter involved
+rust-test:  ## Every Rust test's fast tier: the port of the old suite, oracle-v1, the corpus prefix
 	cargo test --workspace
+
+rust-sweep:  ## The #[ignore]d sweeps: 10k seeds vs oracle-v1 at every step, the whole corpus (~15 min)
+	cargo test --workspace --release -- --ignored
+
+# Coverage needs llvm-tools, which a Homebrew Rust lacks; this uses rustup's toolchain.
+rust-cov:  ## ttr-core line coverage (rustup toolchain + cargo-llvm-cov)
+	RUSTUP_TOOLCHAIN=stable cargo llvm-cov -p ttr-core --summary-only
+
+mutants:  ## Mutation-test rules, scoring, graph and the encoder (hours; see .cargo/mutants.toml)
+	cargo mutants -j 4
 
 fmt:  ## Format and autofix
 	uv run ruff format .
@@ -56,13 +63,13 @@ bench:  ## Run benchmarks and save a new baseline
 bench-check:  ## Fail if throughput regressed >20% vs the saved baseline (M2, idle machine)
 	uv run pytest -m bench --benchmark-compare --benchmark-compare-fail=mean:20%
 
-board:  ## Regenerate board data and the observation feature-spec table
+board:  ## Regenerate the board data (RULES.md -> usa.toml, board_gen.py, board_gen.rs)
 	uv run python tools/gen_board.py
-	uv run python tools/gen_obs_spec.py
 
-vectors:  ## Verify the frozen contract vectors still reproduce (see docs/CONTRACT.md)
-	uv run python tools/gen_vectors.py --check
-	uv run python tools/gen_replays.py --check
+vectors:  ## Verify the frozen fixtures: contract vectors, golden replays, golden corpus
+	cargo run -q --release -p ttr-tools --bin gen-vectors -- --check
+	cargo run -q --release -p ttr-tools --bin gen-replays -- --check
+	cargo run -q --release -p ttr-tools --bin gen-corpus -- --check
 
 tb:  ## Launch tensorboard over all runs
 	uv run tensorboard --logdir runs/

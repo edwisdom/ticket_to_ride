@@ -11,6 +11,9 @@ dependencies = [
     "msgspec>=0.21",
     "typer>=0.27",
     "rich>=15",
+    # The engine. A workspace member (crates/ttr-py), built by `uv sync` -- see [tool.uv]
+    # below for why its cache keys list the Rust sources.
+    "ttr-rust",
 ]
 
 [project.optional-dependencies]
@@ -39,13 +42,11 @@ dev = [
     "pytest-cov>=6",
     "pytest-benchmark>=5",
     "pytest-timeout>=2.3",
-    "hypothesis>=6.140",
     "syrupy>=4.8",
     "ruff>=0.16",
     "ty>=0.0.63",
     "pre-commit>=4",
     "polars>=1.40",
-    "maturin>=1.9,<2",
 ]
 
 [build-system]
@@ -75,6 +76,12 @@ explicit = true
 
 [tool.uv.sources]
 torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+ttr-rust = { workspace = true }
+
+# The Rust core is a workspace member built by maturin (release profile, see
+# crates/ttr-py/pyproject.toml), so `uv sync` and `uv run` build it like any dependency.
+[tool.uv.workspace]
+members = ["crates/ttr-py"]
 
 # ---------------------------------------------------------------------------
 # ruff

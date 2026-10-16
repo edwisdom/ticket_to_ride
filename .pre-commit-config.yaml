@@ -16,8 +16,8 @@ repos:
   - repo: local
     hooks:
       # RULES.md and the map TOMLs are inputs to checked-in generated code in two
-      # languages. Committing one without the other is how the Python and Rust engines
-      # would start disagreeing about the board itself.
+      # languages (the Rust engine's board tables, and the Python data module `ttr map`
+      # and the UI read). Committing one without the other is how they would disagree.
       - id: gen-board
         name: board data is regenerated
         entry: uv run python tools/gen_board.py --check
@@ -25,31 +25,15 @@ repos:
         pass_filenames: false
         files: ^(RULES\.md|ticket_to_ride/data/maps/.*\.toml|tools/gen_board\.py)$
 
-      # The observation layout is declared once and generated into both languages.
-      - id: gen-obs-spec
-        name: observation spec is regenerated
-        entry: uv run python tools/gen_obs_spec.py --check
+      # The frozen fixtures: CONTRACT.md's vectors and the 84 golden replays, checked by
+      # their Rust generators. A diff here is never "regenerate it" -- it means the engine
+      # plays a different game. (The golden corpus is checked by `cargo test`.)
+      - id: frozen-fixtures
+        name: contract vectors and golden replays reproduce
+        entry: bash -c 'cargo run -q --release -p ttr-tools --bin gen-vectors -- --check && cargo run -q --release -p ttr-tools --bin gen-replays -- --check'
         language: system
         pass_filenames: false
-        files: ^(ticket_to_ride/rl/encode/spec\.py|tools/gen_obs_spec\.py)$
-
-      # docs/CONTRACT.md is the Phase 1 -> Phase 2 gate. Drift here is never a
-      # regeneration: it invalidates every replay ever recorded.
-      - id: contract-vectors
-        name: frozen contract vectors reproduce
-        entry: uv run python tools/gen_vectors.py --check
-        language: system
-        pass_filenames: false
-        files: ^(ticket_to_ride/engine/.*\.py|tools/gen_vectors\.py|tests/golden/.*)$
-
-      # 84 finished games that must still be finished the same way. A rules or scoring
-      # regression shows up here as a concrete failing game, not as a drifting win rate.
-      - id: golden-replays
-        name: golden replays still reproduce
-        entry: uv run python tools/gen_replays.py --check
-        language: system
-        pass_filenames: false
-        files: ^(ticket_to_ride/(engine|agents|data)/.*\.py|tools/gen_replays\.py|tests/golden/.*)$
+        files: ^(crates/ttr-core/src/.*\.rs|crates/ttr-tools/src/bin/gen-(vectors|replays)\.rs|tests/golden/.*)$
 
       # Rust formatting and lints. `cargo fmt` is fast enough to be unconditional; clippy
       # is scoped to Rust changes because a cold run is ~30s.
