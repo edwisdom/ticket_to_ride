@@ -18,11 +18,15 @@
 //! a route with each of its free segments temporarily closed. Both restore what they
 //! touched, and neither the DSU nor a restored `seg_owner` reaches any hash.
 
-use std::collections::HashMap;
-
-use crate::board::{CityId, GRAY, NO_SIBLING, SegmentId, UNREACHABLE};
+use crate::board::{
+    CityId, GRAY, MAX_CARD_TYPES, MAX_CITIES, MAX_PLAYERS, MAX_SEGMENTS, MAX_TICKETS, NO_SIBLING,
+    SegmentId, UNREACHABLE,
+};
 use crate::config::{CLOSED, EMPTY_SLOT, FREE, NOT_TRIGGERED, PHASE_DRAW_SECOND};
-use crate::graph::{MIN_TERMINALS, longest_trail, remaining_costs_from, steiner_cost_exact};
+use crate::graph::{
+    Distances, MIN_TERMINALS, all_pairs, crossing_costs, distance_between, longest_trail,
+    steiner_cost_with,
+};
 pub use crate::obs_spec::spec_for;
 use crate::obs_spec::{
     COST_BUCKETS, HAND_BUCKETS, OBS_VERSION, OPPONENT_SLOTS, ObsBlock, ObsSpec, TRAIN_BUCKETS,
@@ -361,93 +365,152 @@ fn layout_for(map: &str) -> &'static Layout {
 // ---------------------------------------------------------------------------
 
 /// Everything the blocks need, computed once: seat order, costs, the Steiner tree.
+///
+/// Fixed-size throughout, so building one allocates nothing. The player's crossing costs
+/// and the all-pairs table over them are computed once here, and every distance the
+/// encoder reads -- ticket costs, the Steiner DP's terminals, the planned routes -- is a
+/// row of that table rather than a Dijkstra of its own.
 struct View {
     me: usize,
-    order: Vec<usize>,
+    /// Opponents by distance in turn order: slot 0 acts next. `n_players - 1` entries.
+    order: [usize; MAX_PLAYERS - 1],
+    n_opponents: usize,
     trains_supply: f64,
-    locked: bool,
-    dsu_root: Vec<u8>,
-    held: Vec<u8>,
-    ticket_cost: HashMap<u8, u16>,
-    connected: HashMap<u8, bool>,
-    dead: HashMap<u8, bool>,
-    reach_cost: HashMap<CityId, Vec<u16>>,
+    dsu_root: [u8; MAX_CITIES],
+    /// Held ticket ids, ascending.
+    held: [u8; MAX_TICKETS],
+    n_held: usize,
+    /// Remaining cost per ticket id; meaningful for held tickets only.
+    ticket_cost: [u16; MAX_TICKETS],
+    /// My crossing cost per segment ([`crate::graph::edge_cost`]).
+    cost: [u16; MAX_SEGMENTS],
+    dist: Distances,
     steiner: u32,
     steiner_exact: bool,
-    steiner_edges: Vec<SegmentId>,
-    unseen: Vec<i16>,
+    /// Free segments on the planned routes, one bit per segment.
+    plan: u128,
+    unseen: [i16; MAX_CARD_TYPES],
 }
+
+const _: () = assert!(MAX_SEGMENTS <= 128, "the plan bitset is a u128");
 
 impl View {
     fn build(state: &mut State, player: usize) -> Self {
         let board = state.board;
         let n = state.n_players();
-        let locked = state.rules.doubles_locked;
-
-        // Opponents by distance in turn order: the seat that acts next is slot 0.
-        let order: Vec<usize> = (0..n - 1).map(|i| (player + 1 + i) % n).collect();
-        let dsu_root: Vec<u8> = (0..board.n_cities as u8)
-            .map(|c| state.dsu_root(player, c))
-            .collect();
-
-        let held = state.tickets_of(player);
         let seg_owner = &state.seg_owner[..board.n_segments];
-        let mut terminals: Vec<CityId> = Vec::new();
-        let mut ticket_cost = HashMap::new();
-        let mut connected = HashMap::new();
-        let mut dead = HashMap::new();
-        let mut reach_cost: HashMap<CityId, Vec<u16>> = HashMap::new();
 
-        for &ticket in &held {
-            let (a, b) = (
-                board.ticket_a[ticket as usize],
-                board.ticket_b[ticket as usize],
-            );
-            reach_cost
-                .entry(a)
-                .or_insert_with(|| remaining_costs_from(board, seg_owner, player as u8, a, locked));
-            let cost = reach_cost[&a][b as usize];
-            ticket_cost.insert(ticket, cost);
-            connected.insert(ticket, cost == 0);
-            dead.insert(ticket, cost >= UNREACHABLE);
-            if cost > 0 && cost < UNREACHABLE {
-                terminals.push(a);
-                terminals.push(b);
+        let mut order = [0usize; MAX_PLAYERS - 1];
+        for (i, slot) in order.iter_mut().enumerate().take(n - 1) {
+            *slot = (player + 1 + i) % n;
+        }
+        let cost = crossing_costs(board, seg_owner, player as u8, state.rules.doubles_locked);
+        let dist = all_pairs(board, &cost);
+
+        let mut held = [0u8; MAX_TICKETS];
+        let mut n_held = 0;
+        let mut ticket_cost = [UNREACHABLE; MAX_TICKETS];
+        let mut terminals = [0 as CityId; 2 * MAX_TICKETS];
+        let mut n_terminals = 0;
+        for (ticket, slot) in ticket_cost.iter_mut().enumerate().take(board.n_tickets) {
+            if state.tickets[player] >> ticket & 1 == 0 {
+                continue;
+            }
+            held[n_held] = ticket as u8;
+            n_held += 1;
+            let (a, b) = (board.ticket_a[ticket], board.ticket_b[ticket]);
+            let c = dist[usize::from(a)][usize::from(b)];
+            *slot = c;
+            if c > 0 && c < UNREACHABLE {
+                terminals[n_terminals] = a;
+                terminals[n_terminals + 1] = b;
+                n_terminals += 2;
             }
         }
+        let terminals = &terminals[..n_terminals];
+        let (steiner, steiner_exact) = steiner_cost_with(board, &dist, terminals);
 
-        let (steiner, steiner_exact) =
-            steiner_cost_exact(board, seg_owner, player as u8, &terminals, locked);
+        let mut dsu_root = [0u8; MAX_CITIES];
+        for (city, root) in dsu_root.iter_mut().enumerate().take(board.n_cities) {
+            *root = state.dsu_root(player, city as u8);
+        }
+        let mut unseen = [0i16; MAX_CARD_TYPES];
+        for (slot, count) in unseen.iter_mut().zip(state.unseen_counts(player)) {
+            *slot = count;
+        }
 
-        let mut view = Self {
+        let plan = planned_segments(state, player, &dist, terminals);
+        Self {
             me: player,
             order,
+            n_opponents: n - 1,
             trains_supply: f64::from(board.raw.trains_per_player),
-            locked,
             dsu_root,
             held,
+            n_held,
             ticket_cost,
-            connected,
-            dead,
-            reach_cost,
+            cost,
+            dist,
             steiner,
             steiner_exact,
-            steiner_edges: Vec::new(),
-            unseen: state.unseen_counts(player),
-        };
-        view.steiner_edges = steiner_edges(&mut view, state, &terminals);
-        view
+            plan,
+            unseen,
+        }
     }
 
-    /// The cached Dijkstra from `source`, computing it if this is the first ask.
-    fn costs_from(&mut self, state: &State, source: CityId) -> &Vec<u16> {
-        let board = state.board;
-        let locked = self.locked;
-        let me = self.me as u8;
-        let seg_owner = &state.seg_owner[..board.n_segments];
-        self.reach_cost
-            .entry(source)
-            .or_insert_with(|| remaining_costs_from(board, seg_owner, me, source, locked))
+    fn held(&self) -> &[u8] {
+        &self.held[..self.n_held]
+    }
+
+    fn order(&self) -> &[usize] {
+        &self.order[..self.n_opponents]
+    }
+}
+
+/// Walk back from `target` to `source` along one cheapest route, calling `step` with each
+/// segment crossed. `dist` is the table row from `source`.
+///
+/// Reproduces `OBS_VERSION` 1 exactly, defect included: my own track counts as weight 0,
+/// so at a city whose neighbour across my track has the same distance the walk can step
+/// back across it, and it ends when the guard runs out with the route truncated. See
+/// `tests/obs_plan.rs`; fixing it is a named `OBS_VERSION` bump.
+fn walk_route(
+    state: &State,
+    me: u8,
+    dist: &[u16],
+    source: CityId,
+    target: CityId,
+    mut step: impl FnMut(SegmentId, u8),
+) {
+    let board = state.board;
+    if dist[usize::from(target)] >= UNREACHABLE {
+        return;
+    }
+    let mut here = target;
+    let mut guard = 0;
+    while here != source && guard <= board.n_cities {
+        guard += 1;
+        let mut stepped = false;
+        for &(nb, segment) in &board.adjacency[usize::from(here)] {
+            let owner = state.seg_owner[usize::from(segment)];
+            if owner != FREE && owner != me {
+                continue;
+            }
+            let weight = if owner == me {
+                0
+            } else {
+                u16::from(board.seg_len[usize::from(segment)])
+            };
+            if dist[usize::from(nb)] + weight == dist[usize::from(here)] {
+                step(segment, owner);
+                here = nb;
+                stepped = true;
+                break;
+            }
+        }
+        if !stepped {
+            break;
+        }
     }
 }
 
@@ -457,48 +520,27 @@ impl View {
 /// Dreyfus-Wagner solution needs back-pointers through the subset DP, which is a lot of
 /// machinery for a boolean hint. What the network needs is "this route is on my plan", and
 /// a union of cheapest paths gives that.
-fn steiner_edges(view: &mut View, state: &State, terminals: &[CityId]) -> Vec<SegmentId> {
+fn planned_segments(state: &State, me: usize, dist: &Distances, terminals: &[CityId]) -> u128 {
     if terminals.len() < MIN_TERMINALS {
-        return Vec::new();
+        return 0;
     }
-    let board = state.board;
-    let mut edges: Vec<SegmentId> = Vec::new();
+    let mut plan = 0u128;
     for pair in terminals.chunks_exact(2) {
         let (source, target) = (pair[0], pair[1]);
-        let dist = view.costs_from(state, source).clone();
-        if dist[target as usize] >= UNREACHABLE {
-            continue;
-        }
-        let mut here = target;
-        let mut guard = 0;
-        while here != source && guard <= board.n_cities {
-            guard += 1;
-            let mut stepped = false;
-            for &(nb, segment) in &board.adjacency[here as usize] {
-                let owner = state.seg_owner[segment as usize];
-                if owner != FREE && owner != view.me as u8 {
-                    continue;
+        walk_route(
+            state,
+            me as u8,
+            &dist[usize::from(source)],
+            source,
+            target,
+            |segment, owner| {
+                if owner == FREE {
+                    plan |= 1 << segment;
                 }
-                let weight = if owner == view.me as u8 {
-                    0
-                } else {
-                    u16::from(board.seg_len[segment as usize])
-                };
-                if dist[nb as usize] + weight == dist[here as usize] {
-                    if owner == FREE && !edges.contains(&segment) {
-                        edges.push(segment);
-                    }
-                    here = nb;
-                    stepped = true;
-                    break;
-                }
-            }
-            if !stepped {
-                break;
-            }
-        }
+            },
+        );
     }
-    edges
+    plan
 }
 
 // ---------------------------------------------------------------------------
@@ -524,11 +566,11 @@ pub fn encode(state: &mut State, player: usize, out: &mut [f32]) {
     );
     out.fill(0.0);
 
-    let mut view = View::build(state, player);
+    let view = View::build(state, player);
     segment_static(&view, state, layout, out);
     segment_dynamic(&view, state, layout, out);
     own_hand(&view, state, layout, out);
-    tickets(&mut view, state, layout, out);
+    tickets(&view, state, layout, out);
     steiner(&view, state, layout, out);
     faceup(&view, state, layout, out);
     piles(&view, state, layout, out);
@@ -558,8 +600,8 @@ fn segment_static(_view: &View, state: &State, l: &Layout, out: &mut [f32]) {
 
 fn segment_dynamic(view: &View, state: &State, l: &Layout, out: &mut [f32]) {
     let board = state.board;
-    let mut seat_slot = [0usize; crate::board::MAX_PLAYERS];
-    for (i, &seat) in view.order.iter().enumerate() {
+    let mut seat_slot = [0usize; MAX_PLAYERS];
+    for (i, &seat) in view.order().iter().enumerate() {
         seat_slot[seat] = i;
     }
     let hand_base = view.me * board.n_card_types;
@@ -617,12 +659,11 @@ fn segment_dynamic(view: &View, state: &State, l: &Layout, out: &mut [f32]) {
             &HAND_BUCKETS,
         );
 
-        out[l.seg_dyn.at(segment, l.on_my_steiner_tree)] =
-            if view.steiner_edges.contains(&(segment as SegmentId)) {
-                1.0
-            } else {
-                0.0
-            };
+        out[l.seg_dyn.at(segment, l.on_my_steiner_tree)] = if view.plan >> segment & 1 == 1 {
+            1.0
+        } else {
+            0.0
+        };
         let (a, b) = (board.seg_a[segment], board.seg_b[segment]);
         let touches = view.dsu_root[a as usize] != a || view.dsu_root[b as usize] != b;
         out[l.seg_dyn.at(segment, l.extends_my_chain)] =
@@ -648,24 +689,23 @@ fn own_hand(view: &View, state: &State, l: &Layout, out: &mut [f32]) {
     }
 }
 
-fn tickets(view: &mut View, state: &mut State, l: &Layout, out: &mut [f32]) {
+fn tickets(view: &View, state: &State, l: &Layout, out: &mut [f32]) {
     let board = state.board;
     let max_points = f64::from(*board.ticket_points.iter().max().expect("tickets exist"));
-    let held = view.held.clone();
     for ticket in 0..board.n_tickets {
         out[l.tickets.at(ticket, l.points)] =
             (f64::from(board.ticket_points[ticket]) / max_points) as f32;
-        if !held.contains(&(ticket as u8)) {
-            continue;
-        }
-        let t = ticket as u8;
+    }
+    for &t in view.held() {
+        let ticket = usize::from(t);
+        let cost = view.ticket_cost[ticket];
+        let dead = cost >= UNREACHABLE;
         out[l.tickets.at(ticket, l.held)] = 1.0;
-        out[l.tickets.at(ticket, l.connected)] = if view.connected[&t] { 1.0 } else { 0.0 };
-        out[l.tickets.at(ticket, l.is_dead)] = if view.dead[&t] { 1.0 } else { 0.0 };
-        if view.dead[&t] {
+        out[l.tickets.at(ticket, l.connected)] = if cost == 0 { 1.0 } else { 0.0 };
+        out[l.tickets.at(ticket, l.is_dead)] = if dead { 1.0 } else { 0.0 };
+        if dead {
             continue;
         }
-        let cost = view.ticket_cost[&t];
         out[l.tickets.at(ticket, l.ticket_remaining_cost)] =
             (f64::from(cost) / view.trains_supply) as f32;
         thermometer(
@@ -675,91 +715,54 @@ fn tickets(view: &mut View, state: &mut State, l: &Layout, out: &mut [f32]) {
             &COST_BUCKETS,
         );
         out[l.tickets.at(ticket, l.fragility)] =
-            (fragility(view, state, t) / view.trains_supply) as f32;
+            (fragility(view, state, ticket) / view.trains_supply) as f32;
     }
 }
 
 /// Worst extra cost if one enemy claim lands on my cheapest route for this ticket.
 ///
-/// Measured by re-pricing the route with each of its free segments taken in turn. That is
-/// a handful of Dijkstras per ticket, which separates a safe connection from one hanging
-/// on a single contested edge.
-fn fragility(view: &mut View, state: &mut State, ticket: u8) -> f64 {
+/// Measured by re-pricing the route with each of its free segments taken in turn: a
+/// Dijkstra per segment over my cost table with that one segment priced out, stopped as
+/// soon as the far end is settled. That separates a safe connection from one hanging on a
+/// single contested edge.
+fn fragility(view: &View, state: &State, ticket: usize) -> f64 {
     let board = state.board;
-    let (a, b) = (
-        board.ticket_a[ticket as usize],
-        board.ticket_b[ticket as usize],
-    );
-    let baseline = view.ticket_cost[&ticket];
+    let (a, b) = (board.ticket_a[ticket], board.ticket_b[ticket]);
+    let baseline = view.ticket_cost[ticket];
     if baseline == 0 || baseline >= UNREACHABLE {
         return 0.0;
     }
 
-    let route = cheapest_route(view, state, a, b);
-    let on_path: Vec<SegmentId> = route
-        .into_iter()
-        .filter(|&s| state.seg_owner[s as usize] == FREE)
-        .collect();
+    let mut on_path = [0 as SegmentId; MAX_CITIES + 1];
+    let mut n_on_path = 0;
+    walk_route(
+        state,
+        view.me as u8,
+        &view.dist[usize::from(a)],
+        a,
+        b,
+        |segment, owner| {
+            if owner == FREE && n_on_path < on_path.len() {
+                on_path[n_on_path] = segment;
+                n_on_path += 1;
+            }
+        },
+    );
 
+    let mut cost = view.cost;
     let mut worst = 0u16;
-    for segment in on_path {
-        state.seg_owner[segment as usize] = CLOSED;
-        let cost = remaining_costs_from(
-            board,
-            &state.seg_owner[..board.n_segments],
-            view.me as u8,
-            a,
-            view.locked,
-        )[b as usize];
-        state.seg_owner[segment as usize] = FREE;
-        if cost >= UNREACHABLE {
+    for &segment in &on_path[..n_on_path] {
+        let s = usize::from(segment);
+        let kept = cost[s];
+        cost[s] = UNREACHABLE;
+        let detour = distance_between(board, &cost, a, b);
+        cost[s] = kept;
+        if detour >= UNREACHABLE {
             return view.trains_supply;
         }
-        worst = worst.max(cost - baseline);
+        worst = worst.max(detour - baseline);
     }
     f64::from(worst)
-}
-
-/// One cheapest route from `source` to `target`, as segment ids.
-fn cheapest_route(
-    view: &mut View,
-    state: &State,
-    source: CityId,
-    target: CityId,
-) -> Vec<SegmentId> {
-    let board = state.board;
-    let dist = view.costs_from(state, source).clone();
-    if dist[target as usize] >= UNREACHABLE {
-        return Vec::new();
-    }
-    let mut path = Vec::new();
-    let mut here = target;
-    let mut guard = 0;
-    while here != source && guard <= board.n_cities {
-        guard += 1;
-        let mut stepped = false;
-        for &(nb, segment) in &board.adjacency[here as usize] {
-            let owner = state.seg_owner[segment as usize];
-            if owner != FREE && owner != view.me as u8 {
-                continue;
-            }
-            let weight = if owner == view.me as u8 {
-                0
-            } else {
-                u16::from(board.seg_len[segment as usize])
-            };
-            if dist[nb as usize] + weight == dist[here as usize] {
-                path.push(segment);
-                here = nb;
-                stepped = true;
-                break;
-            }
-        }
-        if !stepped {
-            break;
-        }
-    }
-    path
 }
 
 fn steiner(view: &View, state: &State, l: &Layout, out: &mut [f32]) {
@@ -802,7 +805,7 @@ fn opponents(view: &View, state: &State, l: &Layout, out: &mut [f32]) {
     let k = board.n_card_types;
     let n_segments = board.n_segments;
     for slot in 0..OPPONENT_SLOTS {
-        let Some(&seat) = view.order.get(slot) else {
+        let Some(&seat) = view.order().get(slot) else {
             continue;
         };
         out[l.opponents.at(slot, l.present)] = 1.0;

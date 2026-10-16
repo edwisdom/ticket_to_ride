@@ -1,16 +1,23 @@
 //! Graph work the engine needs. Everything here is a pure function of its arguments.
 //!
 //! No caching: callers that want it own it, because they know when it goes stale. The
-//! union-find is the only piece `step()` touches; the rest is used by scoring and the
-//! observation encoder.
+//! union-find is the only piece `step()` touches; the rest is used by scoring, the
+//! heuristics and the observation encoder.
+//!
+//! Nothing here allocates on the hot path: searches run over fixed arrays sized to the
+//! largest board, and the all-pairs table ([`all_pairs`]) is what the Steiner DP and the
+//! encoder read their distances from. Results are exact and unique -- shortest distances,
+//! the minimum Steiner cost, the MST weight -- so they do not depend on search order, and
+//! the `naive_graph` references and the `oracle-v1` differential check them as values.
 //!
 //! Deliberately not a graph library. The two things actually needed are short, run
 //! millions of times, and no crate has a longest-*trail* function at all.
 
-use std::cmp::Reverse;
-use std::collections::{BinaryHeap, HashMap};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, Hasher};
 
-use crate::board::{Board, NO_SIBLING, UNREACHABLE};
+use crate::board::{Board, MAX_CITIES, MAX_ROUTE_LEN, MAX_SEGMENTS, NO_SIBLING, UNREACHABLE};
 use crate::config::FREE;
 
 /// The longest-trail DFS keeps used edges in one machine word.
@@ -93,6 +100,78 @@ pub fn edge_cost(
     u16::from(board.seg_len[segment])
 }
 
+/// Every segment's [`edge_cost`] for `player`, once, so the searches below read a table
+/// instead of re-deriving ownership and the double-route rule at every relaxation.
+pub fn crossing_costs(
+    board: &Board,
+    seg_owner: &[u8],
+    player: u8,
+    doubles_locked: bool,
+) -> [u16; MAX_SEGMENTS] {
+    let mut cost = [UNREACHABLE; MAX_SEGMENTS];
+    for (segment, c) in cost.iter_mut().enumerate().take(board.n_segments) {
+        *c = edge_cost(board, seg_owner, player, segment, doubles_locked);
+    }
+    cost
+}
+
+/// Dijkstra from `source` over a crossing-cost table, into `dist` (at least `n_cities`).
+///
+/// A bucket queue (Dial's algorithm), allocation-free: crossing costs are small integers --
+/// 0 for my own track, a route's length for free track, at most `max_len` -- so the open
+/// distances always lie in a window `max_len + 1` wide, and a ring of that many city
+/// bitmasks is the whole priority queue. Zero-cost track lands back in the bucket being
+/// drained and is picked up in the same round. If `target` is given the search stops as
+/// soon as that city is settled (its distance is final then) and later cities are left
+/// unsettled.
+///
+/// Exact shortest distances are unique, so this agrees with any other correct search; the
+/// `naive_graph` Floyd-Warshall reference checks it.
+fn dijkstra(board: &Board, cost: &[u16], source: u8, target: Option<u8>, dist: &mut [u16]) {
+    const RING: usize = MAX_ROUTE_LEN + 1;
+    debug_assert!(usize::from(board.max_len) < RING);
+    let n = board.n_cities;
+    dist[..n].fill(UNREACHABLE);
+    dist[usize::from(source)] = 0;
+    let mut ring = [0u64; RING];
+    ring[0] = 1 << source;
+    let mut settled = 0u64;
+    let mut current: u16 = 0;
+    loop {
+        let slot = usize::from(current) % RING;
+        while ring[slot] != 0 {
+            let mut batch = std::mem::take(&mut ring[slot]);
+            while batch != 0 {
+                let here = batch.trailing_zeros() as usize;
+                batch &= batch - 1;
+                if settled >> here & 1 == 1 || dist[here] != current {
+                    continue;
+                }
+                if target == Some(here as u8) {
+                    return;
+                }
+                settled |= 1 << here;
+                for &(nb, segment) in &board.adjacency[here] {
+                    let w = cost[usize::from(segment)];
+                    if w >= UNREACHABLE {
+                        continue;
+                    }
+                    let nd = current + w;
+                    let nb = usize::from(nb);
+                    if nd < dist[nb] {
+                        dist[nb] = nd;
+                        ring[usize::from(nd) % RING] |= 1 << nb;
+                    }
+                }
+            }
+        }
+        if ring.iter().all(|&b| b == 0) {
+            return;
+        }
+        current += 1;
+    }
+}
+
 /// Dijkstra from `source` with my track free, free track priced, enemy track blocked.
 ///
 /// The result is "train cars still needed" to reach each city. [`UNREACHABLE`] means the
@@ -105,23 +184,65 @@ pub fn remaining_costs_from(
     source: u8,
     doubles_locked: bool,
 ) -> Vec<u16> {
+    let cost = crossing_costs(board, seg_owner, player, doubles_locked);
     let mut dist = vec![UNREACHABLE; board.n_cities];
-    dist[source as usize] = 0;
-    let mut queue = BinaryHeap::new();
-    queue.push(Reverse((0u16, source)));
-    while let Some(Reverse((d, u))) = queue.pop() {
-        if d > dist[u as usize] {
+    dijkstra(board, &cost, source, None, &mut dist);
+    dist
+}
+
+/// The cheapest crossing cost from `source` to `target` over a cost table, stopping as soon
+/// as `target` is settled. [`UNREACHABLE`] if it cannot be reached.
+pub fn distance_between(board: &Board, cost: &[u16], source: u8, target: u8) -> u16 {
+    let mut dist = [UNREACHABLE; MAX_CITIES];
+    dijkstra(board, cost, source, Some(target), &mut dist);
+    dist[usize::from(target)]
+}
+
+/// Rows of the all-pairs table are padded to this many entries, a multiple of the SIMD
+/// width, so the min-plus loops below vectorize without a remainder.
+pub const DIST_STRIDE: usize = MAX_CITIES.next_multiple_of(8);
+
+/// All-pairs crossing costs: `dist[a][b]` is what [`remaining_costs_from`] from `a` would
+/// say about `b`, for every pair, [`UNREACHABLE`] where there is no route.
+pub type Distances = [[u16; DIST_STRIDE]; DIST_STRIDE];
+
+/// Floyd-Warshall over a crossing-cost table.
+///
+/// One pass yields every row the encoder and the Steiner DP would otherwise each run a
+/// Dijkstra for -- every ticket endpoint, every terminal -- and the inner loop is a
+/// fixed-width min-plus that compiles to straight SIMD. Shortest distances are unique, so
+/// this agrees with the Dijkstra in [`remaining_costs_from`] entry for entry.
+///
+/// Sums stay inside `u16`: a finite distance is under the sentinel, so a finite plus the
+/// sentinel is at most `2 * UNREACHABLE - 1`, and taking the minimum against a cell that
+/// is at most the sentinel keeps every entry at most the sentinel.
+pub fn all_pairs(board: &Board, cost: &[u16]) -> Distances {
+    const _: () = assert!(2 * (UNREACHABLE as usize) < u16::MAX as usize);
+    let n = board.n_cities;
+    let mut dist = [[UNREACHABLE; DIST_STRIDE]; DIST_STRIDE];
+    for (city, row) in dist.iter_mut().enumerate().take(n) {
+        row[city] = 0;
+    }
+    for (segment, &w) in cost.iter().enumerate().take(board.n_segments) {
+        if w >= UNREACHABLE {
             continue;
         }
-        for &(nb, segment) in &board.adjacency[u as usize] {
-            let w = edge_cost(board, seg_owner, player, segment as usize, doubles_locked);
-            if w >= UNREACHABLE {
+        let (a, b) = (
+            usize::from(board.seg_a[segment]),
+            usize::from(board.seg_b[segment]),
+        );
+        dist[a][b] = dist[a][b].min(w);
+        dist[b][a] = dist[b][a].min(w);
+    }
+    for k in 0..n {
+        let via = dist[k];
+        for row in dist.iter_mut().take(n) {
+            let to_k = row[k];
+            if to_k >= UNREACHABLE {
                 continue;
             }
-            let nd = d + w;
-            if nd < dist[nb as usize] {
-                dist[nb as usize] = nd;
-                queue.push(Reverse((nd, nb)));
+            for (cell, &onward) in row.iter_mut().zip(&via) {
+                *cell = (*cell).min(to_k + onward);
             }
         }
     }
@@ -140,10 +261,6 @@ pub fn remaining_costs_from(
 /// [`MAX_STEINER_TERMINALS`] distinct components the DP is abandoned and a
 /// minimum-spanning-tree approximation over the terminal metric is returned instead --
 /// documented, upper-bounding, and never silent (the second return value is `false`).
-///
-/// Widths follow Python's unbounded integers rather than the engine's `u16`: combining
-/// eight terminals can sum eight [`UNREACHABLE`] sentinels, which overflows a `u16` and
-/// would turn "no such tree" into a small, plausible, wrong number.
 pub fn steiner_cost_exact(
     board: &Board,
     seg_owner: &[u8],
@@ -154,74 +271,101 @@ pub fn steiner_cost_exact(
     if terminals.len() < MIN_TERMINALS {
         return (0, true);
     }
+    let cost = crossing_costs(board, seg_owner, player, doubles_locked);
+    steiner_cost_with(board, &all_pairs(board, &cost), terminals)
+}
 
-    let mut unique: Vec<u8> = terminals.to_vec();
-    unique.sort_unstable();
-    unique.dedup();
-    let distances: HashMap<u8, Vec<u16>> = unique
-        .iter()
-        .map(|&t| {
-            (
-                t,
-                remaining_costs_from(board, seg_owner, player, t, doubles_locked),
-            )
-        })
-        .collect();
-
-    // Contract terminals that already cost nothing to reach from one another.
-    let mut roots: Vec<u8> = Vec::new();
-    for &t in &unique {
-        let from_t = &distances[&t];
-        if !roots.iter().any(|&r| from_t[r as usize] == 0) {
-            roots.push(t);
+/// [`steiner_cost_exact`] over an all-pairs table the caller already has.
+///
+/// Every cell of the DP is at most [`UNREACHABLE`]: cells start there and only ever
+/// decrease. That is what makes the min-plus relaxation below the same computation as the
+/// multi-source Dijkstra it replaces -- seeding from every cell under the sentinel and
+/// adding exact distances reaches each city at the same minimum, since a detour through an
+/// improved city is never shorter than the direct distance (the triangle inequality), and
+/// a sentinel-valued cell can never improve anything.
+pub fn steiner_cost_with(board: &Board, dist: &Distances, terminals: &[u8]) -> (u32, bool) {
+    if terminals.len() < MIN_TERMINALS {
+        return (0, true);
+    }
+    let mut unique = [0u8; MAX_CITIES];
+    let mut n_unique = 0;
+    let mut seen = 0u64;
+    for &t in terminals {
+        if seen >> t & 1 == 0 {
+            seen |= 1 << t;
+            unique[n_unique] = t;
+            n_unique += 1;
         }
     }
+    unique[..n_unique].sort_unstable();
+
+    // Contract terminals that already cost nothing to reach from one another.
+    let mut roots = [0u8; MAX_CITIES];
+    let mut n_roots = 0;
+    for &t in &unique[..n_unique] {
+        let from_t = &dist[usize::from(t)];
+        if !roots[..n_roots]
+            .iter()
+            .any(|&r| from_t[usize::from(r)] == 0)
+        {
+            roots[n_roots] = t;
+            n_roots += 1;
+        }
+    }
+    let roots = &roots[..n_roots];
     if roots.len() < MIN_TERMINALS {
         return (0, true);
     }
-    let from_first = &distances[&roots[0]];
-    if roots.iter().any(|&r| from_first[r as usize] >= UNREACHABLE) {
+    let from_first = &dist[usize::from(roots[0])];
+    if roots
+        .iter()
+        .any(|&r| from_first[usize::from(r)] >= UNREACHABLE)
+    {
         return (u32::from(UNREACHABLE), true);
     }
     if roots.len() > MAX_STEINER_TERMINALS {
-        return (mst_bound(&roots, &distances), false);
+        return (mst_bound(roots, dist), false);
     }
 
     let n = board.n_cities;
     let full = (1usize << roots.len()) - 1;
+    let sentinel = u32::from(UNREACHABLE);
     // dp[mask][v] = cheapest tree spanning the terminals in `mask` plus the vertex v.
-    let mut dp = vec![vec![u32::from(UNREACHABLE); n]; full + 1];
-    for (i, t) in roots.iter().enumerate() {
-        let source = &distances[t];
-        for v in 0..n {
-            dp[1 << i][v] = u32::from(source[v]);
+    let mut dp = [[sentinel; DIST_STRIDE]; 1 << MAX_STEINER_TERMINALS];
+    for (i, &t) in roots.iter().enumerate() {
+        for (cell, &d) in dp[1 << i].iter_mut().zip(&dist[usize::from(t)]) {
+            *cell = u32::from(d);
         }
     }
 
     for mask in 1..=full {
         if mask & (mask - 1) == 0 {
-            continue; // single terminal: already initialized from its Dijkstra
+            continue; // single terminal: already initialized from its distances
         }
-        // Lifted out of the loop: `sub` and `mask ^ sub` are both proper non-empty subsets
-        // of `mask`, so neither aliases this row, and taking it once lets the inner loop
-        // zip three slices instead of indexing three rows of a `Vec<Vec<_>>`.
-        let mut row = std::mem::take(&mut dp[mask]);
+        let mut row = dp[mask];
         let mut sub = (mask - 1) & mask;
         while sub != 0 {
             let (left, other) = (&dp[sub], &dp[mask ^ sub]);
             for ((cell, &a), &b) in row.iter_mut().zip(left).zip(other) {
-                let combined = a + b;
-                if combined < *cell {
-                    *cell = combined;
-                }
+                *cell = (*cell).min(a + b);
             }
             sub = (sub - 1) & mask;
         }
-        relax(board, seg_owner, player, &mut row, doubles_locked);
-        dp[mask] = row;
+        // Let the tree's root slide along cheap track: min over u of row[u] + d(u, v).
+        let mut relaxed = row;
+        for (u, &through) in row.iter().enumerate().take(n) {
+            if through >= sentinel {
+                continue;
+            }
+            for (cell, &d) in relaxed.iter_mut().zip(&dist[u]) {
+                *cell = (*cell).min(through + u32::from(d));
+            }
+        }
+        dp[mask] = relaxed;
     }
 
-    (*dp[full].iter().min().expect("at least one city"), true)
+    let best = *dp[full][..n].iter().min().expect("at least one city");
+    (best, true)
 }
 
 /// Cheapest set of new track connecting every terminal. See [`steiner_cost_exact`].
@@ -235,53 +379,31 @@ pub fn steiner_cost(
     steiner_cost_exact(board, seg_owner, player, terminals, doubles_locked).0
 }
 
-/// Multi-source Dijkstra in place: let the tree's root slide along cheap track.
-fn relax(board: &Board, seg_owner: &[u8], player: u8, dist: &mut [u32], doubles_locked: bool) {
-    let mut queue: BinaryHeap<Reverse<(u32, u8)>> = dist
-        .iter()
-        .enumerate()
-        .filter(|&(_, &d)| d < u32::from(UNREACHABLE))
-        .map(|(v, &d)| Reverse((d, v as u8)))
-        .collect();
-    while let Some(Reverse((d, u))) = queue.pop() {
-        if d > dist[u as usize] {
-            continue;
-        }
-        for &(nb, segment) in &board.adjacency[u as usize] {
-            let w = edge_cost(board, seg_owner, player, segment as usize, doubles_locked);
-            if w >= UNREACHABLE {
-                continue;
-            }
-            let nd = d + u32::from(w);
-            if nd < dist[nb as usize] {
-                dist[nb as usize] = nd;
-                queue.push(Reverse((nd, nb)));
-            }
-        }
-    }
-}
-
 /// Prim over the terminal metric. Always >= the Steiner cost, never below it.
-fn mst_bound(roots: &[u8], distances: &HashMap<u8, Vec<u16>>) -> u32 {
-    let mut inside = vec![roots[0]];
+fn mst_bound(roots: &[u8], dist: &Distances) -> u32 {
+    let mut inside = [0u8; MAX_CITIES];
+    inside[0] = roots[0];
+    let mut n_inside = 1;
     let mut total = 0u32;
-    while inside.len() < roots.len() {
+    while n_inside < roots.len() {
         let mut best = UNREACHABLE;
         let mut best_t: Option<u8> = None;
         for &t in roots {
-            if inside.contains(&t) {
+            if inside[..n_inside].contains(&t) {
                 continue;
             }
-            for &u in &inside {
-                if distances[&u][t as usize] < best {
-                    best = distances[&u][t as usize];
+            for &u in &inside[..n_inside] {
+                let d = dist[usize::from(u)][usize::from(t)];
+                if d < best {
+                    best = d;
                     best_t = Some(t);
                 }
             }
         }
         match best_t {
             Some(t) => {
-                inside.push(t);
+                inside[n_inside] = t;
+                n_inside += 1;
                 total += u32::from(best);
             }
             None => return u32::from(UNREACHABLE),
@@ -312,129 +434,197 @@ fn mst_bound(roots: &[u8], distances: &HashMap<u8, Vec<u16>>) -> u32 {
 /// If a component holds more than [`MAX_TRAIL_EDGES`] edges. The train supply makes that
 /// unreachable, and a panic beats silently truncating the mask.
 pub fn longest_trail(board: &Board, seg_owner: &[u8], player: u8) -> u16 {
-    let owned: Vec<usize> = (0..board.n_segments)
-        .filter(|&s| seg_owner[s] == player)
-        .collect();
-    if owned.is_empty() {
+    // Every segment the seat owns, and each city's incident ones: (neighbour, local edge
+    // index, weight), in segment order.
+    let mut owned = [0u16; MAX_SEGMENTS];
+    let mut n_owned = 0;
+    for (segment, &owner) in seg_owner.iter().enumerate().take(board.n_segments) {
+        if owner == player {
+            owned[n_owned] = segment as u16;
+            n_owned += 1;
+        }
+    }
+    if n_owned == 0 {
         return 0;
     }
-
-    // city -> [(neighbour, local edge index, weight)]
-    let mut adjacency: HashMap<u8, Vec<(u8, usize, u16)>> = HashMap::new();
-    for (local, &segment) in owned.iter().enumerate() {
-        let (a, b, w) = (
-            board.seg_a[segment],
-            board.seg_b[segment],
-            u16::from(board.seg_len[segment]),
-        );
-        adjacency.entry(a).or_default().push((b, local, w));
-        adjacency.entry(b).or_default().push((a, local, w));
+    let mut trail = Trail::default();
+    for (local, &segment) in owned[..n_owned].iter().enumerate() {
+        let s = usize::from(segment);
+        let (a, b, w) = (board.seg_a[s], board.seg_b[s], u16::from(board.seg_len[s]));
+        trail.connect(a, b, local as u8, w);
+        trail.connect(b, a, local as u8, w);
     }
 
-    components(&adjacency)
-        .into_iter()
-        .map(|component| component_longest_trail(&adjacency, &component))
-        .max()
-        .unwrap_or(0)
-}
-
-fn components(adjacency: &HashMap<u8, Vec<(u8, usize, u16)>>) -> Vec<Vec<u8>> {
-    let mut starts: Vec<u8> = adjacency.keys().copied().collect();
-    starts.sort_unstable();
-    let mut seen: Vec<u8> = Vec::new();
-    let mut out = Vec::new();
-    for start in starts {
-        if seen.contains(&start) {
-            continue;
-        }
-        let mut stack = vec![start];
-        let mut component = Vec::new();
-        seen.push(start);
-        while let Some(v) = stack.pop() {
-            component.push(v);
-            for &(nb, _, _) in &adjacency[&v] {
-                if !seen.contains(&nb) {
-                    seen.push(nb);
-                    stack.push(nb);
+    // Layer 1: components, by flood fill over the cities that have track at all.
+    let mut best = 0;
+    let mut unvisited = trail.touched;
+    while unvisited != 0 {
+        let start = unvisited.trailing_zeros() as u8;
+        let mut component = 0u64;
+        let mut frontier = 1u64 << start;
+        while frontier != 0 {
+            let city = frontier.trailing_zeros() as usize;
+            frontier &= frontier - 1;
+            component |= 1 << city;
+            for &(nb, _, _) in trail.edges_of(city) {
+                if component >> nb & 1 == 0 {
+                    frontier |= 1 << nb;
                 }
             }
         }
-        out.push(component);
+        unvisited &= !component;
+        best = best.max(trail.component_longest(component));
     }
-    out
-}
-
-fn component_longest_trail(
-    adjacency: &HashMap<u8, Vec<(u8, usize, u16)>>,
-    component: &[u8],
-) -> u16 {
-    let mut edges: HashMap<usize, u16> = HashMap::new();
-    for v in component {
-        for &(_, local, w) in &adjacency[v] {
-            edges.insert(local, w);
-        }
-    }
-    let total: u16 = edges.values().sum();
-
-    let odd = component
-        .iter()
-        .filter(|v| adjacency[v].len() % 2 == 1)
-        .count();
-    if odd == 0 || odd == 2 {
-        return total; // layer 2: an Eulerian trail uses every edge
-    }
-
-    assert!(
-        edges.len() <= MAX_TRAIL_EDGES,
-        "longest-trail component has {} edges, above the {MAX_TRAIL_EDGES}-bit mask limit; \
-         the train supply should make this unreachable",
-        edges.len()
-    );
-
-    // Mask bits are numbered within the component, not across every segment the seat owns.
-    // Numbering globally let a seat with more than 32 segments in total shift past bit 31
-    // even when every component fits the mask -- a panic in debug builds and a silently
-    // short trail in release. Unreachable in play (a seat can own at most 27 segments on
-    // the USA map), and found by the brute-force reference in `naive_graph`.
-    let mut locals: Vec<usize> = edges.keys().copied().collect();
-    locals.sort_unstable();
-    let bit_of: HashMap<usize, u32> = locals
-        .iter()
-        .enumerate()
-        .map(|(i, &local)| (local, 1u32 << i))
-        .collect();
-
-    let mut memo: HashMap<(u8, u32), u16> = HashMap::new();
-    let mut overall = 0;
-    for &start in component {
-        overall = overall.max(best_from(adjacency, &bit_of, &mut memo, start, 0));
-        if overall == total {
-            break; // layer 4: cannot do better than every edge
-        }
-    }
-    overall
-}
-
-fn best_from(
-    adjacency: &HashMap<u8, Vec<(u8, usize, u16)>>,
-    bit_of: &HashMap<usize, u32>,
-    memo: &mut HashMap<(u8, u32), u16>,
-    v: u8,
-    used: u32,
-) -> u16 {
-    if let Some(&cached) = memo.get(&(v, used)) {
-        return cached;
-    }
-    let mut best = 0;
-    for &(nb, local, w) in &adjacency[&v] {
-        let bit = bit_of[&local];
-        if used & bit != 0 {
-            continue;
-        }
-        best = best.max(w + best_from(adjacency, bit_of, memo, nb, used | bit));
-    }
-    memo.insert((v, used), best);
     best
+}
+
+/// The seat's network as fixed arrays: per city, its incident owned segments.
+struct Trail {
+    edges: [[(u8, u8, u16); MAX_TRAIL_DEGREE]; MAX_CITIES],
+    degree: [u8; MAX_CITIES],
+    /// Cities with at least one owned segment.
+    touched: u64,
+}
+
+/// More owned segments at one city than any board has routes there.
+const MAX_TRAIL_DEGREE: usize = 16;
+
+impl Default for Trail {
+    fn default() -> Self {
+        Self {
+            edges: [[(0, 0, 0); MAX_TRAIL_DEGREE]; MAX_CITIES],
+            degree: [0; MAX_CITIES],
+            touched: 0,
+        }
+    }
+}
+
+impl Trail {
+    fn connect(&mut self, from: u8, to: u8, local: u8, w: u16) {
+        let f = usize::from(from);
+        let d = usize::from(self.degree[f]);
+        self.edges[f][d] = (to, local, w);
+        self.degree[f] += 1;
+        self.touched |= 1 << from;
+    }
+
+    fn edges_of(&self, city: usize) -> &[(u8, u8, u16)] {
+        &self.edges[city][..usize::from(self.degree[city])]
+    }
+
+    /// Layers 2-4 on one component, given as a city bitmask.
+    fn component_longest(&self, component: u64) -> u16 {
+        // Each edge is seen from both ends; count it from its lower-local end only once by
+        // collecting locals in a bitmask (locals are below MAX_SEGMENTS <= 128).
+        let mut locals = 0u128;
+        let mut total = 0u16;
+        let mut odd = 0;
+        let mut cities = component;
+        while cities != 0 {
+            let city = cities.trailing_zeros() as usize;
+            cities &= cities - 1;
+            let incident = self.edges_of(city);
+            if incident.len() % 2 == 1 {
+                odd += 1;
+            }
+            for &(_, local, w) in incident {
+                if locals >> local & 1 == 0 {
+                    locals |= 1 << local;
+                    total += w;
+                }
+            }
+        }
+        if odd == 0 || odd == 2 {
+            return total; // layer 2: an Eulerian trail uses every edge
+        }
+        let n_edges = locals.count_ones() as usize;
+        assert!(
+            n_edges <= MAX_TRAIL_EDGES,
+            "longest-trail component has {n_edges} edges, above the {MAX_TRAIL_EDGES}-bit mask \
+             limit; the train supply should make this unreachable"
+        );
+
+        // Mask bits are numbered within the component, not across every segment the seat
+        // owns. Numbering globally let a seat with more than 32 segments in total shift past
+        // bit 31 even when every component fits the mask -- a panic in debug builds and a
+        // silently short trail in release. Unreachable in play (a seat can own at most 27
+        // segments on the USA map), and found by the brute-force reference in
+        // `naive_graph`.
+        let mut bit_of = [0u32; MAX_SEGMENTS];
+        let mut remaining = locals;
+        let mut i = 0;
+        while remaining != 0 {
+            let local = remaining.trailing_zeros() as usize;
+            remaining &= remaining - 1;
+            bit_of[local] = 1 << i;
+            i += 1;
+        }
+
+        MEMO.with(|memo| {
+            let mut memo = memo.borrow_mut();
+            memo.clear();
+            let mut overall = 0;
+            let mut starts = component;
+            while starts != 0 {
+                let start = starts.trailing_zeros() as u8;
+                starts &= starts - 1;
+                overall = overall.max(self.best_from(&bit_of, &mut memo, start, 0));
+                if overall == total {
+                    break; // layer 4: cannot do better than every edge
+                }
+            }
+            overall
+        })
+    }
+
+    /// Layer 3: the longest walk from `v` over edges not in `used`, memoized.
+    fn best_from(&self, bit_of: &[u32], memo: &mut TrailMemo, v: u8, used: u32) -> u16 {
+        let key = u64::from(v) << 32 | u64::from(used);
+        if let Some(&cached) = memo.get(&key) {
+            return cached;
+        }
+        let mut best = 0;
+        for &(nb, local, w) in self.edges_of(usize::from(v)) {
+            let bit = bit_of[usize::from(local)];
+            if used & bit != 0 {
+                continue;
+            }
+            best = best.max(w + self.best_from(bit_of, memo, nb, used | bit));
+        }
+        memo.insert(key, best);
+        best
+    }
+}
+
+/// The longest-trail memo: `(vertex, used-edge mask)` packed into a `u64`.
+///
+/// A multiplicative hash rather than SipHash -- the keys are not attacker-controlled, and
+/// SipHash was a tenth of an observation -- and one table per thread, cleared rather than
+/// reallocated per component.
+type TrailMemo = HashMap<u64, u16, BuildHasherDefault<PackedKeyHasher>>;
+
+thread_local! {
+    static MEMO: RefCell<TrailMemo> = RefCell::new(TrailMemo::default());
+}
+
+/// Fibonacci hashing of a single `u64` key.
+#[derive(Default)]
+struct PackedKeyHasher(u64);
+
+impl Hasher for PackedKeyHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.0 = (self.0.rotate_left(8) ^ u64::from(b)).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        }
+    }
+
+    fn write_u64(&mut self, key: u64) {
+        self.0 = (key ^ self.0).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    }
 }
 
 /// Segment ids `player` has claimed. `CLOSED` siblings are nobody's, and excluded.
