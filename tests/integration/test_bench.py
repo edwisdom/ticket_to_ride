@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ticket_to_ride.cli.cmd_bench import rust_playouts
+from ticket_to_ride.cli.cmd_bench import rust_playouts, vecenv_loop
 
 if TYPE_CHECKING:
     from pytest_benchmark.fixture import BenchmarkFixture
@@ -51,3 +51,26 @@ def test_batched_throughput(benchmark: BenchmarkFixture, rust: ModuleType) -> No
         }
     )
     benchmark(lambda: rust_playouts("usa", 2, 8_000, threads))
+
+
+@pytest.mark.bench
+@pytest.mark.parametrize(("map_name", "n_envs"), [("usa", 1), ("usa", 1024), ("mini", 1024)])
+def test_vecenv_throughput(benchmark: BenchmarkFixture, map_name: str, n_envs: int) -> None:
+    """The training loop's environment side: observe, mask, pick, step, reset.
+
+    `make bench-check` gates a 20% regression on these, phase figures recorded alongside
+    so a regression can be located without re-running anything.
+    """
+    result = vecenv_loop(map_name, 2, n_envs, seconds=2.0)
+    benchmark.extra_info.update(
+        {
+            "map": map_name,
+            "n_envs": n_envs,
+            **{
+                f"{phase}_us": round(result.per_step(getattr(result, phase)), 3)
+                for phase in ("observe", "mask", "pick", "step", "reset")
+            },
+            "env_steps_per_second": round(result.env_steps_per_second),
+        }
+    )
+    benchmark(lambda: vecenv_loop(map_name, 2, n_envs, seconds=0.5))

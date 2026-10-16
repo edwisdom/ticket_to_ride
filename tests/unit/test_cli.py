@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from ticket_to_ride.cli.app import app
@@ -119,6 +120,19 @@ def test_bench_all_covers_every_configuration() -> None:
     rows = json.loads(result.stdout)
     covered = {(row["map"], row["players"]) for row in rows}
     assert covered == {("usa", n) for n in range(2, 6)} | {("mini", n) for n in range(2, 5)}
+
+
+@pytest.mark.slow
+def test_bench_vecenv_reports_every_phase() -> None:
+    result = runner.invoke(app, ["bench", "--suite", "vecenv", "--format", "json"])
+    assert result.exit_code == 0
+    rows = json.loads(result.stdout)
+    assert {(r["map"], r["n_envs"]) for r in rows} == {
+        (m, n) for m in ("usa", "mini") for n in (1, 64, 1024)
+    }
+    for row in rows:
+        assert row["observe"] > 0
+        assert row["env_steps_per_second"] >= row["loop_steps_per_second"] > 0
 
 
 def test_bench_rejects_an_unknown_suite() -> None:
