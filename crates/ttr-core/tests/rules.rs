@@ -1499,3 +1499,77 @@ fn turn_cap_terminates() {
     play_out(&mut s, &mut policy(1));
     assert!(s.turn <= 5);
 }
+
+// ===========================================================================
+// Found by mutation testing (Phase 3.1)
+// ===========================================================================
+
+/// The flush guard counts the *discard's* locomotives as locomotives too.
+///
+/// The guard test above has an empty discard, so a guard that counted discarded
+/// locomotives as available non-locomotives survived it. Here the deck is all locomotives
+/// and so is the discard: still nothing to flush with.
+#[test]
+fn the_flush_guard_does_not_count_discarded_locomotives_as_flushable() {
+    let (g, mut s) = usa_main(2, 1);
+    let loco = g.board.locomotive;
+    let counts = g.board.deck_composition_counts.clone();
+    let mut mine = counts.clone();
+    mine[usize::from(loco)] = 0;
+    force(
+        &mut s,
+        Rig {
+            hands: Some(vec![mine, vec![0; counts.len()]]),
+            faceup: faceup(&[loco; 5]),
+            deck: Some(vec![loco; 6]),
+            cur: Some(0),
+            ..Rig::default()
+        },
+    );
+    // The three locomotives left over went to the discard, and nothing else did.
+    assert_eq!(s.discard[usize::from(loco)], 3);
+    assert_eq!(s.discard_total, 3);
+    let before = (s.faceup, s.deck_pos, s.discard_total);
+    ticket_turn(&mut s);
+    assert_eq!(
+        (s.faceup, s.deck_pos, s.discard_total),
+        before,
+        "a flush fired with no non-locomotive anywhere to deal"
+    );
+    valid(&s);
+}
+
+/// An opening offer with exactly one legal keep is resolved without asking, and the turn
+/// passes on (CONTRACT.md §2.2 step 5).
+///
+/// Unreachable with the real boards -- the ticket deck always covers a full table, which
+/// `enough_tickets_for_a_full_table` enforces -- so it is rigged: one ticket left in the
+/// ring when seat 0 decides. Seat 0 returns one, seat 1 is then offered exactly two with
+/// "keep at least two" (one legal keep, so it is taken for it), and play reaches seat 2,
+/// whose offer is empty.
+#[test]
+fn a_forced_opening_keep_is_taken_and_the_next_seat_is_dealt() {
+    let g = game("usa", 3);
+    let mut s = g.new_initial_state(4);
+    assert_eq!((s.phase, s.cur), (PHASE_INITIAL_TICKETS, 0));
+    let capacity = g.board.n_tickets;
+    let head = usize::from(s.tdeck_head);
+    let last = s.tdeck[head];
+    for slot in 0..capacity {
+        if slot != head {
+            s.tdeck[slot] = NO_TICKET;
+        }
+    }
+    s.tdeck_len = 1;
+    let returned = s.offer[2];
+
+    s.step(s.space.keep(0b011)).unwrap();
+
+    let expected = (1u32 << last) | (1u32 << returned);
+    assert_eq!(
+        s.tickets[1], expected,
+        "seat 1 kept both tickets it was dealt"
+    );
+    assert_eq!(s.cur, 2, "and play moved on to seat 2");
+    assert_eq!((s.offer_len, s.tdeck_len), (0, 0));
+}

@@ -1,0 +1,13 @@
+# cargo-mutants (PLAN.md §14.1, Phase 3.1 step 5): does the suite catch real bugs, now
+# that there is only one implementation? Rules, scoring, graph and the observation
+# encoder are mutated; see docs/WORKLOG.md for the runs and how survivors were triaged.
+#
+#   cargo mutants -j 4                         # ttr-core's own tests
+#   cargo mutants -j 4 --test-package ttr-core --test-package ttr-tools   # + oracle, corpus
+examine_globs = [
+    "crates/ttr-core/src/state.rs",
+    "crates/ttr-core/src/scoring.rs",
+    "crates/ttr-core/src/graph.rs",
+    "crates/ttr-core/src/obs.rs",
+]
+test_package = ["ttr-core"]

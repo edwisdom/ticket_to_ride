@@ -47,6 +47,8 @@ pub mod vecenv;
 mod naive_graph;
 #[cfg(test)]
 mod naive_legal;
+#[cfg(test)]
+mod naive_obs;
 
 /// The frozen-contract version, kept in lockstep with
 /// `ticket_to_ride.engine.contract.CONTRACT_VERSION`.
