@@ -13,7 +13,11 @@ training reinforcement learning agents against it via self-play.
 | 1 | Python reference engine | done |
 | 2 | Rust core + differential harness | done |
 | 3 | Heuristic agents + arena + Elo | done |
-| 4 | Terminal client | next |
+| 3.1 | Retire the Python engine; Rust becomes its own oracle | next |
+| 3.2 | Rust performance (observation encoder) | |
+| 3.3 | Modal cloud runs | |
+| 3.4 | PPO spike on TTR-mini (tentative) | |
+| 4 | Terminal client | |
 | 5 | Determinization + ISMCTS | |
 | 6 | PPO self-play + league | |
 | 7 | ISMCTS + learned priors | |

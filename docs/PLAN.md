@@ -2,6 +2,10 @@
 Approved implementation plan, saved verbatim from the planning session on 2026-07-26.
 This is the design of record. If you deviate from it, note the deviation and the reason
 in docs/WORKLOG.md rather than silently editing this file.
+
+Revision 1, 2026-10-15, at the user's direction: the Python engine is retired and the Rust
+core becomes its own oracle. New phases 3.1-3.4 are inserted between Phases 3 and 4 (§14,
+§14.1). Superseded text is marked in place rather than deleted. Reasoning in docs/WORKLOG.md.
 -->
 
 # Ticket to Ride — Game Engine + Self-Play RL
@@ -17,7 +21,9 @@ algorithms via self-play until agents beat strong heuristic opponents and eventu
 
 **Decisions confirmed with the user:**
 - Pure-Python reference engine first; Rust core (PyO3/maturin) once rules are frozen, with the Python
-  engine kept permanently as a differential-testing oracle.
+  engine kept permanently as a differential-testing oracle. *(Superseded by Revision 1: the Python
+  engine is retired in Phase 3.1, and a frozen Rust build plus a golden corpus take over as the
+  oracle. See §14.1.)*
 - **The Rust core lands in Phase 2, before any agent work**, so every later phase iterates on a fast
   engine (see §8.1 for what this buys and what it costs).
 - Engine supports 2–5 players (incl. 2–3P double-route blocking); training/eval targets 2P first.
@@ -619,6 +625,10 @@ block name, source, width, offset — generated into both languages by the same 
 data, versioned by `OBS_VERSION`. Adding a feature is then a table edit plus one accessor, not a rewrite in
 two languages, and the Python reference encoder stays as the differential-testing oracle for the Rust one.
 
+*(Superseded by Revision 1: once Python has no encoder, the generator indirection buys nothing. The
+feature-spec table moves into Rust as the single source of truth, and the network reads block
+offsets from `ttr_rust.obs_spec()` at runtime. See §14.1, Phase 3.1.)*
+
 ### 8.3 Heuristics in Rust
 
 H1–H4 live in `ttr-core` with **config-driven constants** (already required by the §1 lesson about the paper's
@@ -678,6 +688,12 @@ MPS contexts thrash unified memory, and for small nets dispatch overhead makes M
 **Throughput targets:** Rust step <3 µs, step+obs <8 µs (→<1 µs incremental), ~1.2M steps/s across 10 threads;
 net forward ~165k obs/s at 9M params / batch 4096, ~350k obs/s for a trimmed 4M variant; PPO end-to-end
 60–150k env steps/s; MCTS self-play ~15k games/h at 400 sims, ~45k at 128.
+
+*(Measured 2026-10-15, M2 Max, USA 2P, random actions: step is 0.04 µs/env batched, well inside
+target, but **observe costs ~120–190 µs of CPU per observation** (exact Steiner, `remaining_cost`,
+`fragility`). Batched at 1024 envs that is 23.8 µs/env-step of wall time on 8 cores, so the loop caps
+at **~35k env-steps/s**, about 30× short of target and below what the network can consume. FFI
+overhead is ~0.04 µs per call and is not the problem. Phase 3.2 exists to close this gap.)*
 
 **Budgets (2P):** PPO beats H3 at 30–60M steps (4–8 h); beats H4 at 150–400M steps (1–3 days); R2 clearly
 above H4 and ISMCTS-2000 at 300k–1M self-play games (10–35 h); "beats strong humans" at 2–5M self-play games
@@ -843,22 +859,169 @@ determinization validator passes on 1M samples.
 | **1** (2–3 d) | `usa.toml` + generator → `board_gen.{py,rs}`; full Python engine; replay; **frozen PRNG/draw/hash contract (§5.8)**; feature-spec table (§8.2); TTR-mini; throwaway H0/H1 + flat-MC stub as API exercise (§8.1); `ttr map`, `ttr bench` | all ~40 edge-case tests + 14 property tests green; engine coverage ≥95%; imports with torch blocked; ≥2000 random playouts/s/core; a seed replays bitwise; all board invariants asserted; **the contract doc has test vectors** |
 | **2** (4–6 d) | **Rust core** + maturin + batched `VecEnv` + Rust obs encoder + search hooks (`clone_into`, `resample_from_infoset`, `position_hash`, `collect_leaves`/`backup`) + differential harness | byte-identical to Python on 100k seeds × {2,3,4,5}P, compared **at every step**, both chance modes; obs encoder matches the Python oracle exactly; ≥50× throughput (target ~85–170k games/s batched); `pytest -m bench` baseline recorded |
 | **3** (2–3 d) | H0–H4 **in Rust** with config-driven constants; `eval/` (pairing, parallel runner, SQLite, BT-MLE + bootstrap CIs, SPRT); `ttr arena`, `ttr leaderboard` | 10k paired games across 5 agents in **seconds**; leaderboard stable across two runs of the same seed root; **seat win rate flat within CI**; ratings accumulate across invocations; H3>H2>H1>random by predicted margins; **every heuristic exercises every action type on both maps** (the paper's bug) |
-| **4** (1–2 d) | `HumanAgent`, projection + lat/lon, terminal client, `ttr play`, `ttr replay` | you play a full 2P game against H3 without confusion; `--map=ascii` legible at 110 cols; **you lose to H3 at least once** |
+| **3.1** (3–4 d) | *Revision 1.* Retire the Python engine; Rust becomes its own oracle: golden corpus from the last Python-verified build, frozen `oracle-v1` crate for per-step differential tests, Python tests ported to Rust, naive reference implementations, mutation testing; obs spec moves into Rust; `uv sync` builds `ttr_rust` (§14.1) | golden corpus reproduced exactly; per-step differential vs `oracle-v1` green; every Python rules/property test has a Rust counterpart; `ttr-core` coverage ≥95%; no surviving mutants in rules/scoring; Python engine, encoder and differential harness deleted; docs updated |
+| **3.2** (3–5 d) | *Revision 1.* Rust performance, free of Python's structural constraints: profile, then cache/incrementalize Steiner and `remaining_cost`, fixed-size bitsets instead of maps, f32, no hot-path allocation (§14.1) | observe ≤15 µs CPU/obs single-threaded (from ~150); ≥250k env-steps/s batched observe+mask+step at 1024 envs (from 35k); state hashes identical to `oracle-v1` at every step; H3 behaviour hash unchanged (`5b906156d4b1204b`); every cache asserted against recomputation |
+| **3.3** (1–2 d) | *Revision 1.* Modal: image that builds `ttr_rust`, a runs Volume, `ttr cloud …` wrapper, `device` setting, spend cap (§14.1) | `ttr bench` and a 10k-game arena run on Modal (CPU and GPU containers); arena outcomes identical to local for the same seed root; results land locally; budget cap set; cost per experiment recorded |
+| **3.4** (3–5 d) | *Revision 1, tentative.* PPO spike on TTR-mini 2P, plus the `VecEnv` RL additions it forces: returns before reset, seat→policy routing with scripted opponents stepping in Rust, aux targets, game-record export (§14.1) | beats random ≥95% within 2M steps (§13 ablation 4); beats H1 on mini; `mask_violations == 0`; measured steps/s on MPS and on a Modal GPU replace the §9 estimates |
+| **4** (1–2 d → ~1 d) | `HumanAgent`, projection + lat/lon, terminal client, `ttr play`, `ttr replay` *(Revision 1: trimmed to `ttr play`; `ttr replay` deferred to Phase 8's web UI)* | you play a full 2P game against H3 without confusion; `--map=ascii` legible at 110 cols; **you lose to H3 at least once** |
 | **5** (3–4 d) | Planned API revision pass (§8.1); determinization sampler + validator + particle filter; flat MC; SO-ISMCTS | ISMCTS-1000 beats H4 with SPRT-confirmed Δelo >+100; **strength monotone in sim count (200<500<1000<2000)** — the canonical proof the search is correct; validator passes 1M samples |
-| **6** (4–6 d) | `rl/encode` (versioned); nets; vec env; PPO; league; tracking; run dirs/manifests/checkpoints | run dir complete and `--resume` continues the same trajectory; **`mask_violations == 0` throughout**; beats H3 by ~40M steps and H4 ≥65%; checkpoints refuse to load under a bumped `OBS_VERSION`; `points_per_train` visibly rises |
+| **6** (4–6 d) | `rl/encode` (versioned); nets; vec env; PPO; league; tracking; run dirs/manifests/checkpoints *(Revision 1 adds: history features as `OBS_VERSION` 2 and the history-probe experiment, §14.1)* | run dir complete and `--resume` continues the same trajectory; **`mask_violations == 0` throughout**; beats H3 by ~40M steps and H4 ≥65%; checkpoints refuse to load under a bumped `OBS_VERSION`; `points_per_train` visibly rises; history probe reported either way |
 | **7** (1–2 w) | Batched ISMCTS + learned prior/value + belief head; AZ trainer; PFSP league | R2 beats the PPO agent (SPRT); Elo rises monotonically over ≥5 promotion generations; `cycle_fraction` tracked; BR-probe exploitability trending down; a 24 h unattended run completes |
 | **8** | Transformer net + color-symmetry regularizer; web UI + introspection overlay; human gauntlet; optional R-NaD / Deep-CFR-on-mini | **beats you consistently**; your Elo lands on the same leaderboard as the bots |
 
 Phase 1 is now the highest-leverage phase in the project: it's the last point at which the rules contract,
 the state layout, and the feature-spec table are free to change. Spend the extra half-day there.
 
+### 14.1 Revision 1 (2026-10-15): retire Python, make Rust fast, get to the cloud
+
+**Why.** The Python engine's job was to catch Rust bugs by disagreeing. That value is mostly banked:
+rules were verified identical over 700k games, base TTR rules never change, and every further
+Python-side line is paid twice. It also has a cost that didn't show until measurement. Rust code was
+being written to match Python *structurally* (f64 arithmetic, the same algorithm shapes), and the
+encoder that resulted is the bottleneck (§9 note). The user chose to retire it outright rather than
+freeze it.
+
+**Ordering.** The oracle replacement comes *before* deletion and before the performance rewrite: the
+rewrite is exactly the change that most needs a check, and Python's last useful act is to sign off on
+a golden corpus. Phases 3.1–3.3 are firm. Phase 3.4 and what follows are tentative and get re-planned
+once 3.3 lands. Phase 5 (ISMCTS) can run alongside 3.4 or 6, since it needs no network.
+
+Numbering: the new phases are 3.1–3.4 rather than a renumbering, so every existing "Phase 5" reference
+in code and docs stays correct.
+
+#### Phase 3.1 — Rust becomes the oracle, then Python goes
+
+In order:
+
+1. **Python's last word, a golden corpus.** On the last commit where Python and Rust agree, generate:
+   - for 10k seeds × every (map, seat count) × both chance modes: final scores, plus a per-game
+     **hash chain** over the `state_hash` after every step (one u64 per game, about 1.5 MB total);
+   - observation digests at sampled steps, for `OBS_VERSION` 1.
+
+   The existing 84-game `replays.bin` and `contract_vectors.json` stay as frozen fixtures, and their
+   regeneration moves into Rust behind `CONTRACT_VERSION`.
+2. **A frozen Rust oracle.** Tag that commit `oracle-v1`. Add `ttr-oracle = { package = "ttr-core",
+   git = <this repo>, tag = "oracle-v1" }` as a **dev-dependency only**. The differential harness is
+   rewritten as new-vs-frozen Rust and still compares **at every step**: state hash, legal actions,
+   observation, final scores. That keeps the property that a divergence names its step. It costs
+   nothing to maintain, since nobody edits a tag. If a git dependency proves awkward in CI, vendor
+   the tagged source read-only under `crates/ttr-oracle/` with a pre-commit hook that rejects edits.
+   Moving the tag is a deliberate, versioned event, the same as a contract bump.
+3. **Port the tests.** The ~40 rules edge cases and the property tests (Hypothesis → `proptest`) are
+   ported to Rust, tracked one-to-one in a table in WORKLOG so none silently drops. The RULES.md
+   structural invariants stay with the board generator.
+4. **Naive references inside the crate**, behind `#[cfg(test)]`: brute-force Steiner on mini, brute-force
+   longest trail, a naive 6300-way legal-mask scan, from-scratch recomputation of anything incremental.
+   This is differential testing that survives Python: fast path against obviously-correct slow path.
+5. **Mutation testing** (`cargo-mutants`) over rules, scoring, graph and obs to measure whether the
+   suite catches real bugs, which matters once there is only one implementation. Surviving mutants
+   are triaged; none may survive in rules or scoring.
+6. **Then delete.** Delete `ticket_to_ride/engine/` (state, actions, graph, scoring, replay, rng,
+   hashing), `rl/encode/observation.py`, the throwaway agents, `tests/differential.py`, the
+   Python-engine unit/property tests, the import-boundary test, `tools/gen_vectors.py` and
+   `tools/gen_replays.py` (both become Rust bins).
+7. **What remains in Python:**
+   - `ticket_to_ride.engine` becomes a thin re-export of `ttr_rust`, so agent, CLI and UI import
+     paths don't move.
+   - `data/` stays: board data and city coordinates for the generator, `ttr map`, and the UI.
+     It is data, not rules.
+   - `tools/gen_board.py` stays, emitting Rust from RULES.md.
+   - The obs feature-spec table moves into Rust (§8.2 note), so `spec.py` and `gen_obs_spec.py` go.
+8. **Packaging.** `ttr_rust` becomes a required dependency built by `uv sync`, as a workspace member
+   with the maturin backend in release profile. CI's test job gains a Rust toolchain. Torch-free CI
+   stays. `TTR_REQUIRE_RUST` is retired because Rust is no longer optional.
+9. **Docs.** README, GOTCHAS, CONTRACT and reproducibility.md drop "permanent oracle" claims and
+   describe the new validation stack.
+
+#### Phase 3.2 — Performance, free of Python's constraints
+
+**Profile first** (`samply` or `cargo flamegraph`) and record the breakdown in WORKLOG before
+changing anything. Candidates, roughly by expected payoff:
+
+- **Cache the Steiner tree and `remaining_cost` per seat.** They change only when a segment is
+  claimed or that seat's tickets change. Card draws, about half of all steps, are pure cache hits.
+- **`fragility` only for segments on the current best tree.** Re-pricing off-tree segments cannot
+  change the answer.
+- **Bitsets and fixed arrays.** Segments as `u128`, cities as `u64`, fixed `[u16; 36]` distance
+  arrays instead of `HashMap<u8, Vec<u16>>`.
+- **No allocation on the hot path.** Per-thread scratch buffers, the pattern `sample_legal_into`
+  already uses.
+- **Incremental connectivity.** Union-find updated on claim, not rebuilt per observation.
+- **f32 where f64 only existed to match Python.**
+
+**Behaviour preservation is the contract of this phase:**
+
+- State hashes stay identical to `oracle-v1` at every step.
+- Observations: discrete fields bit-exact, continuous fields within 1e-6.
+- H3's behaviour hash stays `5b906156d4b1204b`. The heuristics share the graph code, and a moved
+  hash would re-base every rating.
+- Any change that can't meet these is a named `OBS_VERSION` bump done separately, never folded into
+  a speedup.
+- Every cache gets a debug-build assertion against from-scratch recomputation, exercised over 10k
+  games.
+
+`ttr bench --suite vecenv` reports observe, mask and step separately, with the usual 20% regression
+gate.
+
+#### Phase 3.3 — Modal
+
+- **User-only steps:** create the Modal account, authenticate (`modal token new`), set a workspace
+  spend limit. The $30/month Starter credit covers early use. Apply for Modal's research credits once
+  there are results to show.
+- **`cloud` dependency group** with `modal`; `infra/modal_app.py` defines:
+  - an image (Debian slim + rustup + uv) that builds the `ttr_rust` release wheel in a layer keyed on
+    `Cargo.lock` and the crate sources;
+  - a `ttr-runs` Volume;
+  - functions for `bench`, `arena`, and a generic `run(argv)` with selectable CPU count and GPU.
+- **`ttr cloud bench|arena|run …` and `ttr cloud pull`.** Each cloud job writes **its own** results
+  file, merged locally. SQLite on a shared volume with concurrent writers is a corruption risk, not a
+  shortcut.
+- **A `device` setting** (`auto|cuda|mps|cpu`) in config, so training code is portable from its first
+  line.
+- **Check `performance_threads()` inside a container.** Off macOS it uses `available_parallelism`,
+  which must respect the container's CPU quota rather than the host's core count.
+- **Exit check, cross-platform determinism.** An arena run on Linux x86 must reproduce the local
+  macOS ARM outcomes game for game.
+
+#### Phase 3.4 — PPO spike (tentative)
+
+Pulled forward from Phase 6 to retire the largest unknowns early: does PPO learn on this observation,
+and what does the full loop really sustain on MPS versus a cloud GPU?
+
+- **`VecEnv` additions (these are kept):**
+  - final returns readable before `auto_reset`;
+  - per-env seat→policy assignment, with scripted opponents stepping inside Rust until the learner's
+    turn, so Python never loops over envs;
+  - aux-target export (ticket completion, opponents' true tickets, final margin);
+  - game-record export (seed + actions, §9).
+- **The PPO itself may be throwaway:** mini 2P, small MLP, masked categorical, per-seat GAE.
+
+Phase 6 is then re-planned from what it measures.
+
+#### Additions to later phases
+
+- **Phase 4** is trimmed to `ttr play` (about 1 day). Its exit criterion, that you lose to H3, is a
+  real check that the heuristics are strong. `ttr replay` moves to Phase 8's web UI.
+- **Phase 6** gains:
+  - Cheap history features as `OBS_VERSION` 2: claim turn per segment, tickets I returned, face-up
+    colours each opponent passed on, when each opponent last drew tickets.
+  - **The history probe:** a supervised classifier predicting opponents' tickets from H4 self-play
+    games, given (a) the observation versus (b) the observation plus action history. If (b) isn't
+    clearly better, a recurrent or history-token network is not worth its estimated 1.5–3× training
+    cost and its awkward fit with ISMCTS. If it is, that's the Phase 8 architecture question settled
+    with data.
+
 ## 15. Main risks
 
 | Risk | Mitigation |
 | --- | --- |
 | **Rust API frozen before agents/search exercise it → second port pass** (the main cost of the new ordering) | Phase 1 throwaway H0/H1 + flat-MC stub against the Python engine; search hooks designed in from day one; one API revision explicitly budgeted at the start of Phase 5 (§8.1) |
-| Rust port stalls and blocks everything downstream | The Python engine stays fully functional — agents and arena can be built against it if the port slips; only throughput suffers, nothing is blocked |
-| Observation encoding churn means rewriting Rust repeatedly | Declarative feature-spec table generated into both languages (§8.2); adding a feature is a table edit |
+| Rust port stalls and blocks everything downstream *(retired by Revision 1: the port landed)* | The Python engine stays fully functional — agents and arena can be built against it if the port slips; only throughput suffers, nothing is blocked |
+| Observation encoding churn means rewriting Rust repeatedly | Declarative feature-spec table generated into both languages (§8.2); adding a feature is a table edit. *(Revision 1: one language now, so the churn cost halves.)* |
+| *(Rev. 1)* With Python gone, Rust validates itself and correlated bugs go unseen | Golden corpus signed off by Python before deletion; frozen `oracle-v1` per-step differential; in-crate naive references; mutation testing (§14.1) |
+| *(Rev. 1)* The performance rewrite silently changes behaviour | Per-step differential against `oracle-v1`; H3 behaviour hash pinned; every cache asserted against recomputation; semantic changes only via a named `OBS_VERSION` bump |
+| *(Rev. 1)* Cloud spend runs away | Modal workspace budget cap set by the user; per-function timeouts; start inside the free monthly credit |
+| *(Rev. 1)* Linux x86 and macOS ARM disagree, so cloud results don't match local | Phase 3.3 exit requires game-for-game identical arena outcomes across platforms |
 | H4 isn't actually strong, making "beats heuristics" hollow | Phase 4 exists partly so H3/H4 play *you*. H4 must beat random ~100%, not the paper's 91%. |
 | Self-play collapse / cycling | PFSP + permanent scripted anchors + BR probe + `cycle_fraction`, all from day one of Phase 6. |
 | Silent illegal-action leak poisons months of training | `mask_violations` logged and asserted; mask recomputed at update time. |

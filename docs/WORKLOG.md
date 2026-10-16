@@ -5,6 +5,57 @@ session. Decisions that deviate from [PLAN.md](PLAN.md) belong here, with the re
 
 ---
 
+## 2026-10-15 — Plan revision 1: retire the Python engine
+
+A planning session, no code changed. PLAN.md gains Phases 3.1–3.4 (§14, §14.1) ahead of
+Phase 4. Superseded text is marked in place.
+
+### What prompted it
+
+A measurement. Batched `VecEnv` at 1024 envs, USA 2P, random actions, M2 Max:
+
+| per env-step | µs |
+| --- | --- |
+| observe | 23.8 (wall, 8 cores; ~120–190 µs of CPU per observation) |
+| legal mask | 0.19 |
+| step | 0.04 |
+| an empty FFI call | 0.04 |
+
+The loop caps at ~35k env-steps/s, about 30× under §9's target, and the cost is all in the
+encoder (exact Steiner, `remaining_cost`, `fragility`), not the FFI boundary. The Python
+encoder runs at 3,166 µs/obs, so Rust is ~26× faster single-threaded. The port worked; the
+encoder just isn't fast enough for Phase 6 or 7.
+
+### Decisions
+
+**The Python engine is retired, not frozen.** The user's call. The case for it: the oracle's
+value was in catching Rust bugs by disagreement, and that value is mostly banked (700k
+games byte-identical, rules that never change). Both implementations came from one author
+and one plan, so their bugs are correlated, and every further feature is paid for twice.
+Matching Python *structurally* (f64, the same algorithm shapes) is also part of why the
+encoder is slow. The alternative considered was freezing it at zero maintenance cost. It was
+rejected in favour of one implementation and a validation stack built for it.
+
+**Oracle before deletion, deletion before speed.** Python signs off on a golden corpus,
+the verified Rust build is frozen as `oracle-v1` for per-step differential tests, and only
+then is Python deleted and the encoder rewritten. A performance rewrite is exactly the
+change that most needs a check, so its check has to exist first.
+
+**Modal for cloud experiments.** The workload needs many CPU cores (the encoder) plus a
+modest GPU. Modal's per-second billing, CPU-count choice and $30/month free credit fit
+that. Colab and Kaggle (2–4 vCPUs, session limits) and TPU programs do not. Academic grant
+programs (Nebius, NSF ACCESS) require an institutional affiliation.
+
+**Phase 3.4 and onward are tentative.** A PPO spike on TTR-mini is pulled forward from Phase 6
+to retire the biggest unknowns early. Phase 4 is trimmed. Phase 6 gains history features and
+a history-probe experiment. All of it is re-planned once Phase 3.3 lands.
+
+### Next
+
+Phase 3.1 — the golden corpus, then `oracle-v1`.
+
+---
+
 ## 2026-07-27 — Phase 3: the agent ladder and the evaluation harness
 
 Complete. `make lint type test` green, `cargo test` green (97 Rust tests), 10k paired games
