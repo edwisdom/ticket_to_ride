@@ -24,3 +24,11 @@ blake2b_simd = "1.0"
 [profile.release]
 lto = "fat"
 codegen-units = 1
+
+# `cargo test` builds at opt-level 1. The suite plays thousands of full games -- H3 in
+# heuristics.rs, the oracle differential, the corpus prefix -- and unoptimized that took
+# ~145 s against ~20 s: the difference between a suite people run and one they skip, and
+# between mutation testing in hours and in days. Debug assertions and overflow checks stay
+# on; catching those is what the test profile is for.
+[profile.test]
+opt-level = 1
