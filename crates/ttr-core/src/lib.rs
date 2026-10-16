@@ -34,11 +34,19 @@ pub mod heuristic;
 pub mod numeric;
 pub mod obs;
 pub mod obs_spec_gen;
+pub mod replay;
 pub mod resample;
 pub mod rng;
 pub mod scoring;
 pub mod state;
 pub mod vecenv;
+
+// Obviously-correct slow paths that the fast ones are tested against. Test-only: they
+// exist to disagree with the engine, never to run in it.
+#[cfg(test)]
+mod naive_graph;
+#[cfg(test)]
+mod naive_legal;
 
 /// The frozen-contract version, kept in lockstep with
 /// `ticket_to_ride.engine.contract.CONTRACT_VERSION`.
