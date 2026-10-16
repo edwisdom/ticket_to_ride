@@ -273,11 +273,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ttr-core"
+version = "0.1.0"
+source = "git+https://github.com/edwisdom/ticket_to_ride?rev=7923e282367804ec1b6432f9b1da1aecbfb8abab#7923e282367804ec1b6432f9b1da1aecbfb8abab"
+dependencies = [
+ "blake2b_simd",
+ "rayon",
+]
+
+[[package]]
 name = "ttr-py"
 version = "0.1.0"
 dependencies = [
  "pyo3",
- "ttr-core",
+ "ttr-core 0.1.0",
 ]
 
 [[package]]
@@ -286,7 +295,8 @@ version = "0.1.0"
 dependencies = [
  "blake2b_simd",
  "rayon",
- "ttr-core",
+ "ttr-core 0.1.0",
+ "ttr-core 0.1.0 (git+https://github.com/edwisdom/ticket_to_ride?rev=7923e282367804ec1b6432f9b1da1aecbfb8abab)",
 ]
 
 [[package]]

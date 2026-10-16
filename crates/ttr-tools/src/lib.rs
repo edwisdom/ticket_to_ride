@@ -5,4 +5,5 @@
 //! whether the engine still plays the recorded games sits apart from the engine itself.
 
 pub mod corpus;
+pub mod diff;
 pub mod engine;

@@ -5,13 +5,20 @@
 //! history). Two tiers:
 //!
 //! * **fast**, under plain `cargo test`: a prefix of every section, live crate only;
-//! * **full**, `#[ignore]`d: every game.
+//! * **full**, `#[ignore]`d: every game, against the live crate *and* the oracle -- the
+//!   latter is what closes the chain from Python to whatever the live crate is today.
 //!   `cargo test --release -p ttr-tools --test golden_corpus -- --ignored`.
 
 use ttr_tools::corpus::{
     Corpus, HEURISTIC_SEEDS, OBS_SEEDS, RANDOM_SEEDS, Scope, check, configs, current_header,
 };
 use ttr_tools::engine::Live;
+
+ttr_tools::engine_for!(
+    /// The build frozen as `oracle-v1`.
+    Oracle,
+    ttr_oracle
+);
 
 fn load(map: &str, n: usize) -> Corpus {
     Corpus::load(map, n).unwrap_or_else(|e| panic!("{e}"))
@@ -77,5 +84,13 @@ fn a_tampered_corpus_is_caught() {
 fn the_whole_corpus_reproduces_on_the_live_engine() {
     for (map, n) in configs() {
         check(&Live::new(map, n), &load(map, n), &Scope::all()).unwrap_or_else(|e| panic!("{e}"));
+    }
+}
+
+#[test]
+#[ignore = "every game: run with --release -- --ignored"]
+fn the_whole_corpus_reproduces_on_oracle_v1() {
+    for (map, n) in configs() {
+        check(&Oracle::new(map, n), &load(map, n), &Scope::all()).unwrap_or_else(|e| panic!("{e}"));
     }
 }
