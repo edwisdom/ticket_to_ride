@@ -28,6 +28,7 @@ from ticket_to_ride.config.device import resolve_device
 
 @dataclass
 class Config:
+    map: str = "mini"
     steps: int = 2_000_000
     n_envs: int = 256
     horizon: int = 64
@@ -60,9 +61,11 @@ class Policy(nn.Module):
         return logits, self.value(h).squeeze(-1)
 
 
-def make_env(n_envs: int, opponents: tuple[str, ...], seed: int) -> ttr_rust.VecEnv:
+def make_env(
+    n_envs: int, opponents: tuple[str, ...], seed: int, map_name: str = "mini"
+) -> ttr_rust.VecEnv:
     """Learner in seat `i % 2`, opponent cycling through `opponents` by env."""
-    env = ttr_rust.VecEnv("mini", 2, n_envs, seed)
+    env = ttr_rust.VecEnv(map_name, 2, n_envs, seed)
     for i in range(n_envs):
         opponent = opponents[(i // 2) % len(opponents)]
         env.assign(i, ["learner", opponent] if i % 2 == 0 else [opponent, "learner"])
@@ -89,7 +92,7 @@ def learner_seats(env: ttr_rust.VecEnv) -> np.ndarray:
 def evaluate(policy: Policy, cfg: Config, opponent: str, device: str) -> float:
     """Score per game against one opponent, both seatings: win 1, draw 0.5, loss 0."""
     n = cfg.eval_games
-    env = make_env(n, (opponent,), seed=10_000_000 + cfg.seed)
+    env = make_env(n, (opponent,), 10_000_000 + cfg.seed, cfg.map)
     obs = np.zeros((n, env.obs_size), dtype=np.float32)
     mask = np.zeros((n, env.n_actions), dtype=np.uint8)
     returns = np.zeros((n, 2), dtype=np.float32)
@@ -189,7 +192,7 @@ def train(cfg: Config) -> dict[str, object]:
     device = resolve_device(cfg.device)
     torch.manual_seed(cfg.seed)
     rng = np.random.default_rng(cfg.seed)
-    env = make_env(cfg.n_envs, cfg.opponents, cfg.seed)
+    env = make_env(cfg.n_envs, cfg.opponents, cfg.seed, cfg.map)
     n, t = cfg.n_envs, cfg.horizon
     policy = Policy(env.obs_size, env.n_actions, cfg.hidden).to(device)
     optim = torch.optim.Adam(policy.parameters(), lr=cfg.lr)
@@ -205,12 +208,19 @@ def train(cfg: Config) -> dict[str, object]:
     returns = np.zeros((n, 2), dtype=np.float32)
 
     steps, games, mask_violations, history = 0, 0, 0, []
+    # Where the time goes, in seconds: the engine (observe, mask, step including scripted
+    # replies), the network's forward pass and copies, the rest of the rollout loop
+    # (rewards, resets), and the PPO update.
+    timing = dict.fromkeys(("env", "network", "bookkeeping", "update"), 0.0)
     started = time.perf_counter()
     while steps < cfg.steps:
         with torch.no_grad():
             for k in range(t):
+                tick = time.perf_counter()
                 env.observe_current(obs_buf[k])
                 env.legal_masks(mask_buf[k])
+                tock = time.perf_counter()
+                timing["env"] += tock - tick
                 obs_t = torch.from_numpy(obs_buf[k]).to(device)
                 mask_t = torch.from_numpy(mask_buf[k]).bool().to(device)
                 logits, value = policy(obs_t, mask_t)
@@ -219,15 +229,23 @@ def train(cfg: Config) -> dict[str, object]:
                 act_buf[k] = action.cpu().numpy()
                 logp_buf[k] = dist.log_prob(action).cpu().numpy()
                 val_buf[k] = value.cpu().numpy()
+                tick = time.perf_counter()
+                timing["network"] += tick - tock
                 mask_violations += int((mask_buf[k][np.arange(n), act_buf[k]] == 0).sum())
-                env.step(act_buf[k].tolist())
+                actions = act_buf[k].tolist()
+                tock = time.perf_counter()
+                env.step(actions)
+                tick = time.perf_counter()
+                timing["env"] += tick - tock
                 flags = terminal(env)
                 env.returns(returns)
                 rew_buf[k] = np.where(flags, returns[np.arange(n), seat], 0.0)
                 done_buf[k] = flags
                 games += int(flags.sum())
                 env.auto_reset()
+                timing["bookkeeping"] += time.perf_counter() - tick
 
+        tick = time.perf_counter()
         update(
             policy,
             optim,
@@ -238,6 +256,7 @@ def train(cfg: Config) -> dict[str, object]:
             adv=advantages(cfg, val_buf, rew_buf, done_buf, bootstrap(policy, env, device)),
             values=val_buf,
         )
+        timing["update"] += time.perf_counter() - tick
         steps += t * n
         elapsed = time.perf_counter() - started
         history.append({"steps": steps, "games": games, "seconds": round(elapsed, 1)})
@@ -256,6 +275,7 @@ def train(cfg: Config) -> dict[str, object]:
         "seconds": round(elapsed, 1),
         "steps_per_second": round(steps / elapsed),
         "mask_violations": mask_violations,
+        "us_per_step": {k: round(v / steps * 1e6, 2) for k, v in timing.items()},
         "vs": {opponent: evaluate(policy, cfg, opponent, device) for opponent in ("h0", "h1")},
     }
 
