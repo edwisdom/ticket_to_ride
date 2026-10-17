@@ -4,7 +4,8 @@
 //! [`crate::graph`], so each fast function meets a slow one that shares none of its structure
 //! and whose correctness can be checked by reading it:
 //!
-//! * `remaining_costs_from` (Dijkstra) against `floyd_warshall`.
+//! * `remaining_costs_from` (Dijkstra), `all_pairs` (a fixed-width Floyd-Warshall) and
+//!   `guided_distance` (A* with one segment priced out) against `floyd_warshall`.
 //! * `steiner_cost_exact` (contraction, Dreyfus-Wagner, MST fallback) against
 //!   `spanning_trees` + `cheapest_superset`, a brute force over every set of cities -- so on
 //!   TTR-mini only.
@@ -24,8 +25,8 @@ use std::collections::BTreeSet;
 use crate::board::{Board, UNREACHABLE, get_board};
 use crate::config::{CLOSED, FREE, RuleConfig};
 use crate::graph::{
-    MAX_STEINER_TERMINALS, MAX_TRAIL_EDGES, edge_cost, longest_trail, remaining_costs_from,
-    steiner_cost_exact,
+    MAX_STEINER_TERMINALS, MAX_TRAIL_EDGES, all_pairs, crossing_costs, edge_cost, guided_distance,
+    longest_trail, remaining_costs_from, steiner_cost_exact,
 };
 use crate::rng::{Part, Pcg32, stream};
 use crate::state::Game;
@@ -34,7 +35,8 @@ use crate::state::Game;
 // The references
 // ---------------------------------------------------------------------------
 
-/// All-pairs "train cars still needed", by Floyd-Warshall over `edge_cost`.
+/// All-pairs "train cars still needed", by Floyd-Warshall over `edge_cost`, with the
+/// segment `without` (if any) treated as uncrossable.
 ///
 /// "No route" stays `None` until the very end, so no sentinel ever takes part in a sum.
 fn floyd_warshall(
@@ -42,6 +44,7 @@ fn floyd_warshall(
     seg_owner: &[u8],
     player: u8,
     doubles_locked: bool,
+    without: Option<usize>,
 ) -> Vec<Vec<u16>> {
     let n = board.n_cities;
     let mut d: Vec<Vec<Option<u32>>> = vec![vec![None; n]; n];
@@ -50,7 +53,7 @@ fn floyd_warshall(
     }
     for s in 0..board.n_segments {
         let w = edge_cost(board, seg_owner, player, s, doubles_locked);
-        if w >= UNREACHABLE {
+        if w >= UNREACHABLE || without == Some(s) {
             continue;
         }
         let (a, b) = (usize::from(board.seg_a[s]), usize::from(board.seg_b[s]));
@@ -310,32 +313,72 @@ fn all_game_layouts(seeds: std::ops::Range<u64>, every: usize) -> Vec<Layout> {
 }
 
 // ---------------------------------------------------------------------------
-// Remaining cost: Dijkstra against Floyd-Warshall
+// Remaining cost: Dijkstra, all-pairs and A* against Floyd-Warshall
 // ---------------------------------------------------------------------------
 
+/// Every `GUIDED_STRIDE`-th crossable segment is priced out in turn for the A* check.
+const GUIDED_STRIDE: usize = 7;
+
 /// Compares every source on every layout. Returns how many (source, city) pairs were dead.
+///
+/// Then prices segments out one at a time, as `fragility` does, and checks the guided
+/// search between every pair of cities against Floyd-Warshall without that segment.
 fn check_remaining_costs(layouts: &[Layout]) -> usize {
     let mut dead = 0;
     for layout in layouts {
         let board = layout.board;
+        let n = board.n_cities;
         for &seat in &layout.seats {
             for doubles_locked in [true, false] {
-                let all_pairs = floyd_warshall(board, &layout.seg_owner, seat, doubles_locked);
-                for source in 0..board.n_cities as u8 {
-                    let expected = &all_pairs[usize::from(source)];
+                let label = format!(
+                    "{}: seat {seat}, doubles_locked={doubles_locked}",
+                    layout.label
+                );
+                let expected = floyd_warshall(board, &layout.seg_owner, seat, doubles_locked, None);
+                let cost = crossing_costs(board, &layout.seg_owner, seat, doubles_locked);
+                let table = all_pairs(board, &cost);
+                for source in 0..n {
+                    let want = &expected[source];
                     assert_eq!(
                         &remaining_costs_from(
                             board,
                             &layout.seg_owner,
                             seat,
-                            source,
+                            source as u8,
                             doubles_locked
                         ),
-                        expected,
-                        "{}: seat {seat} from city {source}, doubles_locked={doubles_locked}",
-                        layout.label
+                        want,
+                        "{label}: Dijkstra from city {source}"
                     );
-                    dead += expected.iter().filter(|&&d| d == UNREACHABLE).count();
+                    assert_eq!(
+                        &table[source][..n],
+                        &want[..],
+                        "{label}: all_pairs row {source}"
+                    );
+                    dead += want.iter().filter(|&&d| d == UNREACHABLE).count();
+                }
+
+                let crossable = (0..board.n_segments).filter(|&s| cost[s] < UNREACHABLE);
+                for out in crossable.step_by(GUIDED_STRIDE) {
+                    let without =
+                        floyd_warshall(board, &layout.seg_owner, seat, doubles_locked, Some(out));
+                    let mut priced_out = cost;
+                    priced_out[out] = UNREACHABLE;
+                    for source in 0..n {
+                        for target in 0..n {
+                            assert_eq!(
+                                guided_distance(
+                                    board,
+                                    &priced_out,
+                                    &table[target],
+                                    source as u8,
+                                    target as u8
+                                ),
+                                without[source][target],
+                                "{label}: A* from {source} to {target} without segment {out}"
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -343,8 +386,9 @@ fn check_remaining_costs(layouts: &[Layout]) -> usize {
     dead
 }
 
-/// Dijkstra and Floyd-Warshall share nothing but `edge_cost`. On an empty board both must
-/// also reproduce the static distance table, which a third piece of code built.
+/// The searches and Floyd-Warshall share nothing but `edge_cost`. On an empty board the
+/// reference must also reproduce the static distance table, which a third piece of code
+/// built.
 #[test]
 fn remaining_costs_match_floyd_warshall() {
     let mut layouts = Vec::new();
@@ -352,7 +396,7 @@ fn remaining_costs_match_floyd_warshall() {
         let b = board(name);
         let empty = empty_layout(b);
         assert_eq!(
-            floyd_warshall(b, &empty.seg_owner, 0, true),
+            floyd_warshall(b, &empty.seg_owner, 0, true, None),
             b.dist,
             "{name}: Floyd-Warshall disagrees with the static table"
         );

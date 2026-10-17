@@ -65,6 +65,10 @@ pub struct VecEnv {
     /// `n_envs`, so no two environments ever replay each other's game.
     seeds: Vec<u64>,
     next_seed: u64,
+    /// One per environment: the encoder's graph work per seat, reused across steps that
+    /// change neither the board nor that seat's tickets ([`obs::EncoderCache`]). Keyed by
+    /// content, so resets need not touch it.
+    caches: Vec<obs::EncoderCache>,
     obs_size: usize,
     n_actions: usize,
 }
@@ -81,6 +85,7 @@ impl VecEnv {
             obs_size,
             seeds: (0..n_envs).map(|i| base_seed + i as u64).collect(),
             next_seed: base_seed + n_envs as u64,
+            caches: vec![obs::EncoderCache::new(); n_envs],
             states,
             game,
         }
@@ -163,10 +168,11 @@ impl VecEnv {
         assert_eq!(out.len(), self.states.len() * self.obs_size);
         self.states
             .par_iter_mut()
+            .zip(self.caches.par_iter_mut())
             .zip(out.par_chunks_mut(self.obs_size))
-            .for_each(|(state, slot)| {
+            .for_each(|((state, cache), slot)| {
                 let player = state.current_player() as usize;
-                obs::encode(state, player, slot);
+                obs::encode_cached(state, player, slot, cache);
             });
     }
 
@@ -175,8 +181,16 @@ impl VecEnv {
         assert_eq!(out.len(), self.states.len() * self.obs_size);
         self.states
             .par_iter_mut()
+            .zip(self.caches.par_iter_mut())
             .zip(out.par_chunks_mut(self.obs_size))
-            .for_each(|(state, slot)| obs::encode(state, player, slot));
+            .for_each(|((state, cache), slot)| obs::encode_cached(state, player, slot, cache));
+    }
+
+    /// Encoder-cache lookups so far across every environment, as (hits, misses).
+    pub fn encoder_cache_stats(&self) -> (u64, u64) {
+        self.caches
+            .iter()
+            .fold((0, 0), |(h, m), c| (h + c.hits(), m + c.misses()))
     }
 
     /// Write every environment's legal-action mask into `out`, `len() * n_actions()` bytes.
@@ -355,6 +369,33 @@ mod tests {
             let got = &buffer[i * env.obs_size()..(i + 1) * env.obs_size()];
             assert_eq!(got, &want[..], "env {i}");
         }
+    }
+
+    #[test]
+    fn cached_observations_match_the_single_encoder_step_after_step() {
+        let mut env = VecEnv::new(game("usa", 3), 4, 7);
+        let mut buffer = vec![0.0f32; env.len() * env.obs_size()];
+        let mut want = vec![0.0f32; env.obs_size()];
+        let mut rng = policy_stream(7);
+        for _ in 0..300 {
+            env.observe_current(&mut buffer);
+            for i in 0..env.len() {
+                let player = env.states()[i].current_player() as usize;
+                obs::encode(&mut env.states_mut()[i], player, &mut want);
+                let got = &buffer[i * env.obs_size()..(i + 1) * env.obs_size()];
+                assert_eq!(got, &want[..], "env {i}");
+            }
+            let actions: Vec<u16> = env
+                .states()
+                .iter()
+                .map(|s| s.sample_legal(&mut rng).unwrap_or(0))
+                .collect();
+            env.step(&actions).expect("sampled actions are legal");
+            env.auto_reset();
+        }
+        let (hits, misses) = env.encoder_cache_stats();
+        assert_eq!(hits + misses, 4 * 300);
+        assert!(hits > misses / 2, "{hits} hits, {misses} misses");
     }
 
     #[test]

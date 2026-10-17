@@ -1,21 +1,27 @@
 //! Time the observation encoder on recorded positions, single-threaded.
 //!
 //! ```text
-//! cargo run --release -p ttr-tools --bin bench-obs -- [map] [seats] [games] [repeats] [random|h3]
+//! cargo run --release -p ttr-tools --bin bench-obs -- [map] [seats] [games] [repeats] [random|h3] [cold|cached]
 //! samply record ./target/release/bench-obs usa 2 200 20
 //! ```
 //!
 //! Plays `games` games -- uniformly random by default, or H3 self-play, whose positions
 //! (fewer tickets, longer networks) are the ones training will mostly see -- keeps every
-//! position, then encodes each one for the seat to act, `repeats` times over. Single-threaded on purpose: the figure is CPU per observation,
-//! which is what a batched observe divides across cores. Positions are recorded first so
-//! the timing measures the encoder and nothing else.
+//! position, then encodes each one for the seat to act, `repeats` times over.
+//! Single-threaded on purpose: the figure is CPU per observation, which is what a batched
+//! observe divides across cores. Positions are recorded first and only the encoder calls
+//! are timed -- the checksum, a serial chain of thousands of additions per observation, is
+//! not.
+//!
+//! `cold` (the default) recomputes everything for every position. `cached` encodes the
+//! positions in game order through one `EncoderCache`, as a `VecEnv` does, and reports the
+//! hit rate.
 
 use std::time::Instant;
 
 use ttr_core::config::RuleConfig;
 use ttr_core::heuristic::{Heuristic, HeuristicParams, Tier};
-use ttr_core::obs::{encode, observation_size};
+use ttr_core::obs::{EncoderCache, encode, encode_cached, observation_size};
 use ttr_core::rng::{Part, stream};
 use ttr_core::state::{Game, State};
 
@@ -26,6 +32,7 @@ fn main() {
     let games: u64 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(200);
     let repeats: usize = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(5);
     let h3 = args.get(4).is_some_and(|p| p == "h3");
+    let cached = args.get(5).is_some_and(|p| p == "cached");
 
     let cfg = RuleConfig {
         track_history: false,
@@ -58,20 +65,33 @@ fn main() {
     }
 
     let mut out = vec![0.0f32; observation_size(&positions[0])];
+    let mut cache = EncoderCache::new();
     let mut checksum = 0.0f64;
-    let started = Instant::now();
+    let mut elapsed = 0.0f64;
     for _ in 0..repeats {
         for state in &mut positions {
             let seat = usize::from(state.current_player()).min(seats - 1);
-            encode(state, seat, &mut out);
+            let started = Instant::now();
+            if cached {
+                encode_cached(state, seat, &mut out, &mut cache);
+            } else {
+                encode(state, seat, &mut out);
+            }
+            elapsed += started.elapsed().as_secs_f64();
             checksum += out.iter().map(|&x| f64::from(x)).sum::<f64>();
         }
     }
-    let elapsed = started.elapsed().as_secs_f64();
     let n = positions.len() * repeats;
+    let hit_rate = if cached {
+        let lookups = (cache.hits() + cache.misses()) as f64;
+        format!(", {:.1}% cache hits", 100.0 * cache.hits() as f64 / lookups)
+    } else {
+        String::new()
+    };
     println!(
-        "{map} {seats}P {}: {} positions x {repeats}: {:.2} us/obs single-threaded (checksum {checksum:.6e})",
+        "{map} {seats}P {} {}: {} positions x {repeats}: {:.2} us/obs single-threaded{hit_rate} (checksum {checksum:.6e})",
         if h3 { "h3" } else { "random" },
+        if cached { "cached" } else { "cold" },
         positions.len(),
         elapsed / n as f64 * 1e6
     );

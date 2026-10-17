@@ -13,10 +13,14 @@
 //! -- but it agrees by luck of the ranges, and a new feature with a different divisor could
 //! double-round differently in one slot out of 3355.
 //!
-//! One thing that reads oddly and is correct: this takes `&mut State`. Two of the features
-//! need it -- the union-find roots are read through path halving, and `fragility` re-prices
-//! a route with each of its free segments temporarily closed. Both restore what they
-//! touched, and neither the DSU nor a restored `seg_owner` reaches any hash.
+//! One thing that reads oddly and is correct: this takes `&mut State`, because the
+//! union-find roots are read through path halving. The DSU reaches no hash.
+//!
+//! **Cost.** Nearly all of an observation is graph work that depends only on the board and
+//! the observing seat's tickets ([`Derived`]): the all-pairs table, the Steiner DP,
+//! fragility's searches, the opponents' longest trails. [`encode_cached`] keeps it per seat
+//! in an [`EncoderCache`] and skips it whenever a step changed neither -- card draws, about
+//! half of all steps. [`encode`] recomputes everything; the two write identical buffers.
 
 use crate::board::{
     CityId, GRAY, MAX_CARD_TYPES, MAX_CITIES, MAX_PLAYERS, MAX_SEGMENTS, MAX_TICKETS, NO_SIBLING,
@@ -24,7 +28,7 @@ use crate::board::{
 };
 use crate::config::{CLOSED, EMPTY_SLOT, FREE, NOT_TRIGGERED, PHASE_DRAW_SECOND};
 use crate::graph::{
-    Distances, MIN_TERMINALS, all_pairs, crossing_costs, distance_between, longest_trail,
+    Distances, MIN_TERMINALS, all_pairs, crossing_costs, guided_distance, longest_trail,
     steiner_cost_with,
 };
 pub use crate::obs_spec::spec_for;
@@ -361,55 +365,50 @@ fn layout_for(map: &str) -> &'static Layout {
 }
 
 // ---------------------------------------------------------------------------
-// Per-encode derived view
+// The graph work, and the cache that skips it
 // ---------------------------------------------------------------------------
 
-/// Everything the blocks need, computed once: seat order, costs, the Steiner tree.
+/// What the encoder derives from the board and one seat's tickets: the graph work, and all
+/// but a few percent of an observation's cost.
 ///
-/// Fixed-size throughout, so building one allocates nothing. The player's crossing costs
-/// and the all-pairs table over them are computed once here, and every distance the
-/// encoder reads -- ticket costs, the Steiner DP's terminals, the planned routes -- is a
-/// row of that table rather than a Dijkstra of its own.
-struct View {
-    me: usize,
-    /// Opponents by distance in turn order: slot 0 acts next. `n_players - 1` entries.
-    order: [usize; MAX_PLAYERS - 1],
-    n_opponents: usize,
-    trains_supply: f64,
-    dsu_root: [u8; MAX_CITIES],
+/// A pure function of [`Key`] -- the board, the seat count, the double-route rule, every
+/// segment's owner and the seat's tickets -- and of nothing a card draw changes, which lets
+/// [`EncoderCache`] reuse it. Fixed-size throughout, so computing one allocates nothing.
+/// My crossing costs and the all-pairs table over them are built once, and every distance
+/// read -- ticket costs, the Steiner DP's terminals, the planned routes, fragility's
+/// guide -- is a row of that table; neither is kept, since nothing downstream needs them.
+#[derive(Clone, Debug, PartialEq)]
+struct Derived {
     /// Held ticket ids, ascending.
     held: [u8; MAX_TICKETS],
     n_held: usize,
     /// Remaining cost per ticket id; meaningful for held tickets only.
     ticket_cost: [u16; MAX_TICKETS],
-    /// My crossing cost per segment ([`crate::graph::edge_cost`]).
-    cost: [u16; MAX_SEGMENTS],
-    dist: Distances,
+    /// [`fragility`] per ticket id; meaningful for held tickets that are not dead.
+    fragility: [f64; MAX_TICKETS],
     steiner: u32,
     steiner_exact: bool,
     /// Free segments on the planned routes, one bit per segment.
     plan: u128,
-    unseen: [i16; MAX_CARD_TYPES],
+    /// Longest trail per seat; meaningful for opponents only.
+    trails: [u16; MAX_PLAYERS],
 }
 
 const _: () = assert!(MAX_SEGMENTS <= 128, "the plan bitset is a u128");
 
-impl View {
-    fn build(state: &mut State, player: usize) -> Self {
+impl Derived {
+    fn compute(state: &State, player: usize) -> Self {
         let board = state.board;
-        let n = state.n_players();
         let seg_owner = &state.seg_owner[..board.n_segments];
-
-        let mut order = [0usize; MAX_PLAYERS - 1];
-        for (i, slot) in order.iter_mut().enumerate().take(n - 1) {
-            *slot = (player + 1 + i) % n;
-        }
-        let cost = crossing_costs(board, seg_owner, player as u8, state.rules.doubles_locked);
+        let me = player as u8;
+        let cost = crossing_costs(board, seg_owner, me, state.rules.doubles_locked);
         let dist = all_pairs(board, &cost);
+        let trains_supply = f64::from(board.raw.trains_per_player);
 
         let mut held = [0u8; MAX_TICKETS];
         let mut n_held = 0;
         let mut ticket_cost = [UNREACHABLE; MAX_TICKETS];
+        let mut fragility_of = [0.0; MAX_TICKETS];
         let mut terminals = [0 as CityId; 2 * MAX_TICKETS];
         let mut n_terminals = 0;
         for (ticket, slot) in ticket_cost.iter_mut().enumerate().take(board.n_tickets) {
@@ -425,11 +424,147 @@ impl View {
                 terminals[n_terminals] = a;
                 terminals[n_terminals + 1] = b;
                 n_terminals += 2;
+                fragility_of[ticket] = fragility(state, me, &cost, &dist, ticket, trains_supply);
             }
         }
         let terminals = &terminals[..n_terminals];
         let (steiner, steiner_exact) = steiner_cost_with(board, &dist, terminals);
+        let plan = planned_segments(state, player, &dist, terminals);
 
+        let mut trails = [0u16; MAX_PLAYERS];
+        for (seat, trail) in trails.iter_mut().enumerate().take(state.n_players()) {
+            if seat != player {
+                *trail = longest_trail(board, seg_owner, seat as u8);
+            }
+        }
+        Self {
+            held,
+            n_held,
+            ticket_cost,
+            fragility: fragility_of,
+            steiner,
+            steiner_exact,
+            plan,
+            trails,
+        }
+    }
+
+    fn held(&self) -> &[u8] {
+        &self.held[..self.n_held]
+    }
+}
+
+/// Everything [`Derived`] is a function of, compared whole: the inputs themselves rather
+/// than a version counter, so nothing ever has to invalidate a cache entry.
+#[derive(Clone, Debug, PartialEq)]
+struct Key {
+    /// The board's address: boards are `'static`, one per map.
+    board: usize,
+    n_players: usize,
+    doubles_locked: bool,
+    seg_owner: [u8; MAX_SEGMENTS],
+    tickets: u32,
+}
+
+impl Key {
+    fn of(state: &State, player: usize) -> Self {
+        Self {
+            board: std::ptr::from_ref(state.board) as usize,
+            n_players: state.n_players(),
+            doubles_locked: state.rules.doubles_locked,
+            seg_owner: state.seg_owner,
+            tickets: state.tickets[player],
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct Entry {
+    key: Key,
+    derived: Derived,
+}
+
+/// The encoder's graph work, remembered per seat -- one of these per environment.
+///
+/// Each seat keeps the [`Derived`] of the last position it was encoded in, keyed by the
+/// inputs it came from. A reset, a replaced state or another game simply misses; a hit is
+/// equal to recomputing by construction, and debug builds recompute on every hit and assert
+/// it (PLAN.md §14.1, Phase 3.2). `tests/encoder_cache.rs` drives that over ten thousand
+/// games.
+#[derive(Clone, Debug)]
+pub struct EncoderCache {
+    seats: [Option<Entry>; MAX_PLAYERS],
+    hits: u64,
+    misses: u64,
+}
+
+impl Default for EncoderCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl EncoderCache {
+    pub const fn new() -> Self {
+        Self {
+            seats: [const { None }; MAX_PLAYERS],
+            hits: 0,
+            misses: 0,
+        }
+    }
+
+    /// Lookups answered from the cache.
+    pub fn hits(&self) -> u64 {
+        self.hits
+    }
+
+    /// Lookups that recomputed.
+    pub fn misses(&self) -> u64 {
+        self.misses
+    }
+
+    fn lookup(&mut self, state: &State, player: usize) -> &Derived {
+        let key = Key::of(state, player);
+        let slot = &mut self.seats[player];
+        if matches!(slot, Some(entry) if entry.key == key) {
+            self.hits += 1;
+            debug_assert_eq!(
+                slot.as_ref().map(|entry| &entry.derived),
+                Some(&Derived::compute(state, player)),
+                "the encoder cache disagrees with recomputation"
+            );
+        } else {
+            self.misses += 1;
+            *slot = Some(Entry {
+                derived: Derived::compute(state, player),
+                key,
+            });
+        }
+        &slot.as_ref().expect("filled above").derived
+    }
+}
+
+/// What the blocks read: the board-derived work, and the per-position rest -- seat order,
+/// union-find roots, unseen counts -- which is cheap and changes with every card.
+struct View<'a> {
+    me: usize,
+    /// Opponents by distance in turn order: slot 0 acts next. `n_players - 1` entries.
+    order: [usize; MAX_PLAYERS - 1],
+    n_opponents: usize,
+    trains_supply: f64,
+    dsu_root: [u8; MAX_CITIES],
+    unseen: [i16; MAX_CARD_TYPES],
+    derived: &'a Derived,
+}
+
+impl<'a> View<'a> {
+    fn build(state: &mut State, player: usize, derived: &'a Derived) -> Self {
+        let board = state.board;
+        let n = state.n_players();
+        let mut order = [0usize; MAX_PLAYERS - 1];
+        for (i, slot) in order.iter_mut().enumerate().take(n - 1) {
+            *slot = (player + 1 + i) % n;
+        }
         let mut dsu_root = [0u8; MAX_CITIES];
         for (city, root) in dsu_root.iter_mut().enumerate().take(board.n_cities) {
             *root = state.dsu_root(player, city as u8);
@@ -438,28 +573,15 @@ impl View {
         for (slot, count) in unseen.iter_mut().zip(state.unseen_counts(player)) {
             *slot = count;
         }
-
-        let plan = planned_segments(state, player, &dist, terminals);
         Self {
             me: player,
             order,
             n_opponents: n - 1,
             trains_supply: f64::from(board.raw.trains_per_player),
             dsu_root,
-            held,
-            n_held,
-            ticket_cost,
-            cost,
-            dist,
-            steiner,
-            steiner_exact,
-            plan,
             unseen,
+            derived,
         }
-    }
-
-    fn held(&self) -> &[u8] {
-        &self.held[..self.n_held]
     }
 
     fn order(&self) -> &[usize] {
@@ -547,7 +669,7 @@ fn planned_segments(state: &State, me: usize, dist: &Distances, terminals: &[Cit
 // Encoding
 // ---------------------------------------------------------------------------
 
-/// Encode `state` from `player`'s point of view into `out`.
+/// Encode `state` from `player`'s point of view into `out`, computing everything.
 ///
 /// Opponents are ordered by **distance in turn order**, so slot 0 is whoever acts next.
 /// Seat-relative rather than permutation-invariant, which is the right prior: in Ticket to
@@ -556,6 +678,21 @@ fn planned_segments(state: &State, me: usize, dist: &Distances, terminals: &[Cit
 /// # Panics
 /// If `out` is not exactly the spec's size for this board.
 pub fn encode(state: &mut State, player: usize, out: &mut [f32]) {
+    let derived = Derived::compute(state, player);
+    encode_with(state, player, &derived, out);
+}
+
+/// [`encode`], reusing the graph work `cache` holds for `player` when the board and their
+/// tickets are as they were; the buffer written is identical either way.
+///
+/// # Panics
+/// If `out` is not exactly the spec's size for this board.
+pub fn encode_cached(state: &mut State, player: usize, out: &mut [f32], cache: &mut EncoderCache) {
+    let derived = cache.lookup(state, player);
+    encode_with(state, player, derived, out);
+}
+
+fn encode_with(state: &mut State, player: usize, derived: &Derived, out: &mut [f32]) {
     let layout = layout_for(state.board.name);
     assert_eq!(
         out.len(),
@@ -566,7 +703,7 @@ pub fn encode(state: &mut State, player: usize, out: &mut [f32]) {
     );
     out.fill(0.0);
 
-    let view = View::build(state, player);
+    let view = View::build(state, player, derived);
     segment_static(&view, state, layout, out);
     segment_dynamic(&view, state, layout, out);
     own_hand(&view, state, layout, out);
@@ -578,7 +715,6 @@ pub fn encode(state: &mut State, player: usize, out: &mut [f32]) {
     clock(&view, state, layout, out);
 }
 
-#[inline]
 fn thermometer<T: Copy + Into<u32>>(out: &mut [f32], base: usize, value: u32, buckets: &[T]) {
     for (i, &edge) in buckets.iter().enumerate() {
         out[base + i] = if value >= edge.into() { 1.0 } else { 0.0 };
@@ -659,7 +795,8 @@ fn segment_dynamic(view: &View, state: &State, l: &Layout, out: &mut [f32]) {
             &HAND_BUCKETS,
         );
 
-        out[l.seg_dyn.at(segment, l.on_my_steiner_tree)] = if view.plan >> segment & 1 == 1 {
+        out[l.seg_dyn.at(segment, l.on_my_steiner_tree)] = if view.derived.plan >> segment & 1 == 1
+        {
             1.0
         } else {
             0.0
@@ -696,9 +833,9 @@ fn tickets(view: &View, state: &State, l: &Layout, out: &mut [f32]) {
         out[l.tickets.at(ticket, l.points)] =
             (f64::from(board.ticket_points[ticket]) / max_points) as f32;
     }
-    for &t in view.held() {
+    for &t in view.derived.held() {
         let ticket = usize::from(t);
-        let cost = view.ticket_cost[ticket];
+        let cost = view.derived.ticket_cost[ticket];
         let dead = cost >= UNREACHABLE;
         out[l.tickets.at(ticket, l.held)] = 1.0;
         out[l.tickets.at(ticket, l.connected)] = if cost == 0 { 1.0 } else { 0.0 };
@@ -715,50 +852,51 @@ fn tickets(view: &View, state: &State, l: &Layout, out: &mut [f32]) {
             &COST_BUCKETS,
         );
         out[l.tickets.at(ticket, l.fragility)] =
-            (fragility(view, state, ticket) / view.trains_supply) as f32;
+            (view.derived.fragility[ticket] / view.trains_supply) as f32;
     }
 }
 
 /// Worst extra cost if one enemy claim lands on my cheapest route for this ticket.
 ///
 /// Measured by re-pricing the route with each of its free segments taken in turn: a
-/// Dijkstra per segment over my cost table with that one segment priced out, stopped as
-/// soon as the far end is settled. That separates a safe connection from one hanging on a
-/// single contested edge.
-fn fragility(view: &View, state: &State, ticket: usize) -> f64 {
+/// search per segment over my cost table with that one segment priced out, stopped as soon
+/// as the far end is settled. That separates a safe connection from one hanging on a
+/// single contested edge. The search is A* toward the far end, guided by the unblocked
+/// distances already in the view, so a route with a cheap way around explores little.
+fn fragility(
+    state: &State,
+    me: u8,
+    cost: &[u16; MAX_SEGMENTS],
+    dist: &Distances,
+    ticket: usize,
+    trains_supply: f64,
+) -> f64 {
     let board = state.board;
     let (a, b) = (board.ticket_a[ticket], board.ticket_b[ticket]);
-    let baseline = view.ticket_cost[ticket];
+    let baseline = dist[usize::from(a)][usize::from(b)];
     if baseline == 0 || baseline >= UNREACHABLE {
         return 0.0;
     }
 
     let mut on_path = [0 as SegmentId; MAX_CITIES + 1];
     let mut n_on_path = 0;
-    walk_route(
-        state,
-        view.me as u8,
-        &view.dist[usize::from(a)],
-        a,
-        b,
-        |segment, owner| {
-            if owner == FREE && n_on_path < on_path.len() {
-                on_path[n_on_path] = segment;
-                n_on_path += 1;
-            }
-        },
-    );
+    walk_route(state, me, &dist[usize::from(a)], a, b, |segment, owner| {
+        if owner == FREE && n_on_path < on_path.len() {
+            on_path[n_on_path] = segment;
+            n_on_path += 1;
+        }
+    });
 
-    let mut cost = view.cost;
+    let mut cost = *cost;
     let mut worst = 0u16;
     for &segment in &on_path[..n_on_path] {
         let s = usize::from(segment);
         let kept = cost[s];
         cost[s] = UNREACHABLE;
-        let detour = distance_between(board, &cost, a, b);
+        let detour = guided_distance(board, &cost, &dist[usize::from(b)], a, b);
         cost[s] = kept;
         if detour >= UNREACHABLE {
-            return view.trains_supply;
+            return trains_supply;
         }
         worst = worst.max(detour - baseline);
     }
@@ -766,11 +904,11 @@ fn fragility(view: &View, state: &State, ticket: usize) -> f64 {
 }
 
 fn steiner(view: &View, state: &State, l: &Layout, out: &mut [f32]) {
-    let cost = f64::from(view.steiner.min((view.trains_supply as u32) * 2));
+    let cost = f64::from(view.derived.steiner.min((view.trains_supply as u32) * 2));
     out[l.steiner.at(0, l.steiner_remaining_cost)] = (cost / view.trains_supply) as f32;
     let slack = f64::from(state.trains[view.me]) - cost;
     out[l.steiner.at(0, l.cost_minus_trains)] = (slack / view.trains_supply) as f32;
-    out[l.steiner.at(0, l.exact)] = if view.steiner_exact { 1.0 } else { 0.0 };
+    out[l.steiner.at(0, l.exact)] = if view.derived.steiner_exact { 1.0 } else { 0.0 };
 }
 
 fn faceup(_view: &View, state: &State, l: &Layout, out: &mut [f32]) {
@@ -831,7 +969,7 @@ fn opponents(view: &View, state: &State, l: &Layout, out: &mut [f32]) {
             .filter(|&&o| o as usize == seat)
             .count();
         out[l.opponents.at(slot, l.segments_claimed)] = (claimed as f64 / n_segments as f64) as f32;
-        let trail = longest_trail(board, &state.seg_owner[..n_segments], seat as u8);
+        let trail = view.derived.trails[seat];
         out[l.opponents.at(slot, l.longest_chain)] = (f64::from(trail) / view.trains_supply) as f32;
         for c in 0..k {
             let printed = f64::from(board.cards_per_type(c as u8));

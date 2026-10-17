@@ -121,13 +121,11 @@ pub fn crossing_costs(
 /// 0 for my own track, a route's length for free track, at most `max_len` -- so the open
 /// distances always lie in a window `max_len + 1` wide, and a ring of that many city
 /// bitmasks is the whole priority queue. Zero-cost track lands back in the bucket being
-/// drained and is picked up in the same round. If `target` is given the search stops as
-/// soon as that city is settled (its distance is final then) and later cities are left
-/// unsettled.
+/// drained and is picked up in the same round.
 ///
 /// Exact shortest distances are unique, so this agrees with any other correct search; the
 /// `naive_graph` Floyd-Warshall reference checks it.
-fn dijkstra(board: &Board, cost: &[u16], source: u8, target: Option<u8>, dist: &mut [u16]) {
+fn dijkstra(board: &Board, cost: &[u16], source: u8, dist: &mut [u16]) {
     const RING: usize = MAX_ROUTE_LEN + 1;
     debug_assert!(usize::from(board.max_len) < RING);
     let n = board.n_cities;
@@ -146,9 +144,6 @@ fn dijkstra(board: &Board, cost: &[u16], source: u8, target: Option<u8>, dist: &
                 batch &= batch - 1;
                 if settled >> here & 1 == 1 || dist[here] != current {
                     continue;
-                }
-                if target == Some(here as u8) {
-                    return;
                 }
                 settled |= 1 << here;
                 for &(nb, segment) in &board.adjacency[here] {
@@ -186,16 +181,70 @@ pub fn remaining_costs_from(
 ) -> Vec<u16> {
     let cost = crossing_costs(board, seg_owner, player, doubles_locked);
     let mut dist = vec![UNREACHABLE; board.n_cities];
-    dijkstra(board, &cost, source, None, &mut dist);
+    dijkstra(board, &cost, source, &mut dist);
     dist
 }
 
-/// The cheapest crossing cost from `source` to `target` over a cost table, stopping as soon
-/// as `target` is settled. [`UNREACHABLE`] if it cannot be reached.
-pub fn distance_between(board: &Board, cost: &[u16], source: u8, target: u8) -> u16 {
-    let mut dist = [UNREACHABLE; MAX_CITIES];
-    dijkstra(board, cost, source, Some(target), &mut dist);
-    dist[usize::from(target)]
+/// The cheapest crossing cost from `source` to `target` over `cost` ([`UNREACHABLE`] if
+/// there is no route), by A* search: every city's distance to `target` over some cheaper
+/// cost table is already known (`toward`), and it steers the search.
+///
+/// `toward` must be a consistent lower bound for `cost`: for every crossable segment from
+/// x to y, `toward[x] <= cost + toward[y]`. Distances to `target` over a table that `cost`
+/// only raises are exactly that -- the encoder's case: `fragility` prices one segment out
+/// of my table and reads `toward` from the all-pairs table of the original. The search then
+/// settles cities in order of `g + toward`, which is non-decreasing, and stops at `target`
+/// with the exact distance; a city that cannot reach `target` over the cheaper table cannot
+/// over `cost` either, and is never queued. The ring is twice as wide as Dijkstra's
+/// because a step raises `g + toward` by up to twice a segment's cost.
+pub fn guided_distance(board: &Board, cost: &[u16], toward: &[u16], source: u8, target: u8) -> u16 {
+    const RING: usize = 2 * MAX_ROUTE_LEN + 1;
+    debug_assert!(2 * usize::from(board.max_len) < RING);
+    let start = toward[usize::from(source)];
+    if start >= UNREACHABLE {
+        return UNREACHABLE;
+    }
+    let mut g = [UNREACHABLE; MAX_CITIES];
+    g[usize::from(source)] = 0;
+    let mut ring = [0u64; RING];
+    ring[usize::from(start) % RING] = 1 << source;
+    let mut settled = 0u64;
+    let mut current = start;
+    loop {
+        let slot = usize::from(current) % RING;
+        while ring[slot] != 0 {
+            let mut batch = std::mem::take(&mut ring[slot]);
+            while batch != 0 {
+                let here = batch.trailing_zeros() as usize;
+                batch &= batch - 1;
+                if settled >> here & 1 == 1 || g[here] + toward[here] != current {
+                    continue;
+                }
+                if here == usize::from(target) {
+                    return g[here];
+                }
+                settled |= 1 << here;
+                for &(nb, segment) in &board.adjacency[here] {
+                    let w = cost[usize::from(segment)];
+                    let nb = usize::from(nb);
+                    let h = toward[nb];
+                    if w >= UNREACHABLE || h >= UNREACHABLE {
+                        continue;
+                    }
+                    let ng = g[here] + w;
+                    if ng < g[nb] {
+                        debug_assert!(ng + h >= current, "`toward` is not consistent");
+                        g[nb] = ng;
+                        ring[usize::from(ng + h) % RING] |= 1 << nb;
+                    }
+                }
+            }
+        }
+        if ring.iter().all(|&b| b == 0) {
+            return UNREACHABLE;
+        }
+        current += 1;
+    }
 }
 
 /// Rows of the all-pairs table are padded to this many entries, a multiple of the SIMD
@@ -329,43 +378,51 @@ pub fn steiner_cost_with(board: &Board, dist: &Distances, terminals: &[u8]) -> (
 
     let n = board.n_cities;
     let full = (1usize << roots.len()) - 1;
-    let sentinel = u32::from(UNREACHABLE);
-    // dp[mask][v] = cheapest tree spanning the terminals in `mask` plus the vertex v.
-    let mut dp = [[sentinel; DIST_STRIDE]; 1 << MAX_STEINER_TERMINALS];
+    // dp[mask][v] = cheapest tree spanning the terminals in `mask` plus the vertex v. In u16
+    // exactly: every cell is at most UNREACHABLE, so a sum of two is under u16::MAX (the
+    // assertion in `all_pairs`). Rows above `full` are never read, and every row at or below
+    // it is written before it is read, since submasks are numerically smaller.
+    let mut dp = [[UNREACHABLE; DIST_STRIDE]; 1 << MAX_STEINER_TERMINALS];
     for (i, &t) in roots.iter().enumerate() {
-        for (cell, &d) in dp[1 << i].iter_mut().zip(&dist[usize::from(t)]) {
-            *cell = u32::from(d);
-        }
+        dp[1 << i] = dist[usize::from(t)];
     }
 
     for mask in 1..=full {
         if mask & (mask - 1) == 0 {
             continue; // single terminal: already initialized from its distances
         }
-        let mut row = dp[mask];
-        let mut sub = (mask - 1) & mask;
-        while sub != 0 {
-            let (left, other) = (&dp[sub], &dp[mask ^ sub]);
+        // Every split into two non-empty halves, once: the half holding mask's lowest
+        // terminal is `low | s`, the other `rest ^ s`, for each s strictly inside `rest`.
+        let low = mask & mask.wrapping_neg();
+        let rest = mask ^ low;
+        let mut row = [UNREACHABLE; DIST_STRIDE];
+        let mut s = rest;
+        while s != 0 {
+            s = (s - 1) & rest;
+            let (left, other) = (&dp[low | s], &dp[rest ^ s]);
             for ((cell, &a), &b) in row.iter_mut().zip(left).zip(other) {
                 *cell = (*cell).min(a + b);
             }
-            sub = (sub - 1) & mask;
+        }
+        if mask == full {
+            // The relaxation below cannot lower the minimum (d(u, u) = 0, distances are
+            // non-negative), and the minimum is all that is read of the last row.
+            let best = *row[..n].iter().min().expect("at least one city");
+            return (u32::from(best), true);
         }
         // Let the tree's root slide along cheap track: min over u of row[u] + d(u, v).
         let mut relaxed = row;
         for (u, &through) in row.iter().enumerate().take(n) {
-            if through >= sentinel {
+            if through >= UNREACHABLE {
                 continue;
             }
             for (cell, &d) in relaxed.iter_mut().zip(&dist[u]) {
-                *cell = (*cell).min(through + u32::from(d));
+                *cell = (*cell).min(through + d);
             }
         }
         dp[mask] = relaxed;
     }
-
-    let best = *dp[full][..n].iter().min().expect("at least one city");
-    (best, true)
+    unreachable!("the full mask returns from the loop")
 }
 
 /// Cheapest set of new track connecting every terminal. See [`steiner_cost_exact`].
