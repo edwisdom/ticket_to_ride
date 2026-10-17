@@ -5,6 +5,226 @@ session. Decisions that deviate from [PLAN.md](PLAN.md) belong here, with the re
 
 ---
 
+## 2026-10-16 — Phase 3.2: the observation encoder, fourteen times cheaper and bit for bit
+
+Complete. One observation costs **8.9 µs cold and 4.6 µs with the encoder cache** (USA 2P,
+random-play positions, one thread), from 126.9; the training loop's environment side
+(observe + mask + step + reset) runs **981k env-steps/s at 1024 environments**, from 52k.
+Exit criteria were ≤15 µs and ≥250k. Nothing moved: every observation is bit-identical to
+`oracle-v1`'s at every step -- continuous fields included, so the 1e-6 allowance was never
+used -- state hashes and every heuristic's choices agree, and H3's behaviour hash is still
+`5b906156d4b1204b`. 410 Rust tests (13 behind `#[ignore]`); ttr-core line coverage 96.4%,
+the naive references aside, as in 3.1.
+
+### Measured first
+
+The brief's loop -- `observe_current -> legal_masks -> random masked pick in numpy -> step
+-> auto_reset` for 2 s -- became `ttr bench --suite vecenv` (616af7d) before anything
+changed, with phases timed separately and a `make bench-check` 20% gate. Its first reading
+matched the brief's diagnosis exactly: at 1024 USA 2P environments observe was 19.1 µs of
+a 19.3 µs env-step, mask 0.13, step 0.04.
+
+`bench-obs` (ttr-tools) records positions from whole games -- uniformly random, or H3
+self-play -- and encodes each for the seat to act, single-threaded. samply on it, with the
+encoder's internals un-inlined for attribution:
+
+| | share of an observation |
+| --- | --- |
+| `steiner_cost_exact` | 75% -- of which the DP's per-mask multi-source Dijkstra 53% |
+| `fragility` (a Dijkstra per free route segment) | 10% |
+| `longest_trail` | 6% |
+| allocation (`HashMap<u8, Vec<u16>>` per call, `Vec`s) | ~10%, spread across the above |
+
+Why the DP dominated: random play holds a lot of tickets. Of USA 2P random positions, 42%
+have nine or more Steiner roots (the MST fallback), and 12%, 10% and 11% have eight, seven
+and six -- the subset DP at its widest. H3 positions mostly have two to six.
+
+### What changed, in the order the profile asked for it
+
+All in `graph.rs` and `obs.rs`; µs/obs on USA 2P random positions (the first four steps in
+the original harness, which also timed a checksum -- see below):
+
+| step | µs/obs |
+| --- | --- |
+| baseline | 125.0 |
+| one all-pairs table per observation; the DP's relaxation a min-plus pass over it | 47.2 |
+| a fixed-size view: no `HashMap`, no `Vec`, the plan a `u128` | 30.5 |
+| Dial's bucket-queue Dijkstra; `longest_trail` over arrays and bitmasks | 16.4 |
+| the Steiner DP in `u16`, each split visited once, no relaxation of the last row | 14.3 |
+| fragility by A*, guided by the table | 11.5 |
+
+- **`all_pairs`**: Floyd–Warshall over the seat's crossing costs, a fixed-width `u16`
+  min-plus that compiles to SIMD (rows padded to `DIST_STRIDE` = 40). Ticket costs, the
+  DP's terminal rows, contraction, the MST bound, the planned routes and fragility's guide
+  all read it. The DP relaxation `min over u of row[u] + d(u, v)` is equivalent to the
+  multi-source Dijkstra it replaces because every DP cell stays at or below the sentinel
+  and the table holds exact distances (the argument is in `steiner_cost_with`'s doc).
+- **Dijkstra** is a bucket queue over a ring of `max_len + 1` city bitmasks -- crossing
+  costs are integers 0..=6 -- with zero-cost own track re-draining the current bucket.
+- **Fragility** re-prices the ticket's route with each free segment priced out, as before,
+  but by A* toward the far end with the unpriced table as the heuristic: distances over a
+  table that one closure only raises are a consistent lower bound, so the first time the
+  target settles its distance is exact. The ring is `2 * max_len + 1` wide, since a step
+  raises `g + h` by up to twice a segment's cost.
+- **`longest_trail`**: adjacency in arrays, components by bitmask flood fill, per-component
+  edge bits, and the DFS memo a thread-local map with a Fibonacci hash instead of SipHash
+  (SipHash alone had been a tenth of an observation).
+- **The Steiner DP** in `u16` (every cell is at most the sentinel, so a sum of two fits),
+  enumerating each split once (the half holding the lowest terminal), and skipping the
+  last row's relaxation, which cannot lower its minimum. That last one is most of the win
+  for the 2-4-root plans H3 positions have.
+
+Every one of these computes an exact, unique value -- a shortest distance, the minimum
+Steiner cost, an MST weight, a longest trail -- so none depends on search order.
+
+### The encoder cache
+
+Nearly all of an observation is a function of the board and the observing seat's tickets
+alone: the table, the Steiner DP, the plan, fragility, the opponents' trails. That work is
+now `Derived`, and `EncoderCache` keeps it per seat; `VecEnv` holds one cache per
+environment. **The key is the inputs themselves** -- the board's identity, seat count,
+double-route rule, every segment's owner (a 128-byte compare) and the seat's ticket mask --
+not `board_version`. A counter-keyed cache is correct only while every path that changes
+its inputs remembers to bump the counter; a content key cannot go stale, so resets,
+replaced states and reused caches need no invalidation at all, and a hit is equal to
+recomputing by construction.
+
+Hit rates, by measurement: 55% (USA 2P random), 45% (USA 4P random), 62% (USA 2P H3),
+48% (USA 4P H3), 62-64% (mini). Card draws are about half of all steps, as the plan said.
+Debug builds recompute on every hit and assert equality; `tests/encoder_cache.rs` compares
+cached and recomputed buffers bit for bit over 10k games -- every configuration, one game
+in five H3 self-play, every seat encoded every third position, one cache reused across 25
+consecutive games of different configurations -- in 51 s under the test profile.
+
+### Results
+
+`bench-obs`, single-threaded µs per observation; all three columns agree on the checksum:
+
+| positions | before | cold | cached (hit rate) |
+| --- | --- | --- | --- |
+| usa 2P random | 126.9 | **8.9** | **4.6** (55%) |
+| usa 4P random | 149.2 | 9.5 | 5.9 (45%) |
+| mini 2P random | 37.3 | 3.4 | 1.6 (62%) |
+| usa 2P H3 | 93.8 | 6.5 | 3.3 (62%) |
+| usa 4P H3 | 128.0 | 7.9 | 4.8 (48%) |
+| mini 2P H3 | 7.0 | 1.5 | 0.8 (64%) |
+
+`ttr bench --suite vecenv`, µs of wall time per env-step, both builds measured back to back:
+
+| map | envs | observe | mask | step | env-steps/s before | after |
+| --- | --- | --- | --- | --- | --- | --- |
+| usa 2P | 1 | 135.4 → 5.3 | 0.5 | 0.2 | 7,300 | 168,000 |
+| usa 2P | 64 | 26.5 → 2.7 | 0.8 | 0.1 | 36,000 | 277,000 |
+| usa 2P | 1024 | 19.1 → **0.85** | 0.12 | 0.04 | 52,000 | **981,000** |
+| mini 2P | 1024 | 6.6 → 0.37 | 0.09 | 0.04 | 147,000 | 1,910,000 |
+
+The loop including the numpy pick is now 264k steps/s at 1024 USA environments, and the
+pick (2.8 µs) is most of it -- the environment is no longer the expensive side of a step.
+
+After, a cold observation splits: Steiner DP 30%, fragility 26% (A* 18, the route walk 8),
+`all_pairs` 15%, the planned routes 7%, the segment block 7%, trails 6%.
+
+### By-product: every heuristic is cheaper
+
+The heuristics share `graph.rs`. `ttr bench --suite agents`, µs per decision, single-
+threaded, the pre-3.2 build and this one back to back:
+
+| map | seats | h0 | h1 | h2 | h3 | h4 |
+| --- | --- | --- | --- | --- | --- | --- |
+| usa | 2 | 1.03 → 0.40 | 1.02 → 0.35 | 104.3 → 11.1 | **83.7 → 10.6** | 86.9 → 14.5 |
+| usa | 4 | 0.58 → 0.22 | 0.62 → 0.19 | 107.1 → 12.2 | 93.1 → 12.0 | 101.5 → 17.1 |
+| mini | 2 | 0.28 → 0.15 | 0.34 → 0.17 | 3.54 → 1.21 | 3.83 → 1.37 | 4.02 → 1.66 |
+
+This moves the Phase 3 finding that **H3 is too slow to be the ISMCTS rollout policy**:
+1000 simulations of ~100 decisions were ~7.6 s per move, and are now ~1.1 s. §7.2's S2 tier
+(800-2000 iterations) is back within reach of H3 rollouts. Phase 5 should re-measure
+rather than inherit either number.
+
+### How "nothing moved" was checked
+
+- **`oracle-v1`, full sweep**: 70k random games and 3,500 heuristic games, every step
+  compared -- state, position hash, legal actions, the observation (every seat every 7
+  steps), terminal settlement, every tier's choice. Zero divergences, 356 s (714 s before:
+  the live side's encoder is most of a step). `diff::CONTINUOUS_TOLERANCE` stays 0.0.
+- **The golden corpus** reproduces in full on both builds (26 s, from 44).
+- **H3's anchor**, `the_h3_anchor_has_not_moved`, unchanged.
+- **Naive references**: `naive_graph` now also checks `all_pairs` row by row and
+  `guided_distance` between every pair of cities with each seventh crossable segment priced
+  out, against Floyd–Warshall without that segment, on random and real-game layouts; the
+  sweep passes (71 s).
+- **The cache**: as above.
+- **Mutation testing**, below.
+
+### Mutation testing
+
+`cargo mutants` over `graph.rs` and `obs.rs`, the two files this phase rewrote, against
+ttr-core's own tests: 554 mutants in 34 min -- 473 caught, 33 timeouts, 12 unviable,
+**36 missed**. Triaged:
+
+- **One real gap.** No ttr-core test noticed fragility re-pricing *my own* track on the
+  route (only the oracle differential, in ttr-tools, would have). An enemy cannot claim my
+  track; `fragility_never_prices_out_my_own_track` (`tests/obs_plan.rs`) now searches for
+  positions where counting it would move the feature.
+- **21 pointed at dead code, deleted rather than excluded**: both searches' `settled`
+  masks (8 mutants) -- the stale-distance check already rejects everything they did, since
+  only a strict improvement re-queues a city; the hand-rolled memo hasher (8, all
+  speed-only), replaced by `rustc-hash`'s `FxHashMap`; fragility's early return and
+  capacity guard (4), which its only caller and the walk's own bound make unreachable; and
+  an unread bound on the seat-order loop (2). With `settled` gone, the two `<` → `<=`
+  mutants in the searches loop forever on zero-cost own track instead of surviving.
+- **11 equivalent, pinned** in `.cargo/mutants.toml` with the reason for each: speed-only
+  shortcuts (the Eulerian one, `dsu_union`'s unreachable tie), `|` versus `^` on bits
+  known disjoint, ties in `mst_bound`, overlapping DP splits that can only add upper
+  bounds, a priced-out edge that can never improve a distance, and `obs_version` while it
+  is 1. The 3.1 pins were all stale (their lines moved) and came back as missed, as
+  intended.
+
+A re-run over every edited function: 129 mutants, 104 caught, 17 timeouts, 3 unviable,
+5 missed -- exactly the pinned equivalents among them.
+
+### Decisions
+
+- **Content keys, not `board_version`**, for the cache (above). The key compare is ~150
+  bytes per lookup, nothing next to what a hit saves.
+- **`f64` arithmetic stays.** PLAN.md listed "f32 where f64 only existed to match Python";
+  the profile shows narrowing is not where the time goes, and the corpus and `oracle-v1`
+  were signed under f64-then-narrow. Changing it would spend the continuous tolerance for
+  no measured gain.
+- **No incremental all-pairs.** A claim by me only lowers costs (an O(n²) update), but an
+  opponent's raises them, which needs a recompute; the cache already skips every position
+  where nothing changed, and Floyd–Warshall is 15% of a cold observation.
+- **The rayon pool stays global.** A pool sized to the 8 performance cores measured the
+  same as the global 12 threads at 1024 environments (0.94 vs 0.86 µs observe) and slightly
+  better at 64 (2.26 vs 2.72): within noise for what training needs. PLAN §8.3's caveat (macOS
+  cannot pin threads) is unchanged.
+- **The 15 µs criterion is read on the cold figure**, which is the conservative one: the
+  cached figure depends on the policy's draw rate.
+- **`bench-obs` timed its own checksum.** Summing an observation's 3,355 floats in `f64` is
+  a serial chain of additions -- about 3 µs, a third of what it was timing once the encoder
+  got fast. It now times only the encoder calls; the before/after table above was measured
+  with the corrected harness on both builds. (GOTCHAS.)
+- Removed, being unused: `distance_between` (A* replaced it) and Dijkstra's early-exit
+  target. One search per purpose.
+- **`rustc-hash` is a new dependency of ttr-core**, for the trail memo. A ten-line hasher
+  of our own was the alternative, and every mutant of it survived -- hash quality is not
+  observable, only speed.
+
+### Deviations from PLAN.md
+
+- "Cache the Steiner tree and `remaining_cost` per seat": done, and wider -- every piece of
+  board-derived encoder work is cached, keyed by content rather than invalidated on claims.
+- "f32 where f64 only existed to match Python": not done, deliberately (above).
+- "Incremental connectivity, union-find updated on claim": already the case since Phase 2;
+  the encoder reads roots, it never rebuilt them.
+
+### Next
+
+Phase 3.3 (Modal), which does not touch the encoder; then the `OBS_VERSION` 2 bump agreed
+at the end of 3.1 -- the plan walk and `extends_my_chain` -- as its own commit, so that 3.4
+trains on the fixed features.
+
+---
+
 ## 2026-10-16 — Phase 3.1: the Rust engine becomes its own oracle
 
 Complete. The Python engine, encoder and differential harness are deleted (about 8,200

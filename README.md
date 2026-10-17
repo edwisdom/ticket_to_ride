@@ -14,8 +14,8 @@ training reinforcement learning agents against it via self-play.
 | 2 | Rust core + differential harness | done |
 | 3 | Heuristic agents + arena + Elo | done |
 | 3.1 | Retire the Python engine; Rust becomes its own oracle | done |
-| 3.2 | Rust performance (observation encoder) | next |
-| 3.3 | Modal cloud runs | |
+| 3.2 | Rust performance (observation encoder) | done |
+| 3.3 | Modal cloud runs | next |
 | 3.4 | PPO spike on TTR-mini (tentative) | |
 | 4 | Terminal client | |
 | 5 | Determinization + ISMCTS | |
@@ -43,7 +43,13 @@ in Phase 3.1 and the Rust engine now checks itself against things that cannot dr
 | Rust, 8 performance cores | 0.021 | ~303,000 |
 | *(the retired Python engine)* | *6.6* | *~980* |
 
-On an M2 Max. 406 Rust tests and 129 Python tests; ttr-core line coverage 96%.
+A training step also needs an observation (3,355 floats on USA) and a legal-action mask.
+The encoder costs 8.9 µs per observation from scratch and 4.6 µs with its per-seat cache,
+on one thread (126.9 before Phase 3.2), and `VecEnv` -- one call per batch, buffers
+written in place -- runs observe + mask + step at **~980,000 env-steps/s** over 1024 USA 2P
+games (`ttr bench --suite vecenv`).
+
+On an M2 Max. 410 Rust tests and 133 Python tests; ttr-core line coverage 96%.
 
 Five scripted agents, H0–H4, rated over 10,000 paired games in 12.6 s. **H3 is the permanent
 Elo zero**, and its identity is a hash of what it *plays* over a frozen probe set rather than

@@ -379,6 +379,14 @@ release. Unreachable in play (a seat can buy at most 27 USA segments), and fixed
 numbered per component. The general lesson is the one the naive references exist for: the
 fast path's guards and limits are where a brute force finds things random play never does.
 
+### A benchmark that times its own checksum
+
+`bench-obs` summed each observation's 3,355 floats into an `f64` checksum inside the timed
+loop. Floating-point addition cannot be reassociated, so that sum is a serial chain of
+dependent adds -- about 3 µs per observation, invisible at 125 µs and a third of the figure
+at 9. It now times only the encoder calls. **When the thing measured gets fast, re-check
+what else the timer covers.**
+
 ---
 
 ## Part 2 — known traps in the work ahead
