@@ -62,9 +62,30 @@ pub const SAMPLE_EVERY: u8 = 7;
 /// A game that has not ended by now is a hang, not a long game.
 const MAX_STEPS: usize = 20_000;
 
-/// Which observation slots are continuous, per board.
+/// Which observation slots are continuous, and which a comparison leaves out, per board.
 pub struct ObsMask {
     pub continuous: Vec<bool>,
+    /// Slots not compared: empty except against `oracle-v1` ([`ObsMask::against_oracle`]).
+    pub skip: Vec<bool>,
+}
+
+/// The features whose *meaning* changed since `oracle-v1` signed `OBS_VERSION` 1, as
+/// (block, field, card type or every slot). Comparing them with the frozen build would
+/// compare two definitions; everything else must still agree slot for slot.
+pub const CHANGED_SINCE_ORACLE: &[(&str, &str, Option<CardSlot>)] = &[
+    // OBS_VERSION 2: the plan follows a breadth-first route...
+    ("segment_dynamic", "on_my_steiner_tree", None),
+    ("tickets", "fragility", None),
+    // ...my network is the cities my track reaches, not off-root union-find members...
+    ("segment_dynamic", "extends_my_chain", None),
+    // ...and a locomotive count is over the locomotives printed, not the colour count.
+    ("own_hand", "counts", Some(CardSlot::Locomotive)),
+];
+
+/// One card type's slot within a per-card-type field.
+#[derive(Clone, Copy, Debug)]
+pub enum CardSlot {
+    Locomotive,
 }
 
 impl ObsMask {
@@ -85,7 +106,31 @@ impl ObsMask {
                 }
             }
         }
-        Self { continuous }
+        Self {
+            continuous,
+            skip: vec![false; spec.size],
+        }
+    }
+
+    /// [`ObsMask::for_map`], leaving out [`CHANGED_SINCE_ORACLE`].
+    pub fn against_oracle(map: &str) -> Self {
+        let mut mask = Self::for_map(map);
+        let spec = spec_for(map);
+        let board = ttr_core::board::get_board(map).expect("a generated map");
+        for &(block_name, field_name, slot) in CHANGED_SINCE_ORACLE {
+            let block = spec.block(block_name).expect("a block of the spec");
+            let field = block.field(field_name).expect("a field of the block");
+            for entity in 0..block.count {
+                let start = block.offset + entity * block.stride + field.offset;
+                match slot {
+                    None => mask.skip[start..start + field.width].fill(true),
+                    Some(CardSlot::Locomotive) => {
+                        mask.skip[start + usize::from(board.locomotive)] = true;
+                    }
+                }
+            }
+        }
+        mask
     }
 }
 
@@ -446,6 +491,10 @@ pub struct Scope {
     /// Compare the continuous observation half too. Off only where Phase 3.2's tolerance
     /// applies and the comparison is made against `oracle-v1` instead.
     pub continuous: bool,
+    /// Compare observation digests at all. Off for `oracle-v1`, which encodes
+    /// `OBS_VERSION` 1 against a corpus signed under a later version; its play, scores and
+    /// hash chains are still checked in full.
+    pub observations: bool,
 }
 
 impl Scope {
@@ -455,6 +504,7 @@ impl Scope {
             obs: 0..OBS_SEEDS,
             heuristic: 0..HEURISTIC_SEEDS,
             continuous: true,
+            observations: true,
         }
     }
 
@@ -464,6 +514,15 @@ impl Scope {
             obs: 0..obs,
             heuristic: 0..heuristic,
             continuous: true,
+            observations: true,
+        }
+    }
+
+    /// The same games, observation digests left out.
+    pub fn without_observations(self) -> Self {
+        Self {
+            observations: false,
+            ..self
         }
     }
 }
@@ -513,7 +572,7 @@ pub fn check<E: Engine>(engine: &E, corpus: &Corpus, scope: &Scope) -> Result<us
         .into_par_iter()
         .map(|seed| {
             let want = &corpus.random[seed as usize];
-            let sampled = scope.obs.contains(&seed);
+            let sampled = scope.observations && scope.obs.contains(&seed);
             let got = random_trace(engine, u64::from(seed), sampled.then_some(&mask))
                 .map_err(|e| format!("{label} random seed {seed}: {e}"))?;
             let here = format!("{label} random seed {seed}");
@@ -563,7 +622,8 @@ pub fn check<E: Engine>(engine: &E, corpus: &Corpus, scope: &Scope) -> Result<us
         .map(|seed| {
             let want = &corpus.heuristic[seed as usize];
             let here = format!("{label} heuristic seed {seed}");
-            let got = replay_trace(engine, u64::from(seed), &want.actions, Some(&mask))
+            let observe = scope.observations.then_some(&mask);
+            let got = replay_trace(engine, u64::from(seed), &want.actions, observe)
                 .map_err(|e| format!("{here}: {e}"))?;
             if got.terminal.scores != want.scores {
                 return Err(format!(
@@ -580,7 +640,10 @@ pub fn check<E: Engine>(engine: &E, corpus: &Corpus, scope: &Scope) -> Result<us
                     got.chain, want.chain
                 ));
             }
-            compare_obs(&here, got.obs.expect("sampled"), want.obs, scope.continuous)
+            match got.obs {
+                Some(obs) => compare_obs(&here, obs, want.obs, scope.continuous),
+                None => Ok(()),
+            }
         })
         .collect();
     heuristic.into_iter().collect::<Result<(), String>>()?;

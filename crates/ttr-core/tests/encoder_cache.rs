@@ -91,8 +91,8 @@ fn play(game: &Game, seed: u64, cache: &mut EncoderCache) {
             to_act..to_act + 1
         };
         for seat in seats {
-            encode_cached(&mut state, seat, &mut cached, cache);
-            encode(&mut state, seat, &mut fresh);
+            encode_cached(&state, seat, &mut cached, cache);
+            encode(&state, seat, &mut fresh);
             if let Some(i) = (0..size).find(|&i| cached[i].to_bits() != fresh[i].to_bits()) {
                 panic!(
                     "{} {n}P seed {seed}, position {position}, seat {seat}: slot {i} is {} \

@@ -11,22 +11,26 @@
 //! Bellman-Ford -- and compared with [`crate::obs::encode`] bit for bit, at every few steps
 //! of random and H3 games on every map and seat count, for every seat.
 //!
-//! Two features are left out: `on_my_steiner_tree` and `fragility` both read the encoder's
-//! route-recovery walk, which has a known `OBS_VERSION` 1 defect (it can ping-pong across
-//! zero-weight own track); `tests/obs_plan.rs` states what holds of them. The Steiner cost
-//! comes from [`crate::graph::steiner_cost_exact`] and the longest trail from
-//! [`crate::graph::longest_trail`], both checked against brute force in `naive_graph`.
+//! Two features depend on *which* cheapest route the encoder takes, and the route is its
+//! choice -- the fewest segments among the cheapest, ties to its search order. For those
+//! (`on_my_steiner_tree`, `fragility`) the reference takes the encoder's routes
+//! ([`crate::obs::ticket_route`]) and checks everything promised about them from scratch:
+//! each is a path between the ticket's cities, costs exactly the Bellman-Ford distance, and
+//! has the fewest segments any cheapest route has; the plan is the union of their free
+//! segments; and fragility is recomputed by re-running Bellman-Ford with each free segment
+//! removed. The Steiner cost comes from [`crate::graph::steiner_cost_exact`] and the longest
+//! trail from [`crate::graph::longest_trail`], both checked against brute force in
+//! `naive_graph`.
 //!
-//! **Known `OBS_VERSION` 1 quirks, reproduced on purpose** (each marked `v1 quirk` below):
-//! `extends_my_chain` misses segments at the root city of my network, and the hand counts
-//! are normalized by the colour card count even for the locomotive. Fixing either is a
-//! named `OBS_VERSION` bump, and this reference changes with it.
+//! `OBS_VERSION` 2 removed the quirks version 1 had and this reference used to reproduce:
+//! the plan walk could truncate on my own track, `extends_my_chain` missed each component's
+//! root city, and own-hand counts divided locomotives by the colour count.
 #![allow(clippy::needless_range_loop)]
 
 use crate::board::{GRAY, NO_SIBLING, UNREACHABLE};
 use crate::config::{CLOSED, EMPTY_SLOT, FREE, NO_TICKET, NOT_TRIGGERED, PHASE_DRAW_SECOND};
 use crate::graph::{longest_trail, steiner_cost_exact};
-use crate::obs::spec_for;
+use crate::obs::{spec_for, ticket_route};
 use crate::obs_spec::{COST_BUCKETS, HAND_BUCKETS, OPPONENT_SLOTS, TRAIN_BUCKETS};
 use crate::state::State;
 
@@ -87,6 +91,11 @@ fn crossing_cost(state: &State, me: u8, segment: usize) -> u32 {
 
 /// Bellman-Ford from `source` over [`crossing_cost`], capped at `UNREACHABLE`.
 fn costs_from(state: &State, me: u8, source: u8) -> Vec<u32> {
+    costs_without(state, me, source, None)
+}
+
+/// [`costs_from`] with the segment `without`, if any, uncrossable.
+fn costs_without(state: &State, me: u8, source: u8, without: Option<usize>) -> Vec<u32> {
     let board = state.board;
     let mut dist = vec![u32::from(UNREACHABLE); board.n_cities];
     dist[usize::from(source)] = 0;
@@ -94,7 +103,7 @@ fn costs_from(state: &State, me: u8, source: u8) -> Vec<u32> {
         let mut changed = false;
         for s in 0..board.n_segments {
             let w = crossing_cost(state, me, s);
-            if w >= u32::from(UNREACHABLE) {
+            if w >= u32::from(UNREACHABLE) || without == Some(s) {
                 continue;
             }
             let (a, b) = (usize::from(board.seg_a[s]), usize::from(board.seg_b[s]));
@@ -112,44 +121,89 @@ fn costs_from(state: &State, me: u8, source: u8) -> Vec<u32> {
     dist
 }
 
-/// The cities of my network's components, by flood fill over my own track. Returns, per
-/// city, the smallest city index in its component, or `None` if I own no track there.
-fn my_components(state: &State, me: u8) -> Vec<Option<u8>> {
+/// The fewest segments on any cheapest route from `source` to every city: Bellman-Ford
+/// over (cost, segments) pairs, compared lexicographically.
+fn fewest_segments_from(state: &State, me: u8, source: u8) -> Vec<(u32, u32)> {
     let board = state.board;
-    let mut label: Vec<Option<u8>> = vec![None; board.n_cities];
-    for start in 0..board.n_cities {
-        if label[start].is_some() {
-            continue;
-        }
-        let mut members = vec![start];
-        let mut frontier = vec![start];
-        while let Some(city) = frontier.pop() {
-            for s in 0..board.n_segments {
-                if state.seg_owner[s] != me {
+    let mut best = vec![(u32::from(UNREACHABLE), 0); board.n_cities];
+    best[usize::from(source)] = (0, 0);
+    for _ in 0..board.n_cities * board.n_cities {
+        let mut changed = false;
+        for s in 0..board.n_segments {
+            let w = crossing_cost(state, me, s);
+            if w >= u32::from(UNREACHABLE) {
+                continue;
+            }
+            let (a, b) = (usize::from(board.seg_a[s]), usize::from(board.seg_b[s]));
+            for (x, y) in [(a, b), (b, a)] {
+                if best[x].0 >= u32::from(UNREACHABLE) {
                     continue;
                 }
-                let (a, b) = (usize::from(board.seg_a[s]), usize::from(board.seg_b[s]));
-                let other = if a == city {
-                    b
-                } else if b == city {
-                    a
-                } else {
-                    continue;
-                };
-                if !members.contains(&other) {
-                    members.push(other);
-                    frontier.push(other);
+                let through = (best[x].0 + w, best[x].1 + 1);
+                if through < best[y] {
+                    best[y] = through;
+                    changed = true;
                 }
             }
         }
-        if members.len() > 1 {
-            let smallest = *members.iter().min().unwrap() as u8;
-            for &m in &members {
-                label[m] = Some(smallest);
-            }
+        if !changed {
+            break;
         }
     }
-    label
+    best
+}
+
+/// Everything promised of a ticket's route: a path from `a` to `b`, costing `cost`, with
+/// the fewest segments of any cheapest route.
+fn check_route(state: &State, me: u8, a: u8, b: u8, cost: u32, route: &[(u16, u8)]) {
+    let board = state.board;
+    let mut here = a;
+    let mut paid = 0;
+    for &(segment, owner) in route {
+        let s = usize::from(segment);
+        assert_eq!(owner, state.seg_owner[s], "route owner of segment {s}");
+        here = if board.seg_a[s] == here {
+            board.seg_b[s]
+        } else {
+            assert_eq!(
+                board.seg_b[s], here,
+                "route breaks at segment {s}: {route:?}"
+            );
+            board.seg_a[s]
+        };
+        paid += crossing_cost(state, me, s);
+    }
+    assert_eq!(here, b, "route from {a} ends at {here}, not {b}: {route:?}");
+    assert_eq!(
+        paid, cost,
+        "route from {a} to {b} costs {paid}, not {cost}: {route:?}"
+    );
+    let fewest = fewest_segments_from(state, me, a)[usize::from(b)];
+    assert_eq!(
+        route.len() as u32,
+        fewest.1,
+        "route from {a} to {b} has {} segments, a cheapest one has {}: {route:?}",
+        route.len(),
+        fewest.1
+    );
+}
+
+/// The worst extra cost of one enemy claim on the route's free segments, or the whole train
+/// supply if one cuts the ticket dead.
+fn worst_closure(state: &State, me: u8, a: u8, b: u8, cost: u32, route: &[(u16, u8)]) -> f64 {
+    let supply = f64::from(state.board.raw.trains_per_player);
+    let mut worst = 0;
+    for &(segment, owner) in route {
+        if owner != FREE {
+            continue;
+        }
+        let detour = costs_without(state, me, a, Some(usize::from(segment)))[usize::from(b)];
+        if detour >= u32::from(UNREACHABLE) {
+            return supply;
+        }
+        worst = worst.max(detour - cost);
+    }
+    f64::from(worst)
 }
 
 /// What `observer` cannot account for: the deck plus everyone else's blind draws.
@@ -172,7 +226,7 @@ fn unseen(state: &State, observer: usize) -> Vec<i32> {
         .collect()
 }
 
-/// The observation, recomputed. Slots of the two left-out features stay zero.
+/// The observation, recomputed.
 pub(crate) fn naive_encode(state: &State, player: usize) -> Vec<f32> {
     let board = state.board;
     let at = Lookup { map: board.name };
@@ -189,7 +243,10 @@ pub(crate) fn naive_encode(state: &State, player: usize) -> Vec<f32> {
     // -- segments -----------------------------------------------------------------------
     let hand = &state.hand[player * k..(player + 1) * k];
     let wilds = hand[usize::from(board.locomotive)];
-    let components = my_components(state, me);
+    let on_my_track = |city: u8| {
+        (0..board.n_segments)
+            .any(|t| state.seg_owner[t] == me && (board.seg_a[t] == city || board.seg_b[t] == city))
+    };
     for s in 0..board.n_segments {
         let color = board.seg_color[s];
         let column = if color == GRAY {
@@ -229,19 +286,14 @@ pub(crate) fn naive_encode(state: &State, player: usize) -> Vec<f32> {
         for (i, &edge) in HAND_BUCKETS.iter().enumerate() {
             out[at.at("segment_dynamic", s, "cards_short") + i] = flag(short >= edge);
         }
-        // v1 quirk: "touches my network" is read as "is not its component's root", so a
-        // segment at the smallest-index city of a component reads as not extending it.
-        let (a, b) = (usize::from(board.seg_a[s]), usize::from(board.seg_b[s]));
-        let off_root = |city: usize| components[city].is_some_and(|root| usize::from(root) != city);
+        let (a, b) = (board.seg_a[s], board.seg_b[s]);
         out[at.at("segment_dynamic", s, "extends_my_chain")] =
-            flag(owner == FREE && (off_root(a) || off_root(b)));
+            flag(owner == FREE && (on_my_track(a) || on_my_track(b)));
     }
 
     // -- my hand ------------------------------------------------------------------------
     for c in 0..k {
-        // v1 quirk: normalized by the colour count even for the locomotive.
-        out[at.at("own_hand", 0, "counts") + c] =
-            ratio(f64::from(hand[c]), f64::from(board.raw.cards_per_color));
+        out[at.at("own_hand", 0, "counts") + c] = ratio(f64::from(hand[c]), printed(c));
         for level in 1..=6u8 {
             let name = if level == 1 {
                 "thermometer".to_string()
@@ -255,6 +307,7 @@ pub(crate) fn naive_encode(state: &State, player: usize) -> Vec<f32> {
     // -- tickets --------------------------------------------------------------------------
     let max_points = f64::from(*board.ticket_points.iter().max().unwrap());
     let mut terminals: Vec<u8> = Vec::new();
+    let mut planned = vec![false; board.n_segments];
     for t in 0..board.n_tickets {
         out[at.at("tickets", t, "points")] = ratio(f64::from(board.ticket_points[t]), max_points);
         if state.tickets[player] >> t & 1 == 0 {
@@ -276,7 +329,19 @@ pub(crate) fn naive_encode(state: &State, player: usize) -> Vec<f32> {
         if cost > 0 {
             terminals.push(a);
             terminals.push(b);
+            let route = ticket_route(state, player, t);
+            check_route(state, me, a, b, cost, &route);
+            for &(segment, owner) in &route {
+                if owner == FREE {
+                    planned[usize::from(segment)] = true;
+                }
+            }
+            out[at.at("tickets", t, "fragility")] =
+                ratio(worst_closure(state, me, a, b, cost, &route), supply);
         }
+    }
+    for (s, &on_plan) in planned.iter().enumerate() {
+        out[at.at("segment_dynamic", s, "on_my_steiner_tree")] = flag(on_plan);
     }
 
     // -- the tree over every open ticket --------------------------------------------------
@@ -394,21 +459,6 @@ mod tests {
             .collect()
     }
 
-    /// Slots of the two features this reference leaves out.
-    fn left_out(map: &'static str) -> Vec<bool> {
-        let at = Lookup { map };
-        let spec = spec_for(map);
-        let mut skip = vec![false; spec.size];
-        let board = crate::board::get_board(map).unwrap();
-        for s in 0..board.n_segments {
-            skip[at.at("segment_dynamic", s, "on_my_steiner_tree")] = true;
-        }
-        for t in 0..board.n_tickets {
-            skip[at.at("tickets", t, "fragility")] = true;
-        }
-        skip
-    }
-
     /// `block[entity].field[i]` for a slot, for failure messages.
     fn name_of(map: &str, slot: usize) -> String {
         for b in spec_for(map).blocks.iter() {
@@ -425,16 +475,13 @@ mod tests {
     }
 
     /// Compare every seat's observation at this position; returns how many were compared.
-    fn check(state: &mut State, skip: &[bool], context: &str) -> usize {
-        let size = skip.len();
+    fn check(state: &State, context: &str) -> usize {
+        let size = spec_for(state.board.name).size;
         let mut fast = vec![0.0f32; size];
         for player in 0..state.n_players() {
             let naive = naive_encode(state, player);
             encode(state, player, &mut fast);
             for slot in 0..size {
-                if skip[slot] {
-                    continue;
-                }
                 assert_eq!(
                     fast[slot].to_bits(),
                     naive[slot].to_bits(),
@@ -452,7 +499,6 @@ mod tests {
         let mut compared = 0;
         for (map, n) in configs() {
             let game = Game::new(RuleConfig::new(map, n).unwrap()).unwrap();
-            let skip = left_out(map);
             for seed in seeds.clone() {
                 // Random play reaches the corners; H3 reaches positions a player would.
                 for heuristic in [false, true] {
@@ -470,7 +516,7 @@ mod tests {
                         if step % every == 0 || state.is_terminal() {
                             let context =
                                 format!("{map} {n}P seed {seed} h3={heuristic} step {step}");
-                            compared += check(&mut state, &skip, &context);
+                            compared += check(&state, &context);
                         }
                         if state.is_terminal() {
                             break;
@@ -514,7 +560,7 @@ mod tests {
             state.step(a).unwrap();
         }
         let mut fast = vec![0.0f32; spec_for("usa").size];
-        encode(&mut state, 0, &mut fast);
+        encode(&state, 0, &mut fast);
         assert_ne!(naive_encode(&state, 1), fast);
     }
 }

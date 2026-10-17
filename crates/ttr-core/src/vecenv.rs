@@ -185,7 +185,7 @@ impl VecEnv {
     pub fn observe_current(&mut self, out: &mut [f32]) {
         assert_eq!(out.len(), self.states.len() * self.obs_size);
         self.states
-            .par_iter_mut()
+            .par_iter()
             .zip(self.caches.par_iter_mut())
             .zip(out.par_chunks_mut(self.obs_size))
             .for_each(|((state, cache), slot)| {
@@ -198,7 +198,7 @@ impl VecEnv {
     pub fn observe_seat(&mut self, player: usize, out: &mut [f32]) {
         assert_eq!(out.len(), self.states.len() * self.obs_size);
         self.states
-            .par_iter_mut()
+            .par_iter()
             .zip(self.caches.par_iter_mut())
             .zip(out.par_chunks_mut(self.obs_size))
             .for_each(|((state, cache), slot)| obs::encode_cached(state, player, slot, cache));
@@ -392,7 +392,7 @@ mod tests {
         for i in 0..env.len() {
             let mut want = vec![0.0f32; env.obs_size()];
             let player = env.states()[i].current_player() as usize;
-            obs::encode(&mut env.states_mut()[i], player, &mut want);
+            obs::encode(&env.states()[i], player, &mut want);
             let got = &buffer[i * env.obs_size()..(i + 1) * env.obs_size()];
             assert_eq!(got, &want[..], "env {i}");
         }
@@ -408,7 +408,7 @@ mod tests {
             env.observe_current(&mut buffer);
             for i in 0..env.len() {
                 let player = env.states()[i].current_player() as usize;
-                obs::encode(&mut env.states_mut()[i], player, &mut want);
+                obs::encode(&env.states()[i], player, &mut want);
                 let got = &buffer[i * env.obs_size()..(i + 1) * env.obs_size()];
                 assert_eq!(got, &want[..], "env {i}");
             }

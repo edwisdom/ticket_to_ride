@@ -106,7 +106,7 @@ impl Seats {
 /// Play one game in both engines with identical actions, comparing at every step.
 fn compare_game(map: &str, n: usize, seed: u64, drive: Drive) -> Result<usize, String> {
     let (live, oracle) = (Live::new(map, n), Oracle::new(map, n));
-    let mask = ObsMask::for_map(map);
+    let mask = ObsMask::against_oracle(map);
     let size = live.obs_size();
     if oracle.obs_size() != size {
         return Err(format!("observation sizes {size} vs {}", oracle.obs_size()));
@@ -270,10 +270,56 @@ fn the_comparison_can_actually_fail() {
 #[test]
 fn the_oracle_is_the_build_it_claims_to_be() {
     // The pin is a commit, so this cannot drift by accident -- but a wrong SHA pasted into
-    // Cargo.toml would still compile. Both engines must report the versions the corpus was
-    // signed under.
+    // Cargo.toml would still compile. The frozen build is the one that signed the corpus:
+    // the same CONTRACT_VERSION as the live crate, and OBS_VERSION 1, whose differences
+    // from the live encoder are exactly CHANGED_SINCE_ORACLE.
     assert_eq!(ttr_oracle::CONTRACT_VERSION, ttr_core::CONTRACT_VERSION);
-    assert_eq!(ttr_oracle::obs::obs_version(), ttr_core::obs::obs_version());
+    assert_eq!(ttr_oracle::obs::obs_version(), 1);
+}
+
+#[test]
+fn only_the_features_that_changed_meaning_differ_from_the_oracle() {
+    // Guard the mask: with it, live and frozen agree on every compared slot (the fast tier
+    // above); without it, they must actually disagree -- or the skip list is stale and is
+    // hiding slots that no longer need hiding.
+    let (live, oracle) = (Live::new("usa", 2), Oracle::new("usa", 2));
+    let size = live.obs_size();
+    let mut differs = vec![false; size];
+    let (mut buf_a, mut buf_b) = (vec![0.0f32; size], vec![0.0f32; size]);
+    for seed in 0..20 {
+        let (mut a, mut b) = (live.initial(seed), oracle.initial(seed));
+        let mut rng = stream(seed, &[Part::Str("changed-features")]);
+        while !live.is_terminal(&a) {
+            for player in 0..2 {
+                live.encode(&mut a, player, &mut buf_a);
+                oracle.encode(&mut b, player, &mut buf_b);
+                for (slot, (x, y)) in buf_a.iter().zip(&buf_b).enumerate() {
+                    differs[slot] |= x.to_bits() != y.to_bits();
+                }
+            }
+            let legal = live.legal(&a);
+            let action = legal[rng.below(legal.len() as u32) as usize];
+            live.step(&mut a, action);
+            oracle.step(&mut b, action);
+        }
+    }
+    let skip = ObsMask::against_oracle("usa").skip;
+    for (slot, (&skipped, &moved)) in skip.iter().zip(&differs).enumerate() {
+        assert!(skipped || !moved, "slot {slot} differs and is not skipped");
+    }
+    for (block, field, _) in ttr_tools::corpus::CHANGED_SINCE_ORACLE {
+        let spec = ttr_core::obs::spec_for("usa");
+        let b = spec.block(block).expect("block");
+        let f = b.field(field).expect("field");
+        let any = (0..b.count).any(|e| {
+            let start = b.offset + e * b.stride + f.offset;
+            differs[start..start + f.width].iter().any(|&d| d)
+        });
+        assert!(
+            any,
+            "{block}.{field} is skipped but never differs from the oracle"
+        );
+    }
 }
 
 #[test]

@@ -865,7 +865,7 @@ determinization validator passes on 1M samples.
 | **3.4** (3–5 d) | *Revision 1, tentative.* PPO spike on TTR-mini 2P, plus the `VecEnv` RL additions it forces: returns before reset, seat→policy routing with scripted opponents stepping in Rust, aux targets, game-record export (§14.1) | beats random ≥95% within 2M steps (§13 ablation 4); beats H1 on mini; `mask_violations == 0`; measured steps/s on MPS and on a Modal GPU replace the §9 estimates |
 | **4** (1–2 d → ~1 d) | `HumanAgent`, projection + lat/lon, terminal client, `ttr play`, `ttr replay` *(Revision 1: trimmed to `ttr play`; `ttr replay` deferred to Phase 8's web UI)* | you play a full 2P game against H3 without confusion; `--map=ascii` legible at 110 cols; **you lose to H3 at least once** |
 | **5** (3–4 d) | Planned API revision pass (§8.1); determinization sampler + validator + particle filter; flat MC; SO-ISMCTS | ISMCTS-1000 beats H4 with SPRT-confirmed Δelo >+100; **strength monotone in sim count (200<500<1000<2000)** — the canonical proof the search is correct; validator passes 1M samples |
-| **6** (4–6 d) | `rl/encode` (versioned); nets; vec env; PPO; league; tracking; run dirs/manifests/checkpoints *(Revision 1 adds: history features as `OBS_VERSION` 2 and the history-probe experiment, §14.1)* | run dir complete and `--resume` continues the same trajectory; **`mask_violations == 0` throughout**; beats H3 by ~40M steps and H4 ≥65%; checkpoints refuse to load under a bumped `OBS_VERSION`; `points_per_train` visibly rises; history probe reported either way |
+| **6** (4–6 d) | `rl/encode` (versioned); nets; vec env; PPO; league; tracking; run dirs/manifests/checkpoints *(Revision 1 adds: history features as `OBS_VERSION` 2 and the history-probe experiment, §14.1; **now version 3** — 2 went to the plan-walk fix before Phase 3.4, see WORKLOG 2026-10-17)* | run dir complete and `--resume` continues the same trajectory; **`mask_violations == 0` throughout**; beats H3 by ~40M steps and H4 ≥65%; checkpoints refuse to load under a bumped `OBS_VERSION`; `points_per_train` visibly rises; history probe reported either way |
 | **7** (1–2 w) | Batched ISMCTS + learned prior/value + belief head; AZ trainer; PFSP league | R2 beats the PPO agent (SPRT); Elo rises monotonically over ≥5 promotion generations; `cycle_fraction` tracked; BR-probe exploitability trending down; a 24 h unattended run completes |
 | **8** | Transformer net + color-symmetry regularizer; web UI + introspection overlay; human gauntlet; optional R-NaD / Deep-CFR-on-mini | **beats you consistently**; your Elo lands on the same leaderboard as the bots |
 
@@ -1007,7 +1007,7 @@ Phase 6 is then re-planned from what it measures.
 - **Phase 4** is trimmed to `ttr play` (about 1 day). Its exit criterion, that you lose to H3, is a
   real check that the heuristics are strong. `ttr replay` moves to Phase 8's web UI.
 - **Phase 6** gains:
-  - Cheap history features as `OBS_VERSION` 2: claim turn per segment, tickets I returned, face-up
+  - Cheap history features as `OBS_VERSION` 2 *(now 3: version 2 fixed the plan walk and two quirks before Phase 3.4 — WORKLOG 2026-10-17)*: claim turn per segment, tickets I returned, face-up
     colours each opponent passed on, when each opponent last drew tickets.
   - **The history probe:** a supervised classifier predicting opponents' tickets from H4 self-play
     games, given (a) the observation versus (b) the observation plus action history. If (b) isn't

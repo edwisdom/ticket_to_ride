@@ -350,6 +350,13 @@ recomputed by the Python engine and encoder before they were deleted; the format
 chain are specified in `crates/ttr-tools/src/corpus.rs`. It records `CONTRACT_VERSION` and
 `OBS_VERSION`, and like the replays it is re-signed only at a version bump.
 
+An `OBS_VERSION` bump changes the observation digests and nothing else, so its re-sign is
+two steps: `gen-corpus --check --play-only` first, which must pass -- every game's play,
+scores and hash chain unchanged -- and only then `--write`. That is how version 2 was
+signed (2026-10-17). `oracle-v1` still checks every game's play against the corpus; its
+version-1 observations are compared with the live encoder slot by slot, except the
+features whose meaning changed since (`CHANGED_SINCE_ORACLE` in the same file).
+
 ---
 
 ## 5. What is *not* frozen here

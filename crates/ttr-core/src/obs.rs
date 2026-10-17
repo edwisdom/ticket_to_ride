@@ -13,9 +13,6 @@
 //! -- but it agrees by luck of the ranges, and a new feature with a different divisor could
 //! double-round differently in one slot out of 3355.
 //!
-//! One thing that reads oddly and is correct: this takes `&mut State`, because the
-//! union-find roots are read through path halving. The DSU reaches no hash.
-//!
 //! **Cost.** Nearly all of an observation is graph work that depends only on the board and
 //! the observing seat's tickets ([`Derived`]): the all-pairs table, the Steiner DP,
 //! fragility's searches, the opponents' longest trails. [`encode_cached`] keeps it per seat
@@ -28,8 +25,7 @@ use crate::board::{
 };
 use crate::config::{CLOSED, EMPTY_SLOT, FREE, NOT_TRIGGERED, PHASE_DRAW_SECOND};
 use crate::graph::{
-    Distances, MIN_TERMINALS, all_pairs, crossing_costs, guided_distance, longest_trail,
-    steiner_cost_with,
+    Distances, all_pairs, crossing_costs, guided_distance, longest_trail, steiner_cost_with,
 };
 pub use crate::obs_spec::spec_for;
 use crate::obs_spec::{
@@ -390,6 +386,8 @@ struct Derived {
     steiner_exact: bool,
     /// Free segments on the planned routes, one bit per segment.
     plan: u128,
+    /// Cities my own track reaches, one bit per city.
+    network: u64,
     /// Longest trail per seat; meaningful for opponents only.
     trails: [u16; MAX_PLAYERS],
 }
@@ -424,12 +422,19 @@ impl Derived {
                 terminals[n_terminals] = a;
                 terminals[n_terminals + 1] = b;
                 n_terminals += 2;
-                fragility_of[ticket] = fragility(state, me, &cost, &dist, ticket, trains_supply);
+                fragility_of[ticket] = fragility(state, &cost, &dist, ticket, trains_supply);
             }
         }
         let terminals = &terminals[..n_terminals];
         let (steiner, steiner_exact) = steiner_cost_with(board, &dist, terminals);
-        let plan = planned_segments(state, player, &dist, terminals);
+        let plan = planned_segments(state, &cost, &dist, terminals);
+        let mut network = 0u64;
+        for (segment, &owner) in seg_owner.iter().enumerate() {
+            if owner == me {
+                network |= 1 << board.seg_a[segment];
+                network |= 1 << board.seg_b[segment];
+            }
+        }
 
         let mut trails = [0u16; MAX_PLAYERS];
         for (seat, trail) in trails.iter_mut().enumerate().take(state.n_players()) {
@@ -445,6 +450,7 @@ impl Derived {
             steiner,
             steiner_exact,
             plan,
+            network,
             trails,
         }
     }
@@ -544,31 +550,26 @@ impl EncoderCache {
     }
 }
 
-/// What the blocks read: the board-derived work, and the per-position rest -- seat order,
-/// union-find roots, unseen counts -- which is cheap and changes with every card.
+/// What the blocks read: the board-derived work, and the per-position rest -- seat order and
+/// unseen counts -- which is cheap and changes with every card.
 struct View<'a> {
     me: usize,
     /// Opponents by distance in turn order: slot 0 acts next. `n_players - 1` entries.
     order: [usize; MAX_PLAYERS - 1],
     n_opponents: usize,
     trains_supply: f64,
-    dsu_root: [u8; MAX_CITIES],
     unseen: [i16; MAX_CARD_TYPES],
     derived: &'a Derived,
 }
 
 impl<'a> View<'a> {
-    fn build(state: &mut State, player: usize, derived: &'a Derived) -> Self {
+    fn build(state: &State, player: usize, derived: &'a Derived) -> Self {
         let board = state.board;
         let n = state.n_players();
         // Every slot is filled; `order()` reads the first `n - 1`.
         let mut order = [0usize; MAX_PLAYERS - 1];
         for (i, slot) in order.iter_mut().enumerate() {
             *slot = (player + 1 + i) % n;
-        }
-        let mut dsu_root = [0u8; MAX_CITIES];
-        for (city, root) in dsu_root.iter_mut().enumerate().take(board.n_cities) {
-            *root = state.dsu_root(player, city as u8);
         }
         let mut unseen = [0i16; MAX_CARD_TYPES];
         for (slot, count) in unseen.iter_mut().zip(state.unseen_counts(player)) {
@@ -579,7 +580,6 @@ impl<'a> View<'a> {
             order,
             n_opponents: n - 1,
             trains_supply: f64::from(board.raw.trains_per_player),
-            dsu_root,
             unseen,
             derived,
         }
@@ -590,16 +590,18 @@ impl<'a> View<'a> {
     }
 }
 
-/// Walk back from `target` to `source` along one cheapest route, calling `step` with each
-/// segment crossed. `dist` is the table row from `source`.
+/// One cheapest route from `source` to `target` over my crossing costs, calling `step` with
+/// each segment on it and its owner. `dist` is the all-pairs row from `source`.
 ///
-/// Reproduces `OBS_VERSION` 1 exactly, defect included: my own track counts as weight 0,
-/// so at a city whose neighbour across my track has the same distance the walk can step
-/// back across it, and it ends when the guard runs out with the route truncated. See
-/// `tests/obs_plan.rs`; fixing it is a named `OBS_VERSION` bump.
+/// The route is a cheapest one with the fewest segments, ties to the first found: a
+/// breadth-first search back from `target` over *tight* segments -- those on some cheapest
+/// route, `dist[near] + cost == dist[far]` -- taking cities in index order and each city's
+/// segments in board order. Breadth-first is what makes it safe on my own track, which
+/// costs nothing: `OBS_VERSION` 1 walked greedily and could step back and forth across a
+/// zero-cost segment until a guard ran out, truncating the plan (`tests/obs_plan.rs`).
 fn walk_route(
     state: &State,
-    me: u8,
+    cost: &[u16; MAX_SEGMENTS],
     dist: &[u16],
     source: CityId,
     target: CityId,
@@ -609,50 +611,81 @@ fn walk_route(
     if dist[usize::from(target)] >= UNREACHABLE {
         return;
     }
-    let mut here = target;
-    let mut guard = 0;
-    while here != source && guard <= board.n_cities {
-        guard += 1;
-        let mut stepped = false;
-        for &(nb, segment) in &board.adjacency[usize::from(here)] {
-            let owner = state.seg_owner[usize::from(segment)];
-            if owner != FREE && owner != me {
-                continue;
-            }
-            let weight = if owner == me {
-                0
-            } else {
-                u16::from(board.seg_len[usize::from(segment)])
-            };
-            if dist[usize::from(nb)] + weight == dist[usize::from(here)] {
-                step(segment, owner);
-                here = nb;
-                stepped = true;
-                break;
+    // For each city reached: the city one step nearer the target, and the segment between.
+    let mut toward = [(0 as CityId, 0 as SegmentId); MAX_CITIES];
+    let mut reached = 1u64 << target;
+    let mut frontier = reached;
+    while reached >> source & 1 == 0 {
+        let mut next = 0u64;
+        let mut cities = frontier;
+        while cities != 0 {
+            let here = cities.trailing_zeros() as usize;
+            cities &= cities - 1;
+            for &(near, segment) in &board.adjacency[here] {
+                // A blocked segment costs UNREACHABLE, more than any finite distance it
+                // could close, so it is never tight (and the sum still fits a u16).
+                let w = cost[usize::from(segment)];
+                if reached >> near & 1 == 0 && dist[usize::from(near)] + w == dist[here] {
+                    reached |= 1 << near;
+                    next |= 1 << near;
+                    toward[usize::from(near)] = (here as CityId, segment);
+                }
             }
         }
-        if !stepped {
-            break;
-        }
+        // Every city on a cheapest route has a tight segment back towards the source, so
+        // the search reaches it before it runs out of cities.
+        debug_assert!(next != 0, "no tight route from {target} back to {source}");
+        frontier = next;
+    }
+    let mut here = source;
+    while here != target {
+        let (next, segment) = toward[usize::from(here)];
+        step(segment, state.seg_owner[usize::from(segment)]);
+        here = next;
     }
 }
 
-/// Free segments on *a* cheapest route between consecutive terminals.
+/// The route [`walk_route`] takes for `player`'s ticket -- segments and their owners, from
+/// the ticket's first city -- for `naive_obs`, which checks it is what is promised.
+#[cfg(test)]
+pub(crate) fn ticket_route(state: &State, player: usize, ticket: usize) -> Vec<(SegmentId, u8)> {
+    let board = state.board;
+    let seg_owner = &state.seg_owner[..board.n_segments];
+    let cost = crossing_costs(board, seg_owner, player as u8, state.rules.doubles_locked);
+    let dist = all_pairs(board, &cost);
+    let (a, b) = (board.ticket_a[ticket], board.ticket_b[ticket]);
+    let mut route = Vec::new();
+    walk_route(
+        state,
+        &cost,
+        &dist[usize::from(a)],
+        a,
+        b,
+        |segment, owner| {
+            route.push((segment, owner));
+        },
+    );
+    route
+}
+
+/// Free segments on each live, open ticket's route ([`walk_route`]).
 ///
 /// An approximation of "on my Steiner tree", and deliberately so: the exact edge set of a
 /// Dreyfus-Wagner solution needs back-pointers through the subset DP, which is a lot of
 /// machinery for a boolean hint. What the network needs is "this route is on my plan", and
 /// a union of cheapest paths gives that.
-fn planned_segments(state: &State, me: usize, dist: &Distances, terminals: &[CityId]) -> u128 {
-    if terminals.len() < MIN_TERMINALS {
-        return 0;
-    }
+fn planned_segments(
+    state: &State,
+    cost: &[u16; MAX_SEGMENTS],
+    dist: &Distances,
+    terminals: &[CityId],
+) -> u128 {
     let mut plan = 0u128;
     for pair in terminals.chunks_exact(2) {
         let (source, target) = (pair[0], pair[1]);
         walk_route(
             state,
-            me as u8,
+            cost,
             &dist[usize::from(source)],
             source,
             target,
@@ -678,7 +711,7 @@ fn planned_segments(state: &State, me: usize, dist: &Distances, terminals: &[Cit
 ///
 /// # Panics
 /// If `out` is not exactly the spec's size for this board.
-pub fn encode(state: &mut State, player: usize, out: &mut [f32]) {
+pub fn encode(state: &State, player: usize, out: &mut [f32]) {
     let derived = Derived::compute(state, player);
     encode_with(state, player, &derived, out);
 }
@@ -688,12 +721,12 @@ pub fn encode(state: &mut State, player: usize, out: &mut [f32]) {
 ///
 /// # Panics
 /// If `out` is not exactly the spec's size for this board.
-pub fn encode_cached(state: &mut State, player: usize, out: &mut [f32], cache: &mut EncoderCache) {
+pub fn encode_cached(state: &State, player: usize, out: &mut [f32], cache: &mut EncoderCache) {
     let derived = cache.lookup(state, player);
     encode_with(state, player, derived, out);
 }
 
-fn encode_with(state: &mut State, player: usize, derived: &Derived, out: &mut [f32]) {
+fn encode_with(state: &State, player: usize, derived: &Derived, out: &mut [f32]) {
     let layout = layout_for(state.board.name);
     assert_eq!(
         out.len(),
@@ -803,7 +836,8 @@ fn segment_dynamic(view: &View, state: &State, l: &Layout, out: &mut [f32]) {
             0.0
         };
         let (a, b) = (board.seg_a[segment], board.seg_b[segment]);
-        let touches = view.dsu_root[a as usize] != a || view.dsu_root[b as usize] != b;
+        let network = view.derived.network;
+        let touches = network >> a & 1 == 1 || network >> b & 1 == 1;
         out[l.seg_dyn.at(segment, l.extends_my_chain)] =
             if owner == FREE && touches { 1.0 } else { 0.0 };
     }
@@ -812,10 +846,10 @@ fn segment_dynamic(view: &View, state: &State, l: &Layout, out: &mut [f32]) {
 fn own_hand(view: &View, state: &State, l: &Layout, out: &mut [f32]) {
     let board = state.board;
     let base = view.me * board.n_card_types;
-    let per_color = f64::from(board.raw.cards_per_color);
     for c in 0..board.n_card_types {
         let count = state.hand[base + c];
-        out[l.own_hand.at(0, l.counts) + c] = (f64::from(count) / per_color) as f32;
+        let printed = f64::from(board.cards_per_type(c as u8));
+        out[l.own_hand.at(0, l.counts) + c] = (f64::from(count) / printed) as f32;
         for (level, &field) in l.hand_therm.iter().enumerate() {
             // `hand_therm[0]` is "at least one", so the threshold is the index plus one.
             out[l.own_hand.at(0, field) + c] = if u32::from(count) > level as u32 {
@@ -869,7 +903,6 @@ fn tickets(view: &View, state: &State, l: &Layout, out: &mut [f32]) {
 /// calls it for no other.
 fn fragility(
     state: &State,
-    me: u8,
     cost: &[u16; MAX_SEGMENTS],
     dist: &Distances,
     ticket: usize,
@@ -879,16 +912,22 @@ fn fragility(
     let (a, b) = (board.ticket_a[ticket], board.ticket_b[ticket]);
     let baseline = dist[usize::from(a)][usize::from(b)];
 
-    // Each free step of the walk lands on a city strictly cheaper than the last, so there
-    // are fewer of them than cities.
+    // A route visits each city at most once, so it has fewer segments than there are cities.
     let mut on_path = [0 as SegmentId; MAX_CITIES];
     let mut n_on_path = 0;
-    walk_route(state, me, &dist[usize::from(a)], a, b, |segment, owner| {
-        if owner == FREE {
-            on_path[n_on_path] = segment;
-            n_on_path += 1;
-        }
-    });
+    walk_route(
+        state,
+        cost,
+        &dist[usize::from(a)],
+        a,
+        b,
+        |segment, owner| {
+            if owner == FREE {
+                on_path[n_on_path] = segment;
+                n_on_path += 1;
+            }
+        },
+    );
 
     let mut cost = *cost;
     let mut worst = 0u16;
@@ -1068,11 +1107,9 @@ mod tests {
     }
 
     #[test]
-    fn encoding_is_deterministic_and_leaves_the_position_alone() {
-        // `encode` takes &mut State -- path halving and the fragility probe both mutate.
-        // Both must restore what they touched, or the observation would silently change
-        // the game it was observing. Mid-game, with tickets held, so the fragility probe's
-        // close-and-restore of seg_owner actually runs; at setup nobody holds a ticket.
+    fn encoding_is_deterministic_mid_game() {
+        // Mid-game, with tickets held, so the plan, fragility and the cache's inputs are all
+        // live; at setup nobody holds a ticket.
         let game = Game::new(RuleConfig::new("usa", 3).unwrap()).unwrap();
         let mut state = game.new_initial_state(5);
         let mut rng = stream(5, &[Part::Str("obs"), Part::Str("policy")]);
@@ -1084,21 +1121,12 @@ mod tests {
             (0..3).all(|p| state.tickets[p] != 0),
             "every seat holds tickets"
         );
-        let before = state.state_hash();
-        let owners = state.seg_owner;
         let size = observation_size(&state);
-
         for player in 0..3 {
             let mut first = vec![0.0f32; size];
-            encode(&mut state, player, &mut first);
-            assert_eq!(state.state_hash(), before, "encoding moved the state");
-            assert_eq!(
-                state.seg_owner, owners,
-                "the fragility probe left a segment closed"
-            );
-
+            encode(&state, player, &mut first);
             let mut second = vec![0.0f32; size];
-            encode(&mut state, player, &mut second);
+            encode(&state, player, &mut second);
             assert_eq!(first, second, "encoding is not deterministic");
         }
     }

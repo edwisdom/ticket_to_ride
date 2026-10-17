@@ -40,7 +40,14 @@ use std::sync::OnceLock;
 use crate::board::{Board, FACEUP_SLOTS, MAX_PLAYERS, all_boards};
 
 /// Bumped whenever the table below changes shape or meaning. Baked into every checkpoint.
-pub const OBS_VERSION: u32 = 1;
+///
+/// - **1**: the table as the Python encoder signed it (Phase 3.1's golden corpus).
+/// - **2**: the same layout, three values corrected. The plan (`on_my_steiner_tree`,
+///   `fragility`) follows a breadth-first route that cannot be truncated by my own
+///   zero-cost track; `extends_my_chain` means touching a city my track reaches (1 read the
+///   union-find, and missed each component's root city); and own-hand counts divide each
+///   card type by its own printed count (1 divided locomotives by the colour count).
+pub const OBS_VERSION: u32 = 2;
 
 /// Opponent slots are fixed at the maximum table size so one network plays any seat count;
 /// unused slots are zeroed and carry a `present` flag.
@@ -165,13 +172,14 @@ pub const FEATURE_SPEC: &[BlockDef] = &[
                 "on_my_steiner_tree",
                 Fixed(1),
                 Flag,
-                "Lies on the cheapest tree spanning my tickets.",
+                "Free, and on my plan: the union of each open ticket's cheapest route (the \
+                 fewest segments among the cheapest), standing in for the Steiner tree.",
             ),
             f(
                 "extends_my_chain",
                 Fixed(1),
                 Flag,
-                "Touches a city my network already reaches.",
+                "Free, and touches a city my own track already reaches.",
             ),
         ],
     },
@@ -183,7 +191,7 @@ pub const FEATURE_SPEC: &[BlockDef] = &[
                 "counts",
                 CardTypes,
                 Ratio,
-                "Normalized card counts, locomotive last.",
+                "Card counts, each over that type's printed count; locomotive last.",
             ),
             f("thermometer", CardTypes, Flag, "Per colour: at least one."),
             f("thermometer2", CardTypes, Flag, "Per colour: at least two."),
@@ -549,16 +557,17 @@ mod tests {
     use crate::board::get_board;
     use crate::hashing::hash128_hex;
 
-    /// The layout `OBS_VERSION` 1 was signed under -- by the golden corpus and by
-    /// `oracle-v1` -- as blake2b-128 over `map size` / `block count stride offset` /
-    /// `field offset width` lines. Taken from the generated table this module replaced, so
-    /// the move from Python-generated to hand-maintained is proven layout-preserving.
-    const OBS_V1_LAYOUT: &str = "ebdd9a514988b2eb6533c1921c2602d3";
+    /// The layout as blake2b-128 over `map size` / `block count stride offset` /
+    /// `field offset width` lines, and the versions signed under it. Taken from the
+    /// generated table this module replaced, so the move from Python-generated to
+    /// hand-maintained is proven layout-preserving; version 2 changed values, not layout.
+    const LAYOUT: &str = "ebdd9a514988b2eb6533c1921c2602d3";
+    const LAYOUT_VERSIONS: &[u32] = &[1, 2];
 
     #[test]
-    fn the_layout_is_the_one_obs_version_1_was_signed_under() {
-        assert_eq!(
-            OBS_VERSION, 1,
+    fn the_layout_is_the_one_the_corpus_was_signed_under() {
+        assert!(
+            LAYOUT_VERSIONS.contains(&OBS_VERSION),
             "a version bump must re-pin the layout digest"
         );
         let mut text = String::new();
@@ -577,7 +586,7 @@ mod tests {
         }
         assert_eq!(
             hash128_hex(text.as_bytes()),
-            OBS_V1_LAYOUT,
+            LAYOUT,
             "the observation layout moved without an OBS_VERSION bump:\n{text}"
         );
     }

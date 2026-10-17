@@ -90,7 +90,10 @@ fn the_whole_corpus_reproduces_on_the_live_engine() {
 #[test]
 #[ignore = "every game: run with --release -- --ignored"]
 fn the_whole_corpus_reproduces_on_oracle_v1() {
+    // Play, scores and hash chains in full; not the observation digests, which the corpus
+    // records under the live OBS_VERSION and the frozen build encodes under version 1.
     for (map, n) in configs() {
-        check(&Oracle::new(map, n), &load(map, n), &Scope::all()).unwrap_or_else(|e| panic!("{e}"));
+        let scope = Scope::all().without_observations();
+        check(&Oracle::new(map, n), &load(map, n), &scope).unwrap_or_else(|e| panic!("{e}"));
     }
 }

@@ -1,11 +1,13 @@
 //! Write or verify the golden corpus in `tests/golden/corpus/`.
 //!
 //! ```text
-//! cargo run --release -p ttr-tools --bin gen-corpus -- --check
+//! cargo run --release -p ttr-tools --bin gen-corpus -- --check [--play-only]
 //! cargo run --release -p ttr-tools --bin gen-corpus -- --write
 //! ```
 //!
-//! `--check` re-derives every game with the live crate and compares. `--write` refuses to
+//! `--check` re-derives every game with the live crate and compares. `--play-only` leaves
+//! out the observation digests and the recorded `OBS_VERSION`: what must still hold across
+//! an `OBS_VERSION` bump, and so what to run before re-signing for one. `--write` refuses to
 //! overwrite a file recorded under the current `CONTRACT_VERSION` and `OBS_VERSION`: the
 //! corpus is a frozen fixture, and rewriting it at the same versions would be accepting a
 //! behaviour change by regenerating the evidence. A deliberate re-sign at the same versions
@@ -24,9 +26,10 @@ fn main() -> ExitCode {
     let has = |flag: &str| args.iter().any(|a| a == flag);
     let (write, verify) = (has("--write"), has("--check"));
     if write == verify {
-        eprintln!("usage: gen-corpus (--check | --write [--allow-same-version])");
+        eprintln!("usage: gen-corpus (--check [--play-only] | --write [--allow-same-version])");
         return ExitCode::from(2);
     }
+    let play_only = has("--play-only");
 
     let mut failed = false;
     for (map, n_players) in configs() {
@@ -69,7 +72,10 @@ fn main() -> ExitCode {
                     continue;
                 }
             };
-            let now = current_header(map, n_players);
+            let mut now = current_header(map, n_players);
+            if play_only {
+                now.obs_version = corpus.header.obs_version;
+            }
             if corpus.header != now {
                 eprintln!(
                     "{map} {n_players}P: header {:?} != current {:?}",
@@ -78,7 +84,12 @@ fn main() -> ExitCode {
                 failed = true;
                 continue;
             }
-            match check(&Live::new(map, n_players), &corpus, &Scope::all()) {
+            let scope = if play_only {
+                Scope::all().without_observations()
+            } else {
+                Scope::all()
+            };
+            match check(&Live::new(map, n_players), &corpus, &scope) {
                 Ok(games) => println!(
                     "{map} {n_players}P: {games} games reproduce, {:.1}s",
                     started.elapsed().as_secs_f64()

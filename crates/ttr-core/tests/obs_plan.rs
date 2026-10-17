@@ -6,14 +6,13 @@
 //! differential and the golden corpus. Those stay, but they compare against a frozen copy;
 //! a feature's meaning deserves a test that states it.
 //!
-//! Writing them found a defect that is part of `OBS_VERSION` 1 as signed (the retired
-//! Python encoder had it too): the walk that recovers a planned route gives my own track
-//! weight 0, so it can step back and forth across one of my segments until its loop guard
-//! runs out, and the plan comes back truncated -- 43-44% of open-ticket plans in H3 games on
-//! the USA map, 23% on mini. `on_my_steiner_tree` and `fragility` both read that walk. The
-//! fix changes features, so it is a named `OBS_VERSION` bump done on its own; until then
-//! the test that states the right behaviour is ignored with the defect as its reason, and
-//! `plans_survive_a_real_game` asserts only what holds either way.
+//! Writing them found a defect in `OBS_VERSION` 1 as signed (the retired Python encoder had
+//! it too): the walk that recovered a planned route gave my own track weight 0, so it could
+//! step back and forth across one of my segments until its loop guard ran out, and the plan
+//! came back truncated -- 43-44% of open-ticket plans in H3 games on the USA map, 23% on
+//! mini. `on_my_steiner_tree` and `fragility` both read that walk. `OBS_VERSION` 2 replaced
+//! it with a breadth-first route, which cannot loop; the tests below state what holds of
+//! it, the converse in `plans_survive_a_real_game` included.
 
 mod common;
 
@@ -128,8 +127,6 @@ fn the_plan_flags_exactly_one_cheapest_path_for_a_single_ticket() {
 /// Claiming a step of the plan takes it off the plan, and what is left still reaches: the
 /// remaining free steps plus my own track form one walk, costing exactly what is left.
 #[test]
-#[ignore = "OBS_VERSION 1 defect: the plan walk ping-pongs across zero-weight own track and \
-            truncates the plan; fixing it is a named OBS_VERSION bump (see the module doc)"]
 fn claimed_track_leaves_the_plan_and_the_rest_still_reaches() {
     let board = game("usa", 2).board;
     let ticket = long_tickets(board)[0];
@@ -235,9 +232,9 @@ fn several_tickets_plan_the_union_of_their_routes() {
     assert_eq!(plan(&mut all), union);
 }
 
-/// Mid-game: every flagged segment is free, and there is no plan without a ticket that is
-/// neither finished nor dead. (The converse -- an open ticket always has a plan -- is what
-/// the `OBS_VERSION` 1 walk defect can break, so it is not asserted here.)
+/// Mid-game: every flagged segment is free, and there is a plan exactly when some ticket is
+/// neither finished nor dead -- an open ticket's cheapest route costs something, so it
+/// crosses at least one free segment. (`OBS_VERSION` 1's walk could lose all of them.)
 #[test]
 fn plans_survive_a_real_game() {
     for seed in 0..8 {
@@ -260,9 +257,10 @@ fn plans_survive_a_real_game() {
             view[at("usa", "tickets", t, "connected")] == 0.0
                 && view[at("usa", "tickets", t, "is_dead")] == 0.0
         });
-        assert!(
-            open || route.is_empty(),
-            "seed {seed}: a plan with no open ticket"
+        assert_eq!(
+            open,
+            !route.is_empty(),
+            "seed {seed}: an open ticket and a plan go together"
         );
     }
 }

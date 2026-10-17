@@ -246,7 +246,13 @@ fn opponent_slots_are_fixed_so_one_network_plays_any_table() {
 fn the_spec_is_smaller_on_a_smaller_board() {
     assert!(spec_for("mini").size < spec_for("usa").size);
     assert_eq!(spec_for("usa").size, 3355);
-    assert!(obs_version() >= 1);
+}
+
+#[test]
+fn the_reported_version_is_the_spec_s() {
+    // What checkpoints and the corpus record; version 2 since the plan-walk fix.
+    assert_eq!(obs_version(), ttr_core::obs_spec::OBS_VERSION);
+    assert_eq!(obs_version(), 2);
 }
 
 // ---------------------------------------------------------------------------
@@ -272,7 +278,7 @@ fn encoding_fills_a_buffer_of_the_right_size() {
 fn a_reused_buffer_is_cleared() {
     let mut state = played();
     let mut buffer = vec![7.0; observation_size(&state)];
-    encode(&mut state, 0, &mut buffer);
+    encode(&state, 0, &mut buffer);
     let fresh = observe(&mut state, 0);
     assert_eq!(
         first_difference(&buffer, &fresh),
@@ -285,8 +291,8 @@ fn a_reused_buffer_is_cleared() {
 #[test]
 #[should_panic(expected = "buffer holds")]
 fn a_wrong_sized_buffer_is_rejected() {
-    let mut state = played();
-    encode(&mut state, 0, &mut [0.0; 3]);
+    let state = played();
+    encode(&state, 0, &mut [0.0; 3]);
 }
 
 #[test]
@@ -673,7 +679,7 @@ fn encoding_survives_a_whole_game() {
         let mut steps = 0;
         while !state.is_terminal() && steps < 40 {
             let seat = usize::from(state.current_player());
-            encode(&mut state, seat, &mut buffer);
+            encode(&state, seat, &mut buffer);
             let action = state.sample_legal(&mut rng).expect("a non-terminal state");
             state.step(action).expect("a sampled action is legal");
             steps += 1;

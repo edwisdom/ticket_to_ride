@@ -392,10 +392,10 @@ impl PyState {
     ///
     /// Returns a list rather than writing into a caller buffer: a convenience for tests and
     /// interactive use. The zero-copy path that training uses is `VecEnv::observe_*`.
-    fn observation(&mut self, player: usize) -> PyResult<Vec<f32>> {
+    fn observation(&self, player: usize) -> PyResult<Vec<f32>> {
         self.check_seat(player)?;
         let mut out = vec![0.0f32; ttr_core::obs::observation_size(&self.inner)];
-        ttr_core::obs::encode(&mut self.inner, player, &mut out);
+        ttr_core::obs::encode(&self.inner, player, &mut out);
         Ok(out)
     }
 

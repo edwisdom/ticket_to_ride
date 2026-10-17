@@ -184,7 +184,9 @@ pub fn compare_observation<A: Engine, B: Engine>(
     let mut bad = 0usize;
     let mut first = String::new();
     for (slot, (&x, &y)) in buf_a.iter().zip(buf_b.iter()).enumerate() {
-        let ok = if mask.continuous[slot] {
+        let ok = if mask.skip[slot] {
+            true
+        } else if mask.continuous[slot] {
             x.to_bits() == y.to_bits() || (x - y).abs() <= CONTINUOUS_TOLERANCE
         } else {
             x.to_bits() == y.to_bits()

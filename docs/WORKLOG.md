@@ -5,6 +5,75 @@ session. Decisions that deviate from [PLAN.md](PLAN.md) belong here, with the re
 
 ---
 
+## 2026-10-17 — `OBS_VERSION` 2: the plan walk and two quirks, fixed
+
+The named bump agreed at the end of 3.1: after the bit-exact 3.2, before 3.4, so the PPO
+spike trains on features that mean what their docs say. The layout is unchanged (same
+slots, same layout digest); three features' values changed.
+
+- **The plan walk** (`on_my_steiner_tree`, `fragility`). Version 1 recovered a ticket's
+  route greedily from the far end with my own track at weight 0; at a city whose neighbour
+  across my track had the same distance it could step back across it, ping-pong until its
+  guard ran out, and return a truncated route -- 43-44% of open-ticket plans in H3 games
+  on the USA map, 23% on mini (found in 3.1, `tests/obs_plan.rs`). Version 2 searches
+  breadth-first back from the far end over *tight* segments (`dist[near] + cost ==
+  dist[far]`): a cheapest route with the fewest segments, ties to search order. It cannot
+  loop, and it reads the same cost table the distances came from (version 1 re-derived
+  weights from owners and ignored the double-route rule).
+- **`extends_my_chain`**. Version 1 read `dsu_root[c] != c`, which is true only for the
+  cities of my components other than each component's root (its smallest city), so a
+  segment at a root city never counted. Version 2: a city any of my segments reaches. That
+  is a function of the board, so it moved into the cached `Derived`, and the encoder no
+  longer reads the union-find at all -- **`encode` takes `&State` now**.
+- **Own-hand counts**. Version 1 divided every card type by the colour count (12),
+  locomotives (14 printed) included; version 2 divides each by its own printed count.
+  *Not in the original agreement*: it is the third version-1 quirk `naive_obs` had been
+  reproducing, folded in because the bump was happening anyway. Recorded here so it can be
+  objected to.
+
+### How it was checked
+
+- **`naive_obs` covers every feature now.** The chain and hand features from scratch, as
+  before. For the plan and fragility it takes the encoder's routes
+  (`obs::ticket_route`) and checks everything promised of them: a path between the
+  ticket's cities, costing exactly the Bellman-Ford distance, with the fewest segments of
+  any cheapest route (Bellman-Ford over (cost, segments) pairs); the plan is the union of
+  their free segments; fragility is recomputed by Bellman-Ford with each free segment
+  removed. Version 1 could not be checked this way -- its routes were not cheapest routes.
+  Its sweep (60 seeds, every configuration, random and H3, every third step, every seat)
+  passes.
+- **`tests/obs_plan.rs`**: the test that stated the right behaviour, ignored since 3.1,
+  passes; `plans_survive_a_real_game` asserts the converse it could not before (an open
+  ticket always has a plan).
+- **`oracle-v1`**: live and frozen builds compared at every step as before, every slot
+  except `CHANGED_SINCE_ORACLE` (ttr-tools). A guard test fails if a skipped feature never
+  differs from the oracle (the list would be stale) or an unskipped slot ever does: all
+  four changes are observable, and nothing else moved. Full sweep green (380 s).
+- **The corpus**, re-signed in two steps, now the documented procedure (CONTRACT.md §4.1):
+  `gen-corpus --check --play-only` (new) first -- all 71,400 games' play, scores and hash
+  chains reproduce under version 2 -- then `--write`. About 11,150 bytes changed per
+  file: the version field and the 700 games' observation digests (700 x 16 bytes, less
+  the bytes that coincide), nothing else. `oracle-v1`'s corpus check covers play only now.
+- **Mutation testing** over the changed functions: 144 mutants, 126 caught, 11 timeouts,
+  4 unviable, 3 missed -- the pinned `segment_dynamic` equivalent, and two pieces of
+  redundant code (a bound check a blocked segment could never pass, `|` on disjoint bits),
+  simplified away; their re-run, 50 mutants, missed none. A version-1 pin became a real gap
+  (`obs_version() -> 1` survives once the version is 2) and is now a test.
+
+### Cost
+
+Single-threaded µs per observation, version 1 (end of 3.2) → version 2, cold / cached:
+usa 2P random 8.9 → 9.5 / 4.6 → 5.1; usa 4P random 9.5 → 10.0 / 5.9 → 6.4; usa 2P H3
+6.5 → 6.5 / 3.3 → 3.3; usa 4P H3 7.9 → 7.8 / 4.8 → 5.8; mini 2P H3 1.5 → 2.1 / 0.8 →
+1.2. Most of the increase is honest work version 1 skipped: a truncated route has fewer
+free segments for fragility to re-price. Still well inside 3.2's exit criteria.
+
+### Next
+
+Phase 3.4, starting with its re-plan note.
+
+---
+
 ## 2026-10-17 — Phase 3.3: Modal, proven with smoke tests
 
 Complete, within the brief's scope: cheap smoke tests only, experiments stay local. The

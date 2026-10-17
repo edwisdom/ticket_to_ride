@@ -37,9 +37,7 @@ exclude_re = [
     # and an edge bit already known to be clear in `used`.
     'graph\.rs:638:38: replace \| with \^ in Trail::best_from',
     'graph\.rs:648:71: replace \| with \^ in Trail::best_from',
-    # OBS_VERSION is 1.
-    'obs\.rs:56:5: replace obs_version -> u32 with 1',
     # Treating an unheld colour's reach as the wilds alone: every reach is `.max(wilds)`
     # afterwards anyway.
-    'obs\.rs:751:22: replace > with >= in segment_dynamic',
+    'obs\.rs:784:22: replace > with >= in segment_dynamic',
 ]
