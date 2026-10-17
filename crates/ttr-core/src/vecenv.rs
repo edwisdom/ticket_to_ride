@@ -29,11 +29,29 @@ use crate::state::{Game, IllegalAction, State};
 
 /// How many worker threads to use for batched work.
 ///
-/// On Apple silicon this is the performance-core count read from `sysctl`; elsewhere it is
-/// the CPU count less two, leaving room for the Python process and the allocator. Falls
-/// back to 1 rather than panicking if neither can be determined -- a slow batch beats a
-/// crashed worker.
+/// `TTR_THREADS`, when it holds a positive integer, decides: a machine dedicated to one job
+/// -- a cloud container -- should use every CPU it was given, and only the job knows that
+/// it is dedicated. Otherwise, on Apple silicon this is the performance-core count read from
+/// `sysctl`; elsewhere it is the CPU count less two, leaving room for the Python process and
+/// the allocator. The CPU count is `available_parallelism`, which follows a container's
+/// CPU limit -- checked on Modal, where gVisor shows a capped container exactly its limit
+/// (PLAN.md §14.1, Phase 3.3). Falls back to 1 rather than panicking if nothing can be
+/// determined -- a slow batch beats a crashed worker.
 pub fn performance_threads() -> usize {
+    threads_from(
+        std::env::var("TTR_THREADS").ok().as_deref(),
+        detected_threads,
+    )
+}
+
+fn threads_from(setting: Option<&str>, detect: impl FnOnce() -> usize) -> usize {
+    match setting.and_then(|s| s.trim().parse::<usize>().ok()) {
+        Some(n) if n > 0 => n,
+        _ => detect(),
+    }
+}
+
+fn detected_threads() -> usize {
     #[cfg(target_os = "macos")]
     {
         if let Some(n) = sysctl_usize("hw.perflevel0.logicalcpu") {
@@ -296,6 +314,15 @@ mod tests {
 
     fn game(map: &str, n: usize) -> Game {
         Game::new(RuleConfig::new(map, n).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn ttr_threads_overrides_detection_only_when_it_is_a_positive_count() {
+        assert_eq!(threads_from(Some("16"), || 3), 16);
+        assert_eq!(threads_from(Some(" 4\n"), || 3), 4);
+        for ignored in [None, Some(""), Some("0"), Some("-2"), Some("all")] {
+            assert_eq!(threads_from(ignored, || 3), 3, "{ignored:?}");
+        }
     }
 
     #[test]

@@ -36,6 +36,9 @@ web = [
 ttr = "ticket_to_ride.cli.app:main"
 
 [dependency-groups]
+cloud = [
+    "modal>=1.6.2",
+]
 dev = [
     "pytest>=9",
     "pytest-xdist>=3.6",

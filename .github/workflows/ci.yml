@@ -46,9 +46,10 @@ jobs:
       - run: cargo run -q --release -p ttr-tools --bin gen-vectors -- --check
       - run: cargo run -q --release -p ttr-tools --bin gen-replays -- --check
 
-  # ty must see torch to resolve imports under rl/, and ttr_rust (built by `uv sync`) to
-  # resolve the engine -- so this needs a Rust toolchain as well as the torch install.
-  # Linux torch comes from the pytorch-cpu index, so this is ~200MB, not ~3GB.
+  # ty must see torch to resolve imports under rl/, ttr_rust (built by `uv sync`) to
+  # resolve the engine, and modal (the `cloud` group) to check infra/ and `ttr cloud` -- so
+  # this needs a Rust toolchain as well as the torch install. Linux torch comes from the
+  # pytorch-cpu index, so this is ~200MB, not ~3GB.
   typecheck:
     runs-on: ubuntu-latest
     steps:
@@ -58,7 +59,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-      - run: uv sync --all-extras --group dev
+      - run: uv sync --all-extras --group dev --group cloud
       - run: uv run ty check --output-format github
 
   # The Python suite, still with NO torch installed: that is what keeps it at a couple of

@@ -468,6 +468,94 @@ class Store:
             (rating_run_id,),
         ).fetchall()
 
+    def outcomes(self) -> list[tuple[Any, ...]]:
+        """Every seat of every game: what was played and how it ended, free of database ids,
+        timings and provenance.
+
+        Two stores holding the same games -- one arena run on two machines -- return equal
+        lists. This is the cross-platform check of PLAN.md §14.1, Phase 3.3; the final state
+        hash makes it a check that the *games* were the same, not just their results.
+        """
+        rows = self.db.execute(
+            "SELECT c.map_name, c.n_players, m.seed_root, m.lineup, g.block_seed, g.rotation,"
+            " g.turns, g.final_hash, s.seat, a.spec, a.behaviour_hash, s.score, s.rank"
+            " FROM seat s JOIN game g ON g.game_id = s.game_id"
+            " JOIN match m ON m.match_id = g.match_id"
+            " JOIN config c ON c.config_id = m.config_id"
+            " JOIN agent a ON a.agent_id = s.agent_id"
+            " ORDER BY c.map_name, c.n_players, m.lineup, m.seed_root, g.block_seed,"
+            " g.rotation, s.seat"
+        ).fetchall()
+        return [tuple(row) for row in rows]
+
+    # -- moving matches between stores ---------------------------------
+
+    def merge(self, other: Store) -> int:
+        """Copy every match recorded in `other` into this store. Returns how many.
+
+        How cloud results come home (PLAN.md §14.1, Phase 3.3): each cloud job writes its
+        own database, and this folds it in, a match per transaction through `record_match`.
+        Configurations and agents are matched by their natural keys -- an agent by its
+        content address -- so copied games count towards the same players as local ones.
+        Ratings are not copied; they are a view, refit from everything by `ttr leaderboard`.
+        Not idempotent: the caller keeps track of what it has merged.
+        """
+        configs = {
+            row["config_id"]: self.config_id(
+                row["map_name"],
+                row["n_players"],
+                row["rules_hash"],
+                row["data_hash"],
+                row["contract_version"],
+            )
+            for row in other.db.execute("SELECT * FROM config").fetchall()
+        }
+        agents = {
+            row["agent_id"]: self.agent_id(
+                AgentRow(
+                    spec=row["spec"],
+                    family=row["family"],
+                    params_hash=row["params_hash"],
+                    behaviour_hash=row["behaviour_hash"],
+                    checkpoint=row["checkpoint"],
+                )
+            )
+            for row in other.db.execute("SELECT * FROM agent").fetchall()
+        }
+        matches = other.db.execute("SELECT * FROM match ORDER BY match_id").fetchall()
+        columns = ", ".join(f"s.{c}" for c in SEAT_COLUMNS)
+        for match in matches:
+            games = other.db.execute(
+                "SELECT game_id, block_seed, rotation, turns, final_hash FROM game"
+                " WHERE match_id=? ORDER BY game_id",
+                (match["match_id"],),
+            ).fetchall()
+            index = {game["game_id"]: i for i, game in enumerate(games)}
+            seats = other.db.execute(
+                f"SELECT {columns} FROM seat s JOIN game g ON g.game_id = s.game_id"
+                " WHERE g.match_id=? ORDER BY s.game_id, s.seat",
+                (match["match_id"],),
+            ).fetchall()
+            self.record_match(
+                MatchRow(
+                    config_id=configs[match["config_id"]],
+                    seed_root=match["seed_root"],
+                    n_blocks=match["n_blocks"],
+                    lineup=match["lineup"],
+                    seconds=match["seconds"],
+                    engine=match["engine"],
+                    git_sha=match["git_sha"],
+                    ttr_version=match["ttr_version"],
+                    started_utc=match["started_utc"],
+                ),
+                [(g["block_seed"], g["rotation"], g["turns"], g["final_hash"]) for g in games],
+                [
+                    (index[seat["game_id"]], seat["seat"], agents[seat["agent_id"]], *seat[3:])
+                    for seat in seats
+                ],
+            )
+        return len(matches)
+
     def counts(self) -> dict[str, int]:
         return {
             table: int(self.db.execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()["n"])

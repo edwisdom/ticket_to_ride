@@ -8,12 +8,14 @@ than remembered.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
 from ticket_to_ride.cli.app import app
+from ticket_to_ride.cli.cmd_cloud import job_id
 from ticket_to_ride.cli.cmd_map import summary
 from ticket_to_ride.data.board import MINI, USA
 
@@ -28,7 +30,7 @@ runner = CliRunner()
 def test_help_lists_every_command() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    for command in ("version", "map", "bench", "arena", "leaderboard"):
+    for command in ("version", "map", "bench", "arena", "leaderboard", "cloud"):
         assert command in result.stdout
 
 
@@ -173,3 +175,38 @@ def test_sprt_needs_two_agents_and_two_seats(tmp_path: Path) -> None:
     )
     assert result.exit_code != 0
     assert "challenger,incumbent" in result.output
+
+
+# ---------------------------------------------------------------------------
+# ttr cloud -- everything short of calling Modal
+# ---------------------------------------------------------------------------
+
+
+def test_cloud_lists_its_commands_without_importing_modal() -> None:
+    result = runner.invoke(app, ["cloud", "--help"])
+    assert result.exit_code == 0
+    for command in ("bench", "arena", "run", "pull"):
+        assert command in result.stdout
+
+
+def test_cloud_without_the_cloud_group_says_how_to_get_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "modal", None)  # `import modal` now raises ImportError
+    result = runner.invoke(app, ["cloud", "pull"])
+    assert result.exit_code == 2
+    assert "uv sync --group cloud" in result.output
+
+
+def test_cloud_run_needs_a_command() -> None:
+    result = runner.invoke(app, ["cloud", "run"])
+    assert result.exit_code != 0
+
+
+def test_cloud_job_ids_sort_by_time_and_name_their_command() -> None:
+    first, second = job_id("arena"), job_id("arena")
+    assert first != second
+    stamp, command, suffix = first.rsplit("-", 2)[0], first.split("-")[2], first.rsplit("-", 1)[1]
+    assert len(stamp) == len("20261016-201530")
+    assert command == "arena"
+    assert len(suffix) == 4
