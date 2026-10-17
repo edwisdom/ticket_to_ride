@@ -23,9 +23,24 @@
 
 use rayon::prelude::*;
 
+use crate::heuristic::{Heuristic, HeuristicParams, Tier};
 use crate::obs;
 use crate::rng::{Part, Pcg32, stream};
+use crate::scoring;
 use crate::state::{Game, IllegalAction, State};
+
+/// Who plays a seat. The learner's actions come from Python, one batch per call; a scripted
+/// seat is a heuristic that moves inside Rust, so Python only ever sees the learner's turns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Seat {
+    Learner,
+    Scripted(Tier),
+}
+
+/// A ticket's status in [`VecEnv::ticket_status`].
+pub const TICKET_NOT_HELD: u8 = 0;
+pub const TICKET_OPEN: u8 = 1;
+pub const TICKET_COMPLETE: u8 = 2;
 
 /// How many worker threads to use for batched work.
 ///
@@ -87,6 +102,9 @@ pub struct VecEnv {
     /// change neither the board nor that seat's tickets ([`obs::EncoderCache`]). Keyed by
     /// content, so resets need not touch it.
     caches: Vec<obs::EncoderCache>,
+    /// Per environment, per seat: the heuristic playing it, or `None` for the learner.
+    /// Empty until [`VecEnv::assign`] is called -- then every seat is the learner's.
+    scripted: Vec<Vec<Option<Heuristic>>>,
     obs_size: usize,
     n_actions: usize,
 }
@@ -104,6 +122,7 @@ impl VecEnv {
             seeds: (0..n_envs).map(|i| base_seed + i as u64).collect(),
             next_seed: base_seed + n_envs as u64,
             caches: vec![obs::EncoderCache::new(); n_envs],
+            scripted: (0..n_envs).map(|_| Vec::new()).collect(),
             states,
             game,
         }
@@ -156,7 +175,52 @@ impl VecEnv {
             }
             state.step(action).map_err(|e| (i, e))?;
         }
+        self.advance_scripted();
         Ok(())
+    }
+
+    /// Give environment `env`'s seats to the learner or to heuristics. Takes effect at once:
+    /// scripted seats move until it is the learner's turn or the game is over, and again
+    /// after every [`VecEnv::step`] and [`VecEnv::auto_reset`]. A seat assignment outlives
+    /// resets; each new game re-seeds the heuristics from the game's seed.
+    pub fn assign(&mut self, env: usize, seats: &[Seat]) {
+        let n = self.states[env].n_players();
+        assert_eq!(seats.len(), n, "one assignment per seat");
+        let seed = self.seeds[env];
+        self.scripted[env] = seats
+            .iter()
+            .enumerate()
+            .map(|(seat, &who)| match who {
+                Seat::Learner => None,
+                Seat::Scripted(tier) => {
+                    let mut agent = Heuristic::new(tier, HeuristicParams::default(), 0);
+                    agent.begin_game(seat, seed);
+                    Some(agent)
+                }
+            })
+            .collect();
+        self.advance_scripted();
+    }
+
+    /// Step every scripted seat whose turn it is, until each game is over or waiting on the
+    /// learner. Parallel: an H3 decision costs a microsecond or more, and envs are
+    /// independent.
+    fn advance_scripted(&mut self) {
+        self.states
+            .par_iter_mut()
+            .zip(self.scripted.par_iter_mut())
+            .for_each(|(state, agents)| {
+                if agents.is_empty() {
+                    return;
+                }
+                while !state.is_terminal() {
+                    let Some(agent) = agents[usize::from(state.current_player())].as_mut() else {
+                        break;
+                    };
+                    let action = agent.act(state);
+                    state.step(action).expect("a heuristic plays legal moves");
+                }
+            });
     }
 
     /// Reset only the environments that have finished, each onto a fresh unused seed.
@@ -173,9 +237,68 @@ impl VecEnv {
             self.next_seed += 1;
             self.seeds[i] = seed;
             self.states[i] = self.game.new_initial_state(seed);
+            for (seat, agent) in self.scripted[i].iter_mut().enumerate() {
+                if let Some(agent) = agent {
+                    agent.begin_game(seat, seed);
+                }
+            }
             reset += 1;
         }
+        self.advance_scripted();
         reset
+    }
+
+    /// Every seat's return (`scoring::returns`) for finished games, zero for the rest:
+    /// `len() * n_players` floats. Read it *before* [`VecEnv::auto_reset`], which replaces
+    /// finished games.
+    pub fn returns(&mut self, out: &mut [f32]) {
+        let n = self.states[0].n_players();
+        assert_eq!(out.len(), self.states.len() * n);
+        for (state, slot) in self.states.iter_mut().zip(out.chunks_mut(n)) {
+            if state.is_terminal() {
+                for (cell, r) in slot.iter_mut().zip(scoring::returns(state)) {
+                    *cell = r as f32;
+                }
+            } else {
+                slot.fill(0.0);
+            }
+        }
+    }
+
+    /// Final scores for finished games, zero for the rest: `len() * n_players`.
+    pub fn final_scores(&mut self, out: &mut [i16]) {
+        let n = self.states[0].n_players();
+        assert_eq!(out.len(), self.states.len() * n);
+        for (state, slot) in self.states.iter_mut().zip(out.chunks_mut(n)) {
+            if state.is_terminal() {
+                slot.copy_from_slice(&scoring::final_scores(state));
+            } else {
+                slot.fill(0);
+            }
+        }
+    }
+
+    /// Every seat's tickets, as of now: [`TICKET_NOT_HELD`], [`TICKET_OPEN`] or
+    /// [`TICKET_COMPLETE`], `len() * n_players * n_tickets` bytes. The auxiliary targets:
+    /// at a finished game, which of my tickets were completed; at any time, which tickets
+    /// my opponents really hold.
+    pub fn ticket_status(&mut self, out: &mut [u8]) {
+        let n = self.states[0].n_players();
+        let t = self.game.board.n_tickets;
+        assert_eq!(out.len(), self.states.len() * n * t);
+        for (state, slot) in self.states.iter_mut().zip(out.chunks_mut(n * t)) {
+            slot.fill(TICKET_NOT_HELD);
+            for seat in 0..n {
+                for ticket in state.tickets_of(seat) {
+                    let ticket = usize::from(ticket);
+                    slot[seat * t + ticket] = if state.ticket_complete(seat, ticket) {
+                        TICKET_COMPLETE
+                    } else {
+                        TICKET_OPEN
+                    };
+                }
+            }
+        }
     }
 
     /// Write every environment's observation for the acting seat into `out`.
@@ -423,6 +546,94 @@ mod tests {
         let (hits, misses) = env.encoder_cache_stats();
         assert_eq!(hits + misses, 4 * 300);
         assert!(hits > misses / 2, "{hits} hits, {misses} misses");
+    }
+
+    /// Play every env to the end with random learner moves; returns the final hashes.
+    fn play_against(seats: &[Seat], seed: u64) -> (VecEnv, Vec<u64>) {
+        let mut env = VecEnv::new(game("mini", 2), 6, seed);
+        for i in 0..env.len() {
+            env.assign(i, seats);
+        }
+        let mut rng = policy_stream(seed);
+        while !env.states().iter().all(State::is_terminal) {
+            for state in env.states() {
+                if !state.is_terminal() {
+                    let seat = usize::from(state.current_player());
+                    assert_eq!(seats[seat], Seat::Learner, "Python only sees the learner");
+                }
+            }
+            let actions: Vec<u16> = env
+                .states()
+                .iter()
+                .map(|s| s.sample_legal(&mut rng).unwrap_or(0))
+                .collect();
+            env.step(&actions).expect("sampled actions are legal");
+        }
+        let hashes = env.states().iter().map(State::state_hash).collect();
+        (env, hashes)
+    }
+
+    #[test]
+    fn scripted_seats_move_inside_rust_until_the_learner_is_up() {
+        for seats in [
+            [Seat::Learner, Seat::Scripted(Tier::H1)],
+            [Seat::Scripted(Tier::H0), Seat::Learner],
+        ] {
+            let (mut env, first) = play_against(&seats, 3);
+            let (_, again) = play_against(&seats, 3);
+            assert_eq!(first, again, "seeded heuristics replay identically");
+
+            let mut returns = vec![0.0f32; env.len() * 2];
+            env.returns(&mut returns);
+            let mut scores = vec![0i16; env.len() * 2];
+            env.final_scores(&mut scores);
+            for (i, state) in env.states_mut().iter_mut().enumerate() {
+                let want = scoring::returns(state);
+                assert_eq!(returns[2 * i..2 * i + 2], [want[0] as f32, want[1] as f32]);
+                assert_eq!(&scores[2 * i..2 * i + 2], &scoring::final_scores(state)[..]);
+            }
+        }
+    }
+
+    #[test]
+    fn an_assignment_survives_reset() {
+        let mut env = VecEnv::new(game("mini", 2), 1, 9);
+        env.assign(0, &[Seat::Scripted(Tier::H1), Seat::Learner]);
+        let mut rng = policy_stream(9);
+        for _ in 0..3 {
+            while !env.states()[0].is_terminal() {
+                assert_eq!(env.states()[0].current_player(), 1);
+                let action = env.states()[0].sample_legal(&mut rng).unwrap();
+                env.step(&[action]).unwrap();
+            }
+            assert_eq!(env.auto_reset(), 1);
+        }
+    }
+
+    #[test]
+    fn returns_and_ticket_status_report_unfinished_games_as_such() {
+        let mut env = VecEnv::new(game("mini", 2), 2, 4);
+        let mut returns = vec![1.0f32; 4];
+        env.returns(&mut returns);
+        assert!(returns.iter().all(|&r| r == 0.0));
+
+        let t = env.game.board.n_tickets;
+        let mut status = vec![9u8; 2 * 2 * t];
+        env.ticket_status(&mut status);
+        for (i, state) in env.states_mut().iter_mut().enumerate() {
+            for seat in 0..2 {
+                let held = state.tickets_of(seat);
+                for ticket in 0..t {
+                    let got = status[(i * 2 + seat) * t + ticket];
+                    if held.contains(&(ticket as u8)) {
+                        let done = state.ticket_complete(seat, ticket);
+                        assert_eq!(got, if done { TICKET_COMPLETE } else { TICKET_OPEN });
+                    } else {
+                        assert_eq!(got, TICKET_NOT_HELD);
+                    }
+                }
+            }
+        }
     }
 
     #[test]

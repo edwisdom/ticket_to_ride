@@ -5,6 +5,95 @@ session. Decisions that deviate from [PLAN.md](PLAN.md) belong here, with the re
 
 ---
 
+## 2026-10-17 — Phase 3.4: the RL additions to `VecEnv`, and a PPO spike that learns
+
+Complete. A throwaway PPO on TTR-mini 2P beats uniform random 99.2% and H1 99.6% after 2M
+learner steps (1,000 evaluation games each, both seatings), with `mask_violations == 0`,
+in **21.5 s on MPS** (93.8k learner steps/s; CPU: 25.8 s, 78.2k). It had already passed
+both bars at 300k steps.
+
+### Kept: the `VecEnv` additions
+
+- **`assign(env, seats)`**: each seat `"learner"` or `"h0"`..`"h4"`. Scripted seats move
+  inside Rust (in parallel across envs) after every `step` and `auto_reset`, so every env
+  is finished or waiting on the learner -- Python never loops over opponents. Heuristics
+  are re-seeded from each new game's seed; an assignment outlives resets.
+- **`returns(out)`**: finished games' returns (`scoring::returns`), zero otherwise; read
+  before `auto_reset`. **`final_scores()`** likewise.
+- **`ticket_status(out)`**: every seat's tickets as not held / open / complete -- the
+  auxiliary targets (my completions at the end; opponents' true tickets at any time; the
+  margin comes from `final_scores`).
+- **`finished_games()`**: `(env, seed, actions)` per finished game, enough to replay it
+  (§9), with `track_history=True`.
+
+### Throwaway: `ticket_to_ride/rl/ppo_spike.py`
+
+MLP 1169 → 256 → 256, masked categorical policy and value head, PPO (2 epochs, 4
+minibatches, clip 0.2, entropy 0.01, lr 3e-4), GAE λ 0.95 with γ 1 and the terminal return
+as the only reward. 256 envs × 64-step rollouts; learner in seat `i % 2`, opponents H0 and
+H1 by env. Evaluation is greedy.
+
+| | run | learner steps/s | vs H0 | vs H1 | mask violations |
+| --- | --- | --- | --- | --- | --- |
+| MPS | 2M steps, 21.5 s | 93.8k | 0.992 | 0.996 | 0 |
+| CPU | 2M steps, 25.8 s | 78.2k | 0.998 | 0.988 | 0 |
+
+At this network size MPS is only 1.2x the CPU: the loop is bound by per-step overheads
+(small batches through Python and torch), not by the environment, which runs at ~1M
+env-steps/s. Phase 6's bigger nets and batches are where MPS should earn its keep.
+
+### Two bugs the spike found
+
+- **`terminal_flags()` returns `bytes`**, not a list: PyO3 hands `Vec<u8>` back as
+  `bytes`, and `np.array(b"...", dtype=bool)` is one scalar `True` -- every env looked
+  finished on every step, so the first runs "trained" on nothing and evaluated to exactly
+  0.5. The stub claimed `list[int]`; it says `bytes` now (also `current_players`). (GOTCHAS.)
+- **`Categorical.sample()` on MPS returned a masked action** -- an illegal move the engine
+  refused (`IllegalAction`). Sampling is Gumbel-max over the masked logits now, which cannot
+  pick a -1e9 logit on any device; `mask_violations` is counted and 0.
+
+### Exit criteria
+
+| criterion | result |
+| --- | --- |
+| beats random ≥95% within 2M steps | 99.2% at 2M (MPS); both bars passed by 300k |
+| beats H1 on mini | 99.6% |
+| `mask_violations == 0` | 0 over every run |
+| steps/s measured | MPS 93.8k, CPU 78.2k learner steps/s; Modal GPU not measured (it waits on the spend-limit question, 3.3) |
+
+What it does not show: anything about H3/H4, or about USA. H1 is a weak bar (−545 Elo on
+mini), and mini is small; Phase 6 is where strength gets measured.
+
+### Next
+
+Phase 6 is re-planned from these numbers (PLAN.md §14.1): the environment is not the
+constraint, PPO learns on this observation quickly at mini scale, and MPS needs larger
+batches than the spike's to beat the CPU by much.
+
+---
+
+## 2026-10-17 — Phase 3.4 re-plan note (before starting)
+
+PLAN.md asks for this first. What 3.1–3.3 changed for 3.4, and whether it changes 3.4:
+
+- **The environment is no longer the cost.** ~1M env-steps/s (USA 2P, 1024 envs), 1.9M on
+  mini; a small MLP's forward and backward on MPS will bound the spike's steps/s, so what it
+  measures is the training loop, which is what Phase 6 needs to know.
+- **Scripted opponents are nearly free**: H1 0.17 µs and H3 1.4 µs per decision on mini, so
+  stepping them inside Rust until the learner's turn costs nothing next to a network call.
+- **The features are fixed** (`OBS_VERSION` 2), so the spike trains on plan features that
+  mean what they say.
+- **Modal works for CPU; the GPU measurement waits** on the spend-limit question, so steps/s
+  is measured on MPS (and CPU) here, and the Modal GPU figure is left for the user to unlock.
+
+None of this changes what 3.4 is, so it proceeds as planned: the four `VecEnv` additions
+(kept), then a throwaway PPO on TTR-mini 2P, run locally. Exit: beats H0 (uniform random)
+≥95% within 2M steps, beats H1 on mini, `mask_violations == 0`, steps/s measured. 3.4
+touches neither the engine nor the encoder, so `oracle-v1` sweeps do not apply; its tests
+are its own.
+
+---
+
 ## 2026-10-17 — `OBS_VERSION` 2: the plan walk and two quirks, fixed
 
 The named bump agreed at the end of 3.1: after the bit-exact 3.2, before 3.4, so the PPO

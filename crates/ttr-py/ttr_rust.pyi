@@ -217,6 +217,25 @@ class VecEnv:
     def legal_masks(self, out: Buffer) -> None:
         """Fill `out` (`n_envs * n_actions` bytes) in place. Nothing is copied."""
 
-    def current_players(self) -> list[int]: ...
-    def terminal_flags(self) -> list[int]: ...
+    def current_players(self) -> bytes:
+        """One byte per environment (PyO3 hands a `Vec<u8>` back as `bytes`)."""
+
+    def terminal_flags(self) -> bytes:
+        """One byte per environment, 1 if the game is over."""
+
     def state_hashes(self) -> list[int]: ...
+    @property
+    def n_players(self) -> int: ...
+    @property
+    def n_tickets(self) -> int: ...
+    def assign(self, env: int, seats: list[str]) -> None:
+        """Seats to "learner" or "h0".."h4"; scripted seats then move inside Rust."""
+
+    def returns(self, out: Buffer) -> None:
+        """Fill `out` (`n_envs * n_players` float32s); finished games only, else zero."""
+
+    def final_scores(self) -> list[int]: ...
+    def ticket_status(self, out: Buffer) -> None:
+        """Fill `out` (`n_envs * n_players * n_tickets` bytes): 0 none, 1 open, 2 done."""
+
+    def finished_games(self) -> list[tuple[int, int, list[int]]]: ...

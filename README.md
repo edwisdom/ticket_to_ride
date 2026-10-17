@@ -16,8 +16,8 @@ training reinforcement learning agents against it via self-play.
 | 3.1 | Retire the Python engine; Rust becomes its own oracle | done |
 | 3.2 | Rust performance (observation encoder) | done |
 | 3.3 | Modal cloud runs | done |
-| 3.4 | PPO spike on TTR-mini (tentative) | next |
-| 4 | Terminal client | |
+| 3.4 | PPO spike on TTR-mini (tentative) | done |
+| 4 | Terminal client | next |
 | 5 | Determinization + ISMCTS | |
 | 6 | PPO self-play + league | |
 | 7 | ISMCTS + learned priors | |

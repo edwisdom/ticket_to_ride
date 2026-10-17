@@ -20,6 +20,7 @@ use ttr_core::heuristic::{HeuristicParams, Tier};
 use ttr_core::resample::{assert_consistent, resample_from_infoset};
 use ttr_core::rng::Pcg32;
 use ttr_core::state::{Game, State};
+use ttr_core::vecenv::Seat;
 use ttr_core::vecenv::VecEnv;
 
 /// Borrow a caller-provided buffer as a mutable slice, so batched writes copy nothing.
@@ -635,6 +636,85 @@ impl PyVecEnv {
 
     fn state_hashes(&self) -> Vec<u64> {
         self.inner.states().iter().map(State::state_hash).collect()
+    }
+
+    #[getter]
+    fn n_players(&self) -> usize {
+        self.inner.states()[0].n_players()
+    }
+
+    #[getter]
+    fn n_tickets(&self) -> usize {
+        self.inner.states()[0].board.n_tickets
+    }
+
+    /// Give environment `env`'s seats to `"learner"` or a heuristic (`"h0"`..`"h4"`).
+    /// Scripted seats then move inside Rust, so every env is either finished or waiting on
+    /// a learner seat after each call.
+    fn assign(&mut self, env: usize, seats: Vec<String>) -> PyResult<()> {
+        if env >= self.inner.len() {
+            return Err(PyValueError::new_err(format!("env {env} is out of range")));
+        }
+        if seats.len() != self.n_players() {
+            return Err(PyValueError::new_err(format!(
+                "{} seats given for a {}-player game",
+                seats.len(),
+                self.n_players()
+            )));
+        }
+        let parsed = seats
+            .iter()
+            .map(|name| match name.as_str() {
+                "learner" => Ok(Seat::Learner),
+                other => Tier::parse(other).map(Seat::Scripted).ok_or_else(|| {
+                    PyValueError::new_err(format!("unknown seat {other:?}: learner or h0-h4"))
+                }),
+            })
+            .collect::<PyResult<Vec<Seat>>>()?;
+        self.inner.assign(env, &parsed);
+        Ok(())
+    }
+
+    /// Fill `out` (`n_envs * n_players` float32s) with finished games' returns, zero for
+    /// the rest. Read before `auto_reset`.
+    fn returns(&mut self, out: &Bound<'_, PyAny>) -> PyResult<()> {
+        let mut buf = PyBuffer::<f32>::get(out)?;
+        let want = self.inner.len() * self.n_players();
+        // SAFETY: as above.
+        let slice = unsafe { writable_slice(&mut buf, want, "returns")? };
+        self.inner.returns(slice);
+        Ok(())
+    }
+
+    /// Finished games' final scores, zero for the rest: `n_envs * n_players`.
+    fn final_scores(&mut self) -> Vec<i16> {
+        let mut out = vec![0i16; self.inner.len() * self.n_players()];
+        self.inner.final_scores(&mut out);
+        out
+    }
+
+    /// Fill `out` (`n_envs * n_players * n_tickets` bytes) with every seat's tickets:
+    /// 0 not held, 1 open, 2 complete. The auxiliary targets.
+    fn ticket_status(&mut self, out: &Bound<'_, PyAny>) -> PyResult<()> {
+        let mut buf = PyBuffer::<u8>::get(out)?;
+        let want = self.inner.len() * self.n_players() * self.n_tickets();
+        // SAFETY: as above.
+        let slice = unsafe { writable_slice(&mut buf, want, "ticket status")? };
+        self.inner.ticket_status(slice);
+        Ok(())
+    }
+
+    /// `(env, seed, actions)` for every finished game: enough to replay it (§9). Actions
+    /// are recorded only with `track_history=True`; otherwise the list is empty.
+    fn finished_games(&self) -> Vec<(usize, u64, Vec<u16>)> {
+        self.inner
+            .states()
+            .iter()
+            .zip(self.inner.seeds())
+            .enumerate()
+            .filter(|(_, (state, _))| state.is_terminal())
+            .map(|(i, (state, &seed))| (i, seed, state.history.clone()))
+            .collect()
     }
 
     fn __repr__(&self) -> String {

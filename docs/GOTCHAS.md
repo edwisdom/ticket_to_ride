@@ -401,6 +401,20 @@ Related, in the image: `uv sync` is exact, so syncing the project into the inter
 Modal runs the function on would uninstall Modal's own client. The project gets its own
 venv.
 
+### PyO3 returns `Vec<u8>` as `bytes`
+
+`VecEnv.terminal_flags()` and `current_players()` come back as `bytes`, and
+`np.array(b"\x01\x00", dtype=bool)` is a single scalar `True`, not two flags. The PPO
+spike's first runs treated every environment as finished on every step. Use
+`np.frombuffer(flags, dtype=np.uint8)`. The stub said `list[int]`; it says `bytes` now.
+
+### `Categorical.sample()` on MPS can pick a masked action
+
+With masked logits at -1e9, torch's categorical sampling on MPS still returned a masked
+index -- an illegal move the engine refused. Sample by Gumbel-max (`argmax(logits -
+log(-log(U)))`), which cannot select a -1e9 logit on any device, and keep counting
+`mask_violations`.
+
 ---
 
 ## Part 2 — known traps in the work ahead
