@@ -346,6 +346,39 @@ fn fragility_over(state: &State, ticket: usize, route: &BTreeSet<usize>, locked:
     (f64::from(worst) / 45.0) as f32
 }
 
+/// An enemy cannot claim my track, so fragility re-prices only the free segments on the
+/// route. The positions are searched for: one of my segments on the route whose closure
+/// would cost more than any free one's, so counting it would move the feature.
+#[test]
+fn fragility_never_prices_out_my_own_track() {
+    let board = game("usa", 2).board;
+    let mut checked = 0;
+    for &ticket in &long_tickets(board) {
+        let mut state = holding(2, &[ticket]);
+        for mine in plan(&mut state) {
+            let mut owned = state.clone();
+            give(&mut owned, 0, mine);
+            let free = plan(&mut owned);
+            let honest = fragility_over(&owned, ticket, &free, true);
+            let counted: BTreeSet<usize> = free.iter().copied().chain([mine]).collect();
+            if fragility_over(&owned, ticket, &counted, true) == honest {
+                continue;
+            }
+            let view = observe(&mut owned, 0);
+            assert_eq!(
+                view[at("usa", "tickets", ticket, "fragility")],
+                honest,
+                "ticket {ticket}, my segment {mine}"
+            );
+            checked += 1;
+        }
+    }
+    assert!(
+        checked > 0,
+        "no position where my own track would have mattered"
+    );
+}
+
 /// At four or more seats a double route's twins are owned independently. When an opponent
 /// holds the twin the plan would otherwise have walked, the plan -- and fragility, which
 /// walks the same route -- takes the free twin: the enemy's track is not mine to cross,

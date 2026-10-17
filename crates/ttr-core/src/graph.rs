@@ -14,8 +14,8 @@
 //! millions of times, and no crate has a longest-*trail* function at all.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
-use std::hash::{BuildHasherDefault, Hasher};
+
+use rustc_hash::FxHashMap;
 
 use crate::board::{Board, MAX_CITIES, MAX_ROUTE_LEN, MAX_SEGMENTS, NO_SIBLING, UNREACHABLE};
 use crate::config::FREE;
@@ -133,7 +133,6 @@ fn dijkstra(board: &Board, cost: &[u16], source: u8, dist: &mut [u16]) {
     dist[usize::from(source)] = 0;
     let mut ring = [0u64; RING];
     ring[0] = 1 << source;
-    let mut settled = 0u64;
     let mut current: u16 = 0;
     loop {
         let slot = usize::from(current) % RING;
@@ -142,10 +141,12 @@ fn dijkstra(board: &Board, cost: &[u16], source: u8, dist: &mut [u16]) {
             while batch != 0 {
                 let here = batch.trailing_zeros() as usize;
                 batch &= batch - 1;
-                if settled >> here & 1 == 1 || dist[here] != current {
+                // Stale: improved since it was queued. A city's distance is final once
+                // drawn at it, and only a strict improvement queues it again, so nothing
+                // is expanded twice.
+                if dist[here] != current {
                     continue;
                 }
-                settled |= 1 << here;
                 for &(nb, segment) in &board.adjacency[here] {
                     let w = cost[usize::from(segment)];
                     if w >= UNREACHABLE {
@@ -208,7 +209,6 @@ pub fn guided_distance(board: &Board, cost: &[u16], toward: &[u16], source: u8, 
     g[usize::from(source)] = 0;
     let mut ring = [0u64; RING];
     ring[usize::from(start) % RING] = 1 << source;
-    let mut settled = 0u64;
     let mut current = start;
     loop {
         let slot = usize::from(current) % RING;
@@ -217,13 +217,12 @@ pub fn guided_distance(board: &Board, cost: &[u16], toward: &[u16], source: u8, 
             while batch != 0 {
                 let here = batch.trailing_zeros() as usize;
                 batch &= batch - 1;
-                if settled >> here & 1 == 1 || g[here] + toward[here] != current {
-                    continue;
+                if g[here] + toward[here] != current {
+                    continue; // stale, as in `dijkstra`
                 }
                 if here == usize::from(target) {
                     return g[here];
                 }
-                settled |= 1 << here;
                 for &(nb, segment) in &board.adjacency[here] {
                     let w = cost[usize::from(segment)];
                     let nb = usize::from(nb);
@@ -655,33 +654,13 @@ impl Trail {
 
 /// The longest-trail memo: `(vertex, used-edge mask)` packed into a `u64`.
 ///
-/// A multiplicative hash rather than SipHash -- the keys are not attacker-controlled, and
-/// SipHash was a tenth of an observation -- and one table per thread, cleared rather than
-/// reallocated per component.
-type TrailMemo = HashMap<u64, u16, BuildHasherDefault<PackedKeyHasher>>;
+/// FxHash rather than SipHash -- the keys are not attacker-controlled, and SipHash was a
+/// tenth of an observation -- and one table per thread, cleared rather than reallocated per
+/// component.
+type TrailMemo = FxHashMap<u64, u16>;
 
 thread_local! {
     static MEMO: RefCell<TrailMemo> = RefCell::new(TrailMemo::default());
-}
-
-/// Fibonacci hashing of a single `u64` key.
-#[derive(Default)]
-struct PackedKeyHasher(u64);
-
-impl Hasher for PackedKeyHasher {
-    fn finish(&self) -> u64 {
-        self.0
-    }
-
-    fn write(&mut self, bytes: &[u8]) {
-        for &b in bytes {
-            self.0 = (self.0.rotate_left(8) ^ u64::from(b)).wrapping_mul(0x9E37_79B9_7F4A_7C15);
-        }
-    }
-
-    fn write_u64(&mut self, key: u64) {
-        self.0 = (key ^ self.0).wrapping_mul(0x9E37_79B9_7F4A_7C15);
-    }
 }
 
 /// Segment ids `player` has claimed. `CLOSED` siblings are nobody's, and excluded.

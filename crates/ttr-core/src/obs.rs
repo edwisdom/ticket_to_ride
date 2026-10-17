@@ -561,8 +561,9 @@ impl<'a> View<'a> {
     fn build(state: &mut State, player: usize, derived: &'a Derived) -> Self {
         let board = state.board;
         let n = state.n_players();
+        // Every slot is filled; `order()` reads the first `n - 1`.
         let mut order = [0usize; MAX_PLAYERS - 1];
-        for (i, slot) in order.iter_mut().enumerate().take(n - 1) {
+        for (i, slot) in order.iter_mut().enumerate() {
             *slot = (player + 1 + i) % n;
         }
         let mut dsu_root = [0u8; MAX_CITIES];
@@ -863,6 +864,9 @@ fn tickets(view: &View, state: &State, l: &Layout, out: &mut [f32]) {
 /// as the far end is settled. That separates a safe connection from one hanging on a
 /// single contested edge. The search is A* toward the far end, guided by the unblocked
 /// distances already in the view, so a route with a cheap way around explores little.
+///
+/// Only for a ticket that is open and alive (`0 < cost < UNREACHABLE`); `Derived::compute`
+/// calls it for no other.
 fn fragility(
     state: &State,
     me: u8,
@@ -874,14 +878,13 @@ fn fragility(
     let board = state.board;
     let (a, b) = (board.ticket_a[ticket], board.ticket_b[ticket]);
     let baseline = dist[usize::from(a)][usize::from(b)];
-    if baseline == 0 || baseline >= UNREACHABLE {
-        return 0.0;
-    }
 
-    let mut on_path = [0 as SegmentId; MAX_CITIES + 1];
+    // Each free step of the walk lands on a city strictly cheaper than the last, so there
+    // are fewer of them than cities.
+    let mut on_path = [0 as SegmentId; MAX_CITIES];
     let mut n_on_path = 0;
     walk_route(state, me, &dist[usize::from(a)], a, b, |segment, owner| {
-        if owner == FREE && n_on_path < on_path.len() {
+        if owner == FREE {
             on_path[n_on_path] = segment;
             n_on_path += 1;
         }

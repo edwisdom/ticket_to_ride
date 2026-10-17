@@ -364,8 +364,8 @@ fn check_remaining_costs(layouts: &[Layout]) -> usize {
                         floyd_warshall(board, &layout.seg_owner, seat, doubles_locked, Some(out));
                     let mut priced_out = cost;
                     priced_out[out] = UNREACHABLE;
-                    for source in 0..n {
-                        for target in 0..n {
+                    for (source, want) in without.iter().enumerate() {
+                        for (target, &d) in want.iter().enumerate() {
                             assert_eq!(
                                 guided_distance(
                                     board,
@@ -374,7 +374,7 @@ fn check_remaining_costs(layouts: &[Layout]) -> usize {
                                     source as u8,
                                     target as u8
                                 ),
-                                without[source][target],
+                                d,
                                 "{label}: A* from {source} to {target} without segment {out}"
                             );
                         }

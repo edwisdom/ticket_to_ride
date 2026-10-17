@@ -17,36 +17,29 @@ test_package = ["ttr-core"]
 # and come back as "missed", to be triaged again rather than excluded by habit.
 exclude_re = [
     # dsu_union returns early when ra == rb, so `>` and `>=` differ only where unreachable.
-    'graph\.rs:51:11: replace > with >= in dsu_union',
-    # Dijkstra's stale-entry skip, inverted: stale entries get processed, and a stale
-    # distance can never improve a neighbour. Speed only.
-    'graph\.rs:113:14: replace > with < in remaining_costs_from',
-    'graph\.rs:247:14: replace > with < in relax',
-    # The single-terminal skip in the Steiner DP: these stop skipping single-terminal masks,
-    # whose rows are already shortest paths, so recomputing them changes nothing.
-    'graph\.rs:202:17: replace & with \| in steiner_cost_exact',
-    'graph\.rs:202:17: replace & with \^ in steiner_cost_exact',
-    'graph\.rs:202:25: replace - with / in steiner_cost_exact',
-    # The submask enumeration starting at `mask` (or above it) instead of its largest proper
-    # submask: the extra first step reads the row being built (empty) or a not-yet-built row
-    # (unreachable), and every proper submask is still visited.
-    'graph\.rs:209:34: replace & with \| in steiner_cost_exact',
-    'graph\.rs:209:29: replace - with / in steiner_cost_exact',
+    'graph\.rs:58:11: replace > with >= in dsu_union',
+    # A priced-out segment can never improve a distance (every distance starts at the
+    # sentinel), and a city that cannot reach the target is never expanded either way: its
+    # queue key lies beyond the ring, so it is drawn early and discarded as stale.
+    'graph\.rs:230:41: replace \|\| with && in guided_distance',
+    # The rest of a mask is `mask ^ low`; `mask | low` is the whole mask, which only adds
+    # overlapping splits -- each an upper bound -- and cannot lower the minimum.
+    'graph\.rs:396:25: replace \^ with \| in steiner_cost_with',
+    # `low | s` and `low ^ s` agree: s never holds the lowest terminal.
+    'graph\.rs:401:42: replace \| with \^ in steiner_cost_with',
     # `<` versus `<=` where the two sides are then equal: same value stored, same total.
-    'graph\.rs:214:29: replace < with <= in steiner_cost_exact',
-    'graph\.rs:276:46: replace < with <= in mst_bound',
-    # Seeding the heap with sentinel-distance cities too: they relax nothing.
-    'graph\.rs:243:30: replace < with <= in relax',
-    # Never taking the Eulerian shortcut: the exhaustive search returns the same total.
-    'graph\.rs:383:17: replace \|\| with && in component_longest_trail',
-    # `used | bit` and `used ^ bit` agree because the bit is known to be clear.
-    'graph\.rs:434:73: replace \| with \^ in best_from',
+    'graph\.rs:453:22: replace < with <= in mst_bound',
+    # Never taking the Eulerian shortcut (the odd-city count gone negative, or `&&`): the
+    # exhaustive search returns the same total.
+    'graph\.rs:584:21: replace \+= with -= in Trail::component_longest',
+    'graph\.rs:593:21: replace \|\| with && in Trail::component_longest',
+    # `|` versus `^` on bits known to be disjoint: the vertex above bit 32 of the memo key,
+    # and an edge bit already known to be clear in `used`.
+    'graph\.rs:638:38: replace \| with \^ in Trail::best_from',
+    'graph\.rs:648:71: replace \| with \^ in Trail::best_from',
     # OBS_VERSION is 1.
-    'obs\.rs:48:5: replace obs_version -> u32 with 1',
+    'obs\.rs:56:5: replace obs_version -> u32 with 1',
     # Treating an unheld colour's reach as the wilds alone: every reach is `.max(wilds)`
     # afterwards anyway.
-    'obs\.rs:572:22: replace > with >= in segment_dynamic',
-    # The early return for a finished or dead ticket: a finished one has no free segment to
-    # close (fragility 0 either way), and a dead one never reaches this function.
-    'obs\.rs:694:22: replace \|\| with && in fragility',
+    'obs\.rs:751:22: replace > with >= in segment_dynamic',
 ]
