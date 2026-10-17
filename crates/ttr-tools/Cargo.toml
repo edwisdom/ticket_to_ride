@@ -10,16 +10,4 @@ publish = false
 ttr-core = { path = "../ttr-core" }
 blake2b_simd.workspace = true
 rayon = "1.12.0"
-# gen-vectors writes tests/golden/contract_vectors.json in Python's exact `json.dumps`
-# layout, which serde_json's pretty printer reproduces over sorted keys.
-serde_json = "1.0"
 
-[dev-dependencies]
-# The build frozen as `oracle-v1` (docs/PLAN.md §14.1): the last commit at which the Rust
-# engine was verified byte-identical to the Python one, at every step of 700k games. Test
-# code only -- it is the "before" in every new-versus-frozen comparison.
-#
-# Pinned by commit rather than by tag name: a SHA cannot be moved by a force-push, and it
-# resolves whether or not the `oracle-v1` tag has been pushed. Moving it is a versioned
-# event, the same as a CONTRACT_VERSION bump, and gets a worklog entry.
-ttr-oracle = { package = "ttr-core", git = "https://github.com/edwisdom/ticket_to_ride", rev = "7923e282367804ec1b6432f9b1da1aecbfb8abab" }

@@ -5,7 +5,7 @@ Every run records which level it achieved.
 
 | Level | Promise | Scope | Enforced by |
 | --- | --- | --- | --- |
-| **L0 — Replay** | Bitwise, always | A recorded game replays to the same `state_hash()` and the same scores | [`replay.rs`](../crates/ttr-core/src/replay.rs), the 84-game corpus in `tests/golden/replays.bin` (`crates/ttr-core/tests/golden_replays.rs`), and the 71,400-game golden corpus in `tests/golden/corpus/` (`crates/ttr-tools/tests/golden_corpus.rs`) |
+| **L0 — Replay** | Bitwise, always | A recorded game replays to the same `state_hash()` and the same scores | the 71,400-game golden corpus in `tests/golden/corpus/` (`crates/ttr-tools/tests/golden_corpus.rs`): 14,000 recorded H3 games replayed from seed + actions, and 70,000 random-drive games re-derived from their seeds |
 | **L1 — Rerun** | Bitwise, given the same seed + `Cargo.lock` + `uv.lock` + git sha | Engine, heuristics and (from Phase 5) search | `properties::the_same_seed_replays_bitwise` runs a seed twice and diffs the action logs |
 | **L2 — Statistical** | Same distribution, same curve within noise | Neural-network training | Not bitwise, and not claimed to be |
 

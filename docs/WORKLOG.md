@@ -5,6 +5,52 @@ session. Decisions that deviate from [PLAN.md](PLAN.md) belong here, with the re
 
 ---
 
+## 2026-10-17 — Cleanup: `oracle-v1` retired, the Python-migration scaffolding removed
+
+For faster iteration, as asked: less code, one implementation of everything, shorter
+checks. Net −4,170 lines (4,780 deleted, 610 added) and two binary fixtures; the full
+`#[ignore]` sweep set runs in under 2 minutes (113 s with the build), from 7-10.
+
+### Removed
+
+- **The `oracle-v1` differential** -- the frozen-build git dependency, `tests/oracle.rs`,
+  the `Engine` trait and macro that abstracted over two builds, `diff.rs`. It served its
+  purpose through the 3.2 rewrite; it already skipped the features `OBS_VERSION` 2 changed
+  and would diverge further with every observation change; and its sweep, mostly the old
+  build's slow encoder, was most of the verification time.
+- **The replay module** (`replay.rs`, a byte-compatible port of Python's replay format),
+  its 84 frozen replays, their tests and generator. Nothing used it; the corpus already
+  replays 14,000 recorded games from seed + actions, and `VecEnv.finished_games()` is the
+  game record when one is needed.
+- **The contract vectors** (written by Python as the cross-language contract), their test
+  and their byte-for-byte generator. The golden corpus depends on every value they pinned;
+  the one independent reference, upstream PCG32's demo vector, was already in
+  `tests/rng.rs`.
+- **The Python board** (`ticket_to_ride/data/board.py`, `board_gen.py`, `rawmap.py`), a
+  second copy of the board data with its own distance tables, its tests, and the Python
+  half of `tools/gen_board.py`. `ttr map` reads `ttr_rust.board_summary()` now;
+  configuration lists come from `ticket_to_ride.engine.configurations()`. `msgspec` is no
+  longer a dependency.
+- Python-history comments in module headers, and every reference to the above in CI,
+  pre-commit, the Makefile and the docs.
+
+### Simplified
+
+- **The corpus tooling** (`crates/ttr-tools/src/corpus.rs`, 913 → ~560 lines) uses
+  `ttr_core` directly, and keeps **one observation digest per game** (format 2) instead of
+  discrete and continuous halves, a split that existed only for the cross-implementation
+  1e-6 tolerance. Re-signed only after checking every header, chain, score, winner and
+  recorded action against the format-1 files: identical in all seven.
+- The PPO spike's rollout is its own class (lint, and readability).
+
+### Kept
+
+The golden corpus, the naive in-crate references (`naive_graph`, `naive_legal`,
+`naive_obs`), mutation testing, the encoder cache and its check -- the self-checks that do
+not depend on a second build.
+
+---
+
 ## 2026-10-17 — Phase 3.4: the RL additions to `VecEnv`, and a PPO spike that learns
 
 Complete. A throwaway PPO on TTR-mini 2P beats uniform random 99.2% and H1 99.6% after 2M

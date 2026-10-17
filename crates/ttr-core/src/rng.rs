@@ -192,8 +192,7 @@ mod tests {
     /// `rot == 0` is the one case where C's `(-rot) & 31` and a naive `32 - rot` differ.
     ///
     /// A port writing `x >> rot | x << (32 - rot)` is correct for all 31 other rotations
-    /// and wrong for this one, so it has to be reached, not merely handled. Mirrors
-    /// `test_rot_zero_branch_is_exercised` on the Python side.
+    /// and wrong for this one, so it has to be reached, not merely handled.
     #[test]
     fn rot_zero_branch_is_exercised() {
         let mut rng = Pcg32::seeded(7, 11);

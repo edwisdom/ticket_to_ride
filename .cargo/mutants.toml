@@ -3,7 +3,7 @@
 # encoder are mutated; see docs/WORKLOG.md for the runs and how survivors were triaged.
 #
 #   cargo mutants -j 4                          # ttr-core's own tests
-#   cargo mutants -j 4 --test-workspace=true    # + the oracle-v1 differential and corpus
+#   cargo mutants -j 4 --test-workspace=true    # + the golden corpus
 examine_globs = [
     "crates/ttr-core/src/state.rs",
     "crates/ttr-core/src/scoring.rs",

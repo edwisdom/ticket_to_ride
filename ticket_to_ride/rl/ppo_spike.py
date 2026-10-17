@@ -188,63 +188,68 @@ def update(
             optim.step()
 
 
+class Rollout:
+    """One horizon of experience from every environment, and where the time went."""
+
+    def __init__(self, env: ttr_rust.VecEnv, horizon: int) -> None:
+        n = env.n_envs
+        self.obs = np.zeros((horizon, n, env.obs_size), dtype=np.float32)
+        self.mask = np.zeros((horizon, n, env.n_actions), dtype=np.uint8)
+        self.act = np.zeros((horizon, n), dtype=np.int64)
+        self.logp = np.zeros((horizon, n), dtype=np.float32)
+        self.value = np.zeros((horizon, n), dtype=np.float32)
+        self.reward = np.zeros((horizon, n), dtype=np.float32)
+        self.done = np.zeros((horizon, n), dtype=np.float32)
+        self.returns = np.zeros((n, 2), dtype=np.float32)
+        self.seat = learner_seats(env)
+        self.games = 0
+        self.mask_violations = 0
+        # Seconds: the engine (observe, mask, step with the scripted replies), the network
+        # (forward pass and copies), the rest of the loop (rewards, resets), the PPO update.
+        self.timing = dict.fromkeys(("env", "network", "bookkeeping", "update"), 0.0)
+
+    @torch.no_grad()
+    def collect(self, env: ttr_rust.VecEnv, policy: Policy, device: str) -> None:
+        rows = np.arange(env.n_envs)
+        for k in range(len(self.obs)):
+            tick = time.perf_counter()
+            env.observe_current(self.obs[k])
+            env.legal_masks(self.mask[k])
+            tock = time.perf_counter()
+            self.timing["env"] += tock - tick
+            obs = torch.from_numpy(self.obs[k]).to(device)
+            logits, value = policy(obs, torch.from_numpy(self.mask[k]).bool().to(device))
+            action = sample(logits)
+            self.logp[k] = torch.distributions.Categorical(logits=logits).log_prob(action).cpu()
+            self.act[k] = action.cpu().numpy()
+            self.value[k] = value.cpu().numpy()
+            tick = time.perf_counter()
+            self.timing["network"] += tick - tock
+            self.mask_violations += int((self.mask[k][rows, self.act[k]] == 0).sum())
+            env.step(self.act[k].tolist())
+            tock = time.perf_counter()
+            self.timing["env"] += tock - tick
+            flags = terminal(env)
+            env.returns(self.returns)
+            self.reward[k] = np.where(flags, self.returns[rows, self.seat], 0.0)
+            self.done[k] = flags
+            self.games += int(flags.sum())
+            env.auto_reset()
+            self.timing["bookkeeping"] += time.perf_counter() - tock
+
+
 def train(cfg: Config) -> dict[str, object]:
     device = resolve_device(cfg.device)
     torch.manual_seed(cfg.seed)
     rng = np.random.default_rng(cfg.seed)
     env = make_env(cfg.n_envs, cfg.opponents, cfg.seed, cfg.map)
-    n, t = cfg.n_envs, cfg.horizon
     policy = Policy(env.obs_size, env.n_actions, cfg.hidden).to(device)
     optim = torch.optim.Adam(policy.parameters(), lr=cfg.lr)
-    seat = learner_seats(env)
-
-    obs_buf = np.zeros((t, n, env.obs_size), dtype=np.float32)
-    mask_buf = np.zeros((t, n, env.n_actions), dtype=np.uint8)
-    act_buf = np.zeros((t, n), dtype=np.int64)
-    logp_buf = np.zeros((t, n), dtype=np.float32)
-    val_buf = np.zeros((t, n), dtype=np.float32)
-    rew_buf = np.zeros((t, n), dtype=np.float32)
-    done_buf = np.zeros((t, n), dtype=np.float32)
-    returns = np.zeros((n, 2), dtype=np.float32)
-
-    steps, games, mask_violations, history = 0, 0, 0, []
-    # Where the time goes, in seconds: the engine (observe, mask, step including scripted
-    # replies), the network's forward pass and copies, the rest of the rollout loop
-    # (rewards, resets), and the PPO update.
-    timing = dict.fromkeys(("env", "network", "bookkeeping", "update"), 0.0)
+    rollout = Rollout(env, cfg.horizon)
+    steps = 0
     started = time.perf_counter()
     while steps < cfg.steps:
-        with torch.no_grad():
-            for k in range(t):
-                tick = time.perf_counter()
-                env.observe_current(obs_buf[k])
-                env.legal_masks(mask_buf[k])
-                tock = time.perf_counter()
-                timing["env"] += tock - tick
-                obs_t = torch.from_numpy(obs_buf[k]).to(device)
-                mask_t = torch.from_numpy(mask_buf[k]).bool().to(device)
-                logits, value = policy(obs_t, mask_t)
-                dist = torch.distributions.Categorical(logits=logits)
-                action = sample(logits)
-                act_buf[k] = action.cpu().numpy()
-                logp_buf[k] = dist.log_prob(action).cpu().numpy()
-                val_buf[k] = value.cpu().numpy()
-                tick = time.perf_counter()
-                timing["network"] += tick - tock
-                mask_violations += int((mask_buf[k][np.arange(n), act_buf[k]] == 0).sum())
-                actions = act_buf[k].tolist()
-                tock = time.perf_counter()
-                env.step(actions)
-                tick = time.perf_counter()
-                timing["env"] += tick - tock
-                flags = terminal(env)
-                env.returns(returns)
-                rew_buf[k] = np.where(flags, returns[np.arange(n), seat], 0.0)
-                done_buf[k] = flags
-                games += int(flags.sum())
-                env.auto_reset()
-                timing["bookkeeping"] += time.perf_counter() - tick
-
+        rollout.collect(env, policy, device)
         tick = time.perf_counter()
         update(
             policy,
@@ -252,16 +257,18 @@ def train(cfg: Config) -> dict[str, object]:
             cfg=cfg,
             rng=rng,
             device=device,
-            batch=(obs_buf, mask_buf, act_buf, logp_buf),
-            adv=advantages(cfg, val_buf, rew_buf, done_buf, bootstrap(policy, env, device)),
-            values=val_buf,
+            batch=(rollout.obs, rollout.mask, rollout.act, rollout.logp),
+            adv=advantages(
+                cfg, rollout.value, rollout.reward, rollout.done, bootstrap(policy, env, device)
+            ),
+            values=rollout.value,
         )
-        timing["update"] += time.perf_counter() - tick
-        steps += t * n
+        rollout.timing["update"] += time.perf_counter() - tick
+        steps += rollout.act.size
         elapsed = time.perf_counter() - started
-        history.append({"steps": steps, "games": games, "seconds": round(elapsed, 1)})
         print(
-            f"{steps:>9,} learner steps  {games:>7,} games  {steps / elapsed:>8,.0f} steps/s",
+            f"{steps:>9,} learner steps  {rollout.games:>7,} games  "
+            f"{steps / elapsed:>8,.0f} steps/s",
             flush=True,
         )
 
@@ -271,11 +278,11 @@ def train(cfg: Config) -> dict[str, object]:
         "config": asdict(cfg),
         "device": device,
         "learner_steps": steps,
-        "games": games,
+        "games": rollout.games,
         "seconds": round(elapsed, 1),
         "steps_per_second": round(steps / elapsed),
-        "mask_violations": mask_violations,
-        "us_per_step": {k: round(v / steps * 1e6, 2) for k, v in timing.items()},
+        "mask_violations": rollout.mask_violations,
+        "us_per_step": {k: round(v / steps * 1e6, 2) for k, v in rollout.timing.items()},
         "vs": {opponent: evaluate(policy, cfg, opponent, device) for opponent in ("h0", "h1")},
     }
 

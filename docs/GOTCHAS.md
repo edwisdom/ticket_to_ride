@@ -219,13 +219,14 @@ found the hard way — survives **60 seeds of USA 2P, 3P and 4P undetected**. Re
 requires the deck *and* the discard to run dry, which those configurations rarely do in a
 random game. It is caught at mini seed 0 (3P and 4P) and USA 5P seed 8.
 
-So the fast tier of the differential (`FAST` in `crates/ttr-tools/tests/oracle.rs`, now against `oracle-v1`) weights the small map and the
-full table, and the measurement is recorded next to it. The general lesson: pick the fast
+So a fast tier covers every configuration -- today's, the golden-corpus prefix, runs the
+small map and the full table. The general lesson: pick the fast
 tier's shape by mutating the engine and seeing what catches, not by taking the biggest map.
 
 ### Comparing hashes tells you *that*; comparing fields tells you *where*
 
-Two follow-ons the harness learned the hard way. Diff the serialized image **field-wise
+Learned by the per-step differential harness (retired with `oracle-v1`), and still true of
+any diff of two states. Diff the serialized image **field-wise
 using each side's own `deck_len`**, not byte-wise: a reshuffle at a different moment
 changes `deck_len`, which changes the image length, and a byte-offset diff then reports
 "the images are different lengths" — which reads like a layout bug and sends you to check
@@ -233,8 +234,7 @@ field widths when the real difference is one value several fields earlier.
 
 ### `make bench-check` needs an idle machine
 
-Run alongside anything else — the nightly differential sweep under `-n auto` is the obvious
-offender — pytest-benchmark reports a **40–80% "regression"** that is purely core
+Run alongside anything else — the nightly sweeps are the obvious offender — pytest-benchmark reports a **40–80% "regression"** that is purely core
 contention, complete with a `PerformanceRegression` traceback that names your code.
 Measured, not hypothesised. The absolute figures are only meaningful on a quiet box, which
 is also why the gate is local-only and CI asserts a *ratio* instead.
@@ -329,14 +329,6 @@ warning**. Verified: an edit to ttr-core changed nothing until
 `crates/ttr-py/pyproject.toml` listed the Rust sources, including ttr-core's through `../`.
 The keys compare modification times, so even a `touch` rebuilds; cargo's incremental cache
 keeps that cheap. Add a new crate the extension depends on, add its sources to the list.
-
-### `cargo -p ttr-core` can be ambiguous
-
-`oracle-v1` is ttr-core itself, pulled in as a git dev-dependency of ttr-tools, so the
-dependency graph holds two packages named `ttr-core`. `cargo clippy -p ttr-core -p
-ttr-tools` fails with "specification `ttr-core` is ambiguous"; `--workspace` (what the
-Makefile, CI and pre-commit use) is fine, as is `-p ttr-core` alone in most commands. When
-it bites, name the path: `-p "path+file://$PWD/crates/ttr-core#0.1.0"`.
 
 ### The test profile is opt-level 1 on purpose
 
@@ -562,19 +554,16 @@ the fractions are necessary, and the *test* is what actually catches it.
 Differential testing is impossible unless all three are pinned bit-for-bit with test
 vectors. Two equally-correct sampling implementations produce different — still valid —
 trajectories, which destroys the oracle. This is the gate between Phase 1 and Phase 2.
-PLAN.md §5.8. **Done: [CONTRACT.md](CONTRACT.md) plus `tests/golden/contract_vectors.json`
-and the 84-game `tests/golden/replays.bin` corpus.**
+PLAN.md §5.8. **Done: [CONTRACT.md](CONTRACT.md); the golden corpus pins it now.**
 
 ### Compare against the oracle at every step, not just at the terminal  ✅ handled
 
 Terminal-only comparison tells you *that* you diverged, never *where*. Assert
 `state_hash()` equality and `legal_actions()` set equality after every single step.
-**Done, twice:** Phase 2's Python-versus-Rust harness, and since Phase 3.1 the live crate
-against `oracle-v1` (`crates/ttr-tools/tests/oracle.rs`), which also compares
-`position_hash`, `current_player`, observations, every heuristic's choice and the terminal
-scoring chain, and names the first differing serialized field. Two follow-ons that were not
-obvious in advance are in Part 1: field-wise diffing, and choosing the fast tier's shape by
-mutation testing rather than by map size.
+**Done while two implementations existed:** Phase 2's Python-versus-Rust harness, then
+the live crate against `oracle-v1` -- retired 2026-10-17, once the golden corpus (a hash
+chain over every position) and the naive references carried the check. Two follow-ons are
+in Part 1: field-wise diffing, and choosing the fast tier's shape by mutation testing.
 
 ### MPS will silently fall back to CPU
 

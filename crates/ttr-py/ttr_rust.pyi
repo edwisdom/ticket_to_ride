@@ -10,6 +10,7 @@ Kept next to `Cargo.toml` and shipped by maturin. It is hand-written, so it can 
 """
 
 from collections.abc import Buffer
+from typing import Any
 
 CONTRACT_VERSION: int
 
@@ -239,3 +240,7 @@ class VecEnv:
         """Fill `out` (`n_envs * n_players * n_tickets` bytes): 0 none, 1 open, 2 done."""
 
     def finished_games(self) -> list[tuple[int, int, list[int]]]: ...
+
+def board_names() -> list[str]: ...
+def board_summary(map_name: str = ...) -> dict[str, Any]:
+    """A board's data and derived invariants, as `ttr map` prints them."""

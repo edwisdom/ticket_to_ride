@@ -1,7 +1,6 @@
 //! Union-find, reachability costs, the Steiner tree, and the longest trail.
 //!
-//! The port of `tests/unit/engine/test_graph.py`, one test per Python test. The fast
-//! functions also meet slow, obviously-correct references inside the crate, in
+//! The fast functions also meet slow, obviously-correct references inside the crate, in
 //! `src/naive_graph.rs`; this file keeps the hand-checked facts and the closed forms.
 //!
 //! The longest trail gets an independent oracle here: a brute force over *permutations* of

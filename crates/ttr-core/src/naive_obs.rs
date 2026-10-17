@@ -1,14 +1,12 @@
 //! A deliberately naive observation encoder, for differential testing inside the crate.
 //!
-//! PLAN.md §14.1 step 4, extended to the encoder after mutation testing showed most of
-//! `obs.rs` was checked only by comparison with a frozen copy (`oracle-v1`, the golden
-//! corpus): replacing `own_hand` with nothing, or a normalizer's `/` with `*`, survived
-//! every explicit test. Those comparisons stop applying the day `OBS_VERSION` moves; this
-//! does not.
+//! Mutation testing showed most of `obs.rs` was checked only by comparison with recorded
+//! values (the golden corpus): replacing `own_hand` with nothing, or a normalizer's `/` with
+//! `*`, survived every explicit test. Recorded values stop applying the day `OBS_VERSION`
+//! moves; this does not.
 //!
 //! Every feature is recomputed here straight from the state and the spec's description of
-//! it -- one line per feature, the union-find replaced by a flood fill, remaining costs by
-//! Bellman-Ford -- and compared with [`crate::obs::encode`] bit for bit, at every few steps
+//! it -- one line per feature, remaining costs by Bellman-Ford -- and compared with [`crate::obs::encode`] bit for bit, at every few steps
 //! of random and H3 games on every map and seat count, for every seat.
 //!
 //! Two features depend on *which* cheapest route the encoder takes, and the route is its

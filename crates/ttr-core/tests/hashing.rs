@@ -1,7 +1,7 @@
 //! `state_hash()` and `position_hash()` against docs/CONTRACT.md §3, rebuilt from the text.
 //!
-//! The 84 golden replays pin final `state_hash`es, and the golden corpus and `oracle-v1`
-//! pin both hashes at every step -- but only as comparisons with recorded values. Mutation
+//! The golden corpus pins both hashes at every step -- but only as comparisons with
+//! recorded values. Mutation
 //! testing found nothing in this crate stating what `position_hash` *is*: zeroing the dealt
 //! deck prefix by shrinking the image instead of overwriting it survived every test here.
 //! So the image is rebuilt field by field from the contract's table, by code that shares

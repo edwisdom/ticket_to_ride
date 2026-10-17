@@ -1,7 +1,6 @@
 //! Deliberately naive graph references, for differential testing inside the crate.
 //!
-//! PLAN.md §14.1 step 4. With the Python engine gone nothing else disagrees with
-//! [`crate::graph`], so each fast function meets a slow one that shares none of its structure
+//! Each fast function in [`crate::graph`] meets a slow one that shares none of its structure
 //! and whose correctness can be checked by reading it:
 //!
 //! * `remaining_costs_from` (Dijkstra), `all_pairs` (a fixed-width Floyd-Warshall) and

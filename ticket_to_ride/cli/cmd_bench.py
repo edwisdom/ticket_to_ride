@@ -31,7 +31,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from ticket_to_ride.data.board import BOARDS
+from ticket_to_ride.engine import configurations as all_configurations
 
 
 class BenchResult(NamedTuple):
@@ -206,11 +206,7 @@ def bench_command(
     if suite == "engine":
         configurations = [("usa", 2), ("usa", 4), ("mini", 2)]
     elif suite == "all":
-        configurations = [
-            (name, n)
-            for name, board in BOARDS.items()
-            for n in range(board.raw.min_players, board.raw.max_players + 1)
-        ]
+        configurations = all_configurations()
     else:
         raise typer.BadParameter(f"unknown suite {suite!r}; use engine, agents, vecenv or all")
 

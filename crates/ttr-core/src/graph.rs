@@ -8,7 +8,7 @@
 //! largest board, and the all-pairs table ([`all_pairs`]) is what the Steiner DP and the
 //! encoder read their distances from. Results are exact and unique -- shortest distances,
 //! the minimum Steiner cost, the MST weight -- so they do not depend on search order, and
-//! the `naive_graph` references and the `oracle-v1` differential check them as values.
+//! the `naive_graph` references check them as values.
 //!
 //! Deliberately not a graph library. The two things actually needed are short, run
 //! millions of times, and no crate has a longest-*trail* function at all.

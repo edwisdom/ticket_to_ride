@@ -1,10 +1,9 @@
 //! The encoder's plan features: `on_my_steiner_tree`, and which tickets are terminals.
 //!
-//! Written for Phase 3.1's mutation testing, which found these features had no explicit
-//! test at all: emptying the Steiner edge set, or letting a completed or dead ticket into
-//! the terminal set, survived the whole ported suite and was caught only by the `oracle-v1`
-//! differential and the golden corpus. Those stay, but they compare against a frozen copy;
-//! a feature's meaning deserves a test that states it.
+//! Written when mutation testing found these features had no explicit test: emptying the
+//! Steiner edge set, or letting a completed or dead ticket into the terminal set, was
+//! caught only by comparisons with recorded values. A feature's meaning deserves a test
+//! that states it.
 //!
 //! Writing them found a defect in `OBS_VERSION` 1 as signed (the retired Python encoder had
 //! it too): the walk that recovered a planned route gave my own track weight 0, so it could

@@ -21,10 +21,10 @@ rust-lint:  ## Rust formatting + clippy, warnings are errors
 	cargo fmt --all -- --check
 	cargo clippy --workspace --all-targets -- -D warnings
 
-rust-test:  ## Every Rust test's fast tier: the port of the old suite, oracle-v1, the corpus prefix
+rust-test:  ## Every Rust test's fast tier, the golden-corpus prefix included (~20 s)
 	cargo test --workspace
 
-rust-sweep:  ## The #[ignore]d sweeps: 10k seeds vs oracle-v1 at every step, the whole corpus (~15 min)
+rust-sweep:  ## The #[ignore]d sweeps: the whole corpus, the naive references at width (~3 min)
 	cargo test --workspace --release -- --ignored
 
 # Coverage needs llvm-tools, which a Homebrew Rust lacks; this uses rustup's toolchain.
@@ -57,18 +57,16 @@ cov:  ## Fast tests with coverage
 bench:  ## Run benchmarks and save a new baseline
 	uv run pytest -m bench --benchmark-autosave
 
-# Needs a quiet machine. Running it alongside anything else -- the nightly differential
-# sweep under `-n auto` is the obvious offender -- reports a 40-80% "regression" that is
+# Needs a quiet machine. Running it alongside anything else -- the nightly sweeps are the
+# obvious offender -- reports a 40-80% "regression" that is
 # purely core contention. Measured, not hypothesised.
 bench-check:  ## Fail if throughput regressed >20% vs the saved baseline (M2, idle machine)
 	uv run pytest -m bench --benchmark-compare --benchmark-compare-fail=mean:20%
 
-board:  ## Regenerate the board data (RULES.md -> usa.toml, board_gen.py, board_gen.rs)
+board:  ## Regenerate the board data (RULES.md -> usa.toml, board_gen.rs)
 	uv run python tools/gen_board.py
 
-vectors:  ## Verify the frozen fixtures: contract vectors, golden replays, golden corpus
-	cargo run -q --release -p ttr-tools --bin gen-vectors -- --check
-	cargo run -q --release -p ttr-tools --bin gen-replays -- --check
+corpus:  ## Verify the golden corpus, every game
 	cargo run -q --release -p ttr-tools --bin gen-corpus -- --check
 
 tb:  ## Launch tensorboard over all runs

@@ -18,18 +18,14 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from ticket_to_ride.data.board import BOARDS
+from ticket_to_ride.engine import configurations
 
 if TYPE_CHECKING:
     # The payoff of shipping a .pyi with py.typed: the Rust core is a typed module here,
     # so a wrong method name fails the build rather than the test run.
     from ttr_rust import State as RustState
 
-ALL_CONFIGS = [
-    (name, n)
-    for name, board in BOARDS.items()
-    for n in range(board.raw.min_players, board.raw.max_players + 1)
-]
+ALL_CONFIGS = configurations()
 
 #: Sample here rather than only at the start: an opening position has almost nothing
 #: hidden, so a start-only sweep would barely exercise the sampler.

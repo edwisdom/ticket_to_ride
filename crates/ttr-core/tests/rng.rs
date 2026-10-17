@@ -1,14 +1,10 @@
-//! The frozen PRNG contract. Ported from `tests/unit/engine/test_rng.py`.
-//!
-//! Three layers, deliberately:
+//! The frozen PRNG contract, in two layers:
 //!
 //! 1. **The published reference vector.** `pcg32_srandom_r(&rng, 42, 54)` then six draws is
-//!    printed by O'Neill's own `pcg32-demo`; matching it validates the port against upstream
-//!    rather than against itself (`rng::tests::reproduces_upstream_pcg32_demo`).
-//! 2. **Our golden vectors**, which pin what the reference does not cover: bounded draws,
-//!    shuffle direction, stream derivation (`tests/contract_vectors.rs`, and the whole-file
-//!    regeneration in `gen-vectors`).
-//! 3. **Properties**, which say what the vectors mean -- most of this file.
+//!    printed by O'Neill's own `pcg32-demo`; matching it validates the generator against
+//!    upstream rather than against itself. Bounded draws, shuffle direction and stream
+//!    derivation are pinned end to end by the golden corpus, whose every game depends on them.
+//! 2. **Properties**, which say what those mean -- most of this file.
 
 use proptest::prelude::*;
 use ttr_core::rng::{Part, Pcg32, derive, stream};
@@ -43,16 +39,7 @@ fn seeding_does_the_two_reference_warmups() {
 }
 
 // ---------------------------------------------------------------------------
-// 2. Golden vectors
-// ---------------------------------------------------------------------------
-
-// The whole-file regeneration -- the check that catches a vector that quietly stopped
-// being checked, since the per-section tests above iterate whatever the file holds --
-// lives with the generator: `gen-vectors`'s `the_whole_vector_file_reproduces`
-// (crates/ttr-tools), byte for byte.
-
-// ---------------------------------------------------------------------------
-// 3. Properties
+// 2. Properties
 // ---------------------------------------------------------------------------
 
 /// Python masked every step to 32/64 bits by hand. Here the types are the widths, and what is

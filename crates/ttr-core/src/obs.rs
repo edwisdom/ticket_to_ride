@@ -5,9 +5,8 @@
 //! §8.2).
 //!
 //! **Arithmetic: computed in `f64`, narrowed on store.** The buffer is `f32`; every
-//! intermediate is an integer or an `f64`, and each feature is narrowed once. This began as
-//! a match for the retired Python encoder, which computed in doubles and narrowed on store,
-//! and it is now what the golden corpus and `oracle-v1` were signed under. Dividing
+//! intermediate is an integer or an `f64`, and each feature is narrowed once -- what the
+//! golden corpus's observation digests were recorded under. Dividing
 //! directly in `f32` happens to agree over every divisor used today --
 //! `double_rounding_does_not_bite_over_the_ranges_used` checks that rather than assuming it
 //! -- but it agrees by luck of the ranges, and a new feature with a different divisor could

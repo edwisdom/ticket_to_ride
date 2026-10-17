@@ -1,9 +1,7 @@
 //! Deliberately naive legality and bookkeeping references, for differential testing inside
 //! the crate.
 //!
-//! PLAN.md §14.1 step 4. With the Python engine retired there is no second implementation
-//! left to disagree with this one, so these are the second implementation: slow, obvious,
-//! and derived from the rules rather than from the code they check.
+//! Slow, obvious, and derived from the rules rather than from the code they check.
 //!
 //! * [`naive_legal_actions`] decides legality from RULES.md, PLAN.md §5.2-§5.3 and
 //!   CONTRACT.md §2 alone. Claims are a brute-force scan of every `(segment, pay colour,

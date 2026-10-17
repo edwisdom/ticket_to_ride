@@ -16,8 +16,7 @@ from typer.testing import CliRunner
 
 from ticket_to_ride.cli.app import app
 from ticket_to_ride.cli.cmd_cloud import job_id
-from ticket_to_ride.cli.cmd_map import summary
-from ticket_to_ride.data.board import MINI, USA
+from ticket_to_ride.engine import board_summary
 
 runner = CliRunner()
 
@@ -54,7 +53,7 @@ def test_no_arguments_shows_help_rather_than_failing_silently() -> None:
 def test_map_prints_a_table() -> None:
     result = runner.invoke(app, ["map"])
     assert result.exit_code == 0
-    assert USA.data_hash in result.stdout
+    assert board_summary("usa")["data_hash"] in result.stdout
     assert "Denver" in result.stdout
 
 
@@ -63,8 +62,8 @@ def test_map_json_matches_the_board() -> None:
     assert result.exit_code == 0
     data = json.loads(result.stdout)
     assert data["name"] == "mini"
-    assert data["data_hash"] == MINI.data_hash
-    assert data["segments"] == MINI.n_segments
+    assert data == board_summary("mini")
+    assert data["segments"] == 30
     assert data["connected"] is True
 
 
@@ -86,7 +85,7 @@ def test_map_says_ascii_is_not_ready_yet() -> None:
 
 
 def test_summary_reports_the_invariants_the_engine_is_sized_against() -> None:
-    data = summary(USA)
+    data = board_summary("usa")
     assert (data["cities"], data["pairs"], data["segments"], data["spaces"]) == (36, 78, 100, 309)
     assert data["double_routes"] == 22
     assert data["action_space"] == 915

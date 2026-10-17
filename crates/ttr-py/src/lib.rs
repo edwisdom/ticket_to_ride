@@ -2,8 +2,8 @@
 //!
 //! Deliberately thin: this crate converts types and nothing else. Every rule, every draw,
 //! every hash lives in `ttr-core`, which is testable with a plain `cargo test` and has no
-//! idea Python exists. Logic that leaked in here would be logic the Rust suite, the golden
-//! corpus and the `oracle-v1` differential never see.
+//! idea Python exists. Logic that leaked in here would be logic the Rust suite and the golden
+//! corpus never see.
 //!
 //! The module is `ttr_rust`, a uv workspace member that `ticket_to_ride` depends on and
 //! re-exports as `ticket_to_ride.engine`. `uv sync` builds it in the release profile.
@@ -1106,6 +1106,86 @@ fn obs_spec(map_name: &str) -> PyResult<Vec<BlockRow>> {
         .collect())
 }
 
+/// Every board's name, in data order.
+#[pyfunction]
+fn board_names() -> Vec<&'static str> {
+    ttr_core::board::all_boards()
+        .iter()
+        .map(|b| b.name)
+        .collect()
+}
+
+/// A board's data and the invariants worth asserting about it, as plain values -- what
+/// `ttr map` prints.
+#[pyfunction]
+#[pyo3(signature = (map_name="usa"))]
+fn board_summary(py: Python<'_>, map_name: &str) -> PyResult<Py<PyDict>> {
+    use ttr_core::board::{GRAY, NO_SIBLING, UNREACHABLE};
+    let board = ttr_core::board::get_board(map_name)
+        .ok_or_else(|| PyValueError::new_err(format!("unknown map {map_name:?}")))?;
+    let degrees: Vec<usize> = board
+        .adjacency
+        .iter()
+        .map(|row| {
+            let mut neighbours: Vec<u8> = row.iter().map(|&(city, _)| city).collect();
+            neighbours.sort_unstable();
+            neighbours.dedup();
+            neighbours.len()
+        })
+        .collect();
+    let max_degree = degrees.iter().copied().max().unwrap_or(0);
+    let mut hubs: Vec<&str> = (0..board.n_cities)
+        .filter(|&c| degrees[c] == max_degree)
+        .map(|c| board.raw.cities[c])
+        .collect();
+    hubs.sort_unstable();
+    let diameter = board.dist.iter().flatten().copied().max().unwrap_or(0);
+    let per_color = PyDict::new(py);
+    for c in 0..board.n_colors {
+        let n = board
+            .seg_color
+            .iter()
+            .filter(|&&x| usize::from(x) == c)
+            .count();
+        per_color.set_item(board.raw.color_names[c], n)?;
+    }
+    let mean_degree = (200.0 * board.n_pairs as f64 / board.n_cities as f64).round() / 100.0;
+
+    let d = PyDict::new(py);
+    d.set_item("name", board.name)?;
+    d.set_item("data_hash", board.data_hash)?;
+    d.set_item("cities", board.n_cities)?;
+    d.set_item("pairs", board.n_pairs)?;
+    d.set_item("segments", board.n_segments)?;
+    d.set_item("spaces", board.total_spaces)?;
+    d.set_item(
+        "double_routes",
+        board.sibling.iter().filter(|&&s| s != NO_SIBLING).count() / 2,
+    )?;
+    d.set_item("tickets", board.n_tickets)?;
+    d.set_item("colors", board.n_colors)?;
+    d.set_item("cards", board.deck_size)?;
+    d.set_item("locomotives", board.raw.locomotives)?;
+    d.set_item("trains_per_player", board.raw.trains_per_player)?;
+    // As usize: PyO3 hands any `[u8; N]` back as `bytes`.
+    let players = [board.raw.min_players, board.raw.max_players].map(usize::from);
+    d.set_item("players", players)?;
+    d.set_item("max_route_length", board.max_len)?;
+    d.set_item("claim_buckets", board.buckets.len())?;
+    d.set_item("action_space", ttr_core::actions::ActionSpace::new(board).n)?;
+    d.set_item(
+        "gray_segments",
+        board.seg_color.iter().filter(|&&c| c == GRAY).count(),
+    )?;
+    d.set_item("segments_per_color", per_color)?;
+    d.set_item("max_degree", max_degree)?;
+    d.set_item("mean_degree", mean_degree)?;
+    d.set_item("hubs", hubs)?;
+    d.set_item("diameter", diameter)?;
+    d.set_item("connected", diameter < UNREACHABLE)?;
+    Ok(d.unbind())
+}
+
 #[pymodule]
 fn ttr_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(contract_version, m)?)?;
@@ -1117,6 +1197,8 @@ fn ttr_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(params_hash, m)?)?;
     m.add_function(wrap_pyfunction!(behaviour_hash, m)?)?;
     m.add_function(wrap_pyfunction!(run_arena, m)?)?;
+    m.add_function(wrap_pyfunction!(board_names, m)?)?;
+    m.add_function(wrap_pyfunction!(board_summary, m)?)?;
     m.add_class::<PyArenaGames>()?;
     m.add_class::<PyArenaSeats>()?;
     m.add_class::<PyGame>()?;

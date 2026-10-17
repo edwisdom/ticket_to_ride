@@ -1,10 +1,9 @@
 //! Board invariants -- the generated constants and every table the engine derives from them.
 //!
-//! Ported from `tests/unit/engine/test_board.py`. The checks on the markdown
-//! (`test_rules_md_invariants.py`) and on the generator's own output -- freshness, and Python
-//! and Rust agreeing constant for constant -- stay in Python with `tools/gen_board.py`. This
-//! file checks what `ttr_core::board` builds from `board_gen.rs`: that the derived tables
-//! agree with the raw data, and that the numbers the engine is sized against hold.
+//! The checks on RULES.md and on the generator's freshness stay in Python with
+//! `tools/gen_board.py` (`tests/unit/data/`). This file checks what `ttr_core::board` builds
+//! from `board_gen.rs`: that the derived tables agree with the raw data, and that the
+//! numbers the engine is sized against hold.
 
 use std::collections::{BTreeMap, HashSet};
 

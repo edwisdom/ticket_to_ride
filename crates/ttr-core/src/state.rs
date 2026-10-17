@@ -1,15 +1,13 @@
 //! The engine: [`Game`] (immutable setup) and [`State`] (a flat, cloneable position).
 //!
-//! Written as a transcription of the retired Python engine against docs/CONTRACT.md §2-§3,
-//! and verified byte-identical to it over 700k games before it was deleted. Rules edge
-//! cases sit next to the code implementing them, in the order the contract states them.
-//! Behaviour is now pinned by the golden corpus and the per-step differential against
-//! `oracle-v1` (crates/ttr-tools), where a difference that is "obviously equivalent" is
-//! exactly the kind that is not.
+//! A transcription of docs/CONTRACT.md §2-§3; rules edge cases sit next to the code
+//! implementing them, in the order the contract states them. Behaviour is pinned by the
+//! golden corpus, where a difference that is "obviously equivalent" is exactly the kind
+//! that is not.
 //!
 //! **Deviation from PLAN.md §5.1, small and deliberate:** the plan says `State: Copy`.
 //! `State` here is `Clone`, not `Copy`, because it carries a `Vec<u16>` action history
-//! for replays. Everything `Copy` was meant to buy is still true: the POD
+//! (game records). Everything `Copy` was meant to buy is still true: the POD
 //! arrays clone as a memcpy, [`State::clone_into`] reuses the destination's allocation so
 //! a search arena never allocates, and search runs with `track_history` off, where the
 //! vector is empty and costs nothing.

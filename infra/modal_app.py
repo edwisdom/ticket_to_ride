@@ -17,8 +17,7 @@ goes in as two layers, so a Python-only edit does not rebuild the engine:
    keys are unchanged) and installs only the package.
 
 Modal keys each layer on its inputs, so a layer rebuilds only when something it copies
-changes. Cargo resolves the whole workspace, so `crates/ttr-tools`' `oracle-v1` git
-dev-dependency is fetched from the public repository during the build; nothing uses it.
+changes.
 
 The project lives in its own venv (`/opt/ttr/.venv`), not the interpreter the function runs
 on: `uv sync` is exact, and syncing into Modal's interpreter would uninstall Modal's client.
@@ -71,7 +70,7 @@ def _build_outputs(path: Path) -> bool:
 
 image = (
     modal.Image.debian_slim(python_version="3.14")
-    .apt_install("build-essential", "curl", "git", "pkg-config")
+    .apt_install("build-essential", "curl", "pkg-config")
     .run_commands(
         "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
         f" --profile minimal --default-toolchain {RUST_TOOLCHAIN}",

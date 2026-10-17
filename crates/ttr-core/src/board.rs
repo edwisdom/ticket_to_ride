@@ -1,10 +1,8 @@
 //! Derived board tables, built once from the generated constants in [`crate::board_gen`].
 //!
-//! The twin of `ticket_to_ride/data/board.py`, and deliberately *not* generated for the
-//! same reason: everything here is a pure function of the generated data, so emitting it
-//! into two languages would double the surface area for no gain. Contract §5 lists
-//! adjacency, buckets and distance tables as explicitly **not frozen** -- none of them
-//! reaches a hash, so they may be reorganised for speed freely.
+//! Everything here is a pure function of the generated data. Contract §5 lists adjacency,
+//! buckets and distance tables as explicitly **not frozen** -- none of them reaches a hash,
+//! so they may be reorganised for speed freely.
 //!
 //! They exist so the engine's hot loops never do graph work:
 //!

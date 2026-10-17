@@ -2,9 +2,8 @@
 //!
 //! Observation encoding is the most churn-prone code in the project, so its layout is
 //! declared once here and every offset is derived from it. Adding a feature is a table edit
-//! plus one write in [`crate::obs`], not a hand-maintained offset list. Until Phase 3.1 the
-//! table lived in Python and was generated into Rust; with the Python encoder retired it is
-//! Rust source, and Python reads it back through `ttr_rust.obs_spec()`.
+//! plus one write in [`crate::obs`], not a hand-maintained offset list. Python reads it back
+//! through `ttr_rust.obs_spec()`.
 //!
 //! [`OBS_VERSION`] is baked into every checkpoint. Loading a checkpoint whose version does
 //! not match is a hard error, which over a months-long league is the difference between

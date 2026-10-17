@@ -8,7 +8,6 @@ readme = "README.md"
 requires-python = ">=3.14,<3.15"
 dependencies = [
     "numpy>=2.5",
-    "msgspec>=0.21",
     "typer>=0.27",
     "rich>=15",
     # The engine. A workspace member (crates/ttr-py), built by `uv sync` -- see [tool.uv]
@@ -94,7 +93,6 @@ members = ["crates/ttr-py"]
 target-version = "py314"
 line-length = 100
 extend-exclude = [
-    "ticket_to_ride/data/board_gen.py",  # generated
     # ruff formats fenced Python inside markdown. docs/ holds prose and design sketches
     # -- PLAN.md in particular is a verbatim archive -- and must not be rewritten.
     "docs/",
@@ -146,9 +144,6 @@ known-first-party = ["ticket_to_ride"]
 #
 # python-version is inferred from project.requires-python (3.14), so it is not repeated.
 
-[tool.ty.src]
-exclude = ["ticket_to_ride/data/board_gen.py"]  # generated
-
 [tool.ty.terminal]
 # Warning-level diagnostics fail the build. Without this, `ty check` exits 0 on warnings
 # and `make type` would go green while real problems accumulate.
@@ -178,7 +173,6 @@ filterwarnings = [
 [tool.coverage.run]
 branch = true
 source = ["ticket_to_ride"]
-omit = ["ticket_to_ride/data/board_gen.py"]
 
 [tool.coverage.report]
 exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError", "@overload"]

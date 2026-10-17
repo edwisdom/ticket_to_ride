@@ -1,7 +1,7 @@
 //! The rules correctness checklist, one named test per item (PLAN.md §5.2).
 //!
-//! The port of `tests/unit/engine/test_rules.py`, in the same groups: setup, drawing,
-//! claiming, tickets, end and scoring, degenerate positions. Most of these positions occur
+//! Grouped as setup, drawing, claiming, tickets, end and scoring, degenerate positions. Most
+//! of these positions occur
 //! once in thousands of random games, so they are rigged directly with `common::force`,
 //! which keeps card conservation intact so `validate()` still applies.
 //!

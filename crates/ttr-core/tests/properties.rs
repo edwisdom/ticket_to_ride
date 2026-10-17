@@ -1,17 +1,13 @@
 //! Properties that must hold in every game, on every map, at every player count.
 //!
-//! The port of `tests/property/test_engine_properties.py`, one test per Python test and
-//! named after it without the `test_` prefix. The rules tests check named positions; these
-//! check that nothing *else* went wrong on the way there, by sweeping seeds and asserting
-//! invariants after every single step. Where a property is about the shape of the action
-//! space rather than about play, `proptest` drives it instead of a seed sweep (Hypothesis,
-//! in the Python suite).
+//! The rules tests check named positions; these check that nothing *else* went wrong on the
+//! way there, by sweeping seeds and asserting invariants after every single step. Where a
+//! property is about the shape of the action space rather than about play, `proptest` drives
+//! it instead of a seed sweep.
 //!
-//! These are the Python suite's games, not merely games like them: the same seeds, the same
-//! `"policy"` stream, and `sample_legal` draws from the same unsorted emission order. So a
-//! seed named in a failure here is the game the Python test played, and measurements taken
-//! on those games still hold -- the flush cascade cap first fires on 5P seed 15 at turn
-//! 243, exactly as `state.rs` records.
+//! The seeds, the `"policy"` stream and `sample_legal`'s unsorted emission order are fixed,
+//! so a seed named in a failure is a reproducible game, and measurements taken on these games
+//! hold -- the flush cascade cap first fires on 5P seed 15 at turn 243, as `state.rs` records.
 
 mod common;
 

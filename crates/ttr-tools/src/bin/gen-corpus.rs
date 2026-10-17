@@ -19,7 +19,6 @@ use std::time::Instant;
 use ttr_tools::corpus::{
     Corpus, Scope, check, configs, corpus_dir, corpus_path, current_header, generate,
 };
-use ttr_tools::engine::Live;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -89,7 +88,7 @@ fn main() -> ExitCode {
             } else {
                 Scope::all()
             };
-            match check(&Live::new(map, n_players), &corpus, &scope) {
+            match check(&corpus, &scope) {
                 Ok(games) => println!(
                     "{map} {n_players}P: {games} games reproduce, {:.1}s",
                     started.elapsed().as_secs_f64()

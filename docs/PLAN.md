@@ -910,6 +910,10 @@ In order:
    observation, final scores. That keeps the property that a divergence names its step. It costs
    nothing to maintain, since nobody edits a tag. If a git dependency proves awkward in CI, vendor
    the tagged source read-only under `crates/ttr-oracle/` with a pre-commit hook that rejects edits.
+   *(Retired 2026-10-17, after Phase 3.4: it had served its purpose through the 3.2 rewrite, it
+   already skipped the features `OBS_VERSION` 2 changed and would diverge further with every
+   observation change, and its full sweep was most of the verification time. The golden corpus and
+   the naive references carry the check; see WORKLOG.)*
    Moving the tag is a deliberate, versioned event, the same as a contract bump.
 3. **Port the tests.** The ~40 rules edge cases and the property tests (Hypothesis → `proptest`) are
    ported to Rust, tracked one-to-one in a table in WORKLOG so none silently drops. The RULES.md

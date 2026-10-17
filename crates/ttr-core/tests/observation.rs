@@ -1,11 +1,8 @@
 //! The observation feature spec and the encoder.
 //!
-//! Ported one-to-one from `tests/unit/rl/test_observation.py` (PLAN.md §14.1). What matters
-//! here is that the layout is exactly what the spec says, and that every feature actually
-//! moves when the thing it describes changes.
-//!
-//! The Rust spec is plain data, so features are read by name through two small extension
-//! traits standing in for the Python spec's `block(name)` and `at(entity, field)`.
+//! What matters here is that the layout is exactly what the spec says, and that every feature
+//! actually moves when the thing it describes changes. Features are read by name through two
+//! small extension traits, `block(name)` and `at(entity, field)`.
 
 mod common;
 

@@ -28,10 +28,8 @@ jobs:
       - run: uv run --no-sync ruff check .
       - run: uv run --no-sync ruff format --check .
 
-  # The engine. Every Rust test's fast tier: the port of the retired Python suite, the
-  # naive in-crate references, the per-step differential against oracle-v1 (a git
-  # dev-dependency fetched from this public repository, no credentials needed), and a
-  # prefix of the golden corpus. Then the frozen fixtures, through their generators.
+  # The engine: every Rust test's fast tier, the naive in-crate references and a prefix of
+  # the golden corpus included.
   rust:
     runs-on: ubuntu-latest
     steps:
@@ -43,8 +41,6 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
-      - run: cargo run -q --release -p ttr-tools --bin gen-vectors -- --check
-      - run: cargo run -q --release -p ttr-tools --bin gen-replays -- --check
 
   # ty must see torch to resolve imports under rl/, ttr_rust (built by `uv sync`) to
   # resolve the engine, and modal (the `cloud` group) to check infra/ and `ttr cloud` -- so
@@ -95,10 +91,8 @@ jobs:
       - run: uv sync --extra rl --group dev
       - run: uv run pytest -n auto -m "torch"
 
-  # The sweeps behind #[ignore]: the live crate against oracle-v1 over 10k seeds x every
-  # (map, seat count) at every step, every heuristic against its frozen self, the whole
-  # golden corpus on both builds, and the naive references at width. Then Python's slow
-  # tier (arena statistics at scale).
+  # The sweeps behind #[ignore]: the whole golden corpus, the naive references at width and
+  # the 10k-game encoder-cache check. Then Python's slow tier (arena statistics at scale).
   nightly:
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule'
