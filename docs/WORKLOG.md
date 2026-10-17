@@ -5,6 +5,111 @@ session. Decisions that deviate from [PLAN.md](PLAN.md) belong here, with the re
 
 ---
 
+## 2026-10-17 — Phase 3.3: Modal, proven with smoke tests
+
+Complete, within the brief's scope: cheap smoke tests only, experiments stay local. The
+image builds the engine; `ttr bench` and three arenas ran on Modal; **12,800 arena games
+on Linux x86 reproduced the macOS ARM runs game for game**; results land in the local
+store. **Everything cost $0.0053** by Modal's own billing report. The optional GPU check
+was not run (it needs the spend-limit question first; below).
+
+### What landed
+
+- **`infra/modal_app.py`.** Debian slim with Modal's Python 3.14 (its 2025.06 image
+  builder supports 3.14, so uv-managed Python was not needed), Rust 1.97.1 and uv 0.11.17,
+  both pinned. The project goes in as two layers -- the Cargo workspace and crates, then
+  `uv sync --no-install-project` (which builds `ttr_rust` in the release profile, 19.5 s on
+  Modal's builder); then the Python package and `uv sync`, which finds the extension
+  current -- so a Python edit does not rebuild Rust. A whole image builds in about a
+  minute. The project lives in its own venv: `uv sync` is exact, and syncing into the
+  interpreter Modal runs the function on would uninstall Modal's client.
+- **One job function**, `run(argv, job)`: `ttr <argv>` in `/runs/<job>/` on the
+  `ttr-runs` Volume, saving stdout, stderr and a `job.json` of where it ran (CPUs visible,
+  CPU quota, the engine's thread count, platform). PLAN.md listed functions for `bench`,
+  `arena` and a generic `run`; the first two are `ttr cloud` subcommands over the third,
+  one implementation.
+- **`ttr cloud bench|arena|run|pull`** (`ticket_to_ride/cli/cmd_cloud.py`), running the
+  app ephemerally: nothing is deployed and nothing is left running. Each command pulls its
+  own job when it finishes; `pull` fetches the rest. **Every job writes its own files**;
+  an arena's `results.db` is merged into the local store by `Store.merge`, which re-keys
+  configurations and agents by their natural keys (an agent by its content address), so
+  cloud games count towards the same players as local ones. Markers make pulls resumable
+  and merges happen once. `modal` is imported only inside the commands -- `ttr --help`
+  stays instant, and nothing else needs the `cloud` group.
+- **`--check-local`**, the exit check made a command: replay the arena locally into a
+  scratch database (no game counted twice) and require `Store.outcomes()` -- every seat of
+  every game, final state hash, scores and ranks, free of ids and timings -- to be equal.
+- **`device`** (`ticket_to_ride/config/device.py`): `auto|cuda|mps|cpu`; `auto` takes the
+  best accelerator present, and naming an absent one is an error, not a fallback. `auto`
+  resolves to `mps` here. 3.4's training config carries the setting.
+- **`TTR_THREADS`**: a positive integer overrides `performance_threads()`. Cloud jobs set
+  it to the CPUs their container shows.
+
+### The container check PLAN.md asked for
+
+`performance_threads()` off macOS is `available_parallelism() - 2`. On Modal:
+
+| function config | CPUs the container shows | cgroup quota visible | engine threads |
+| --- | --- | --- | --- |
+| `cpu=8.0` (request only) | 24 | none | 22 |
+| `cpu=(8.0, 8.0)` (request and limit) | **8** | none | 6, then 8 with `TTR_THREADS` |
+
+So `available_parallelism` does follow a container's CPU limit -- gVisor presents the limit
+as the CPU count rather than as a cgroup quota -- but Modal's bare `cpu=` is a reservation
+with no limit, under which the container shows the host slice. `ttr cloud` therefore
+always sets request = limit (cost and thread count no longer depend on the neighbours),
+and the job sets `TTR_THREADS` to the visible count, since the desktop default's two
+spare CPUs are a quarter of a dedicated 8-core container. (GOTCHAS.)
+
+### Smoke tests
+
+| job | what | container time |
+| --- | --- | --- |
+| first bench | image build + `ttr bench --suite engine --games 2000` (uncapped, 22 threads) | 0.8 s |
+| capped bench | the same at `cpu=(8, 8)` | 1.0 s |
+| arena 1 | h0-h4 round robin, USA 2P, 100 blocks: **2,000 games identical** to local | 1.4 s |
+| arena 2 | h0-h4, USA 2P, 500 blocks: **10,000 games identical** (PLAN.md's 10k) | 3.3 s |
+| arena 3 | h0-h4, USA 4P, 40 blocks: **800 games identical** | 0.9 s |
+| final bench | `--games 4000 --repeat 3`, 8 threads | 2.4 s |
+
+Throughput in a capped 8-CPU container (x86, gVisor): USA 2P one thread 34k games/s
+(0.19 µs/step; the M2 Max does ~45k), eight threads 169k games/s; mini 2P 102k and 464k.
+The merged store refits to the same ladder as the README's (h4 −5, h2 −96, h1 −699, h0
+−1181 over the 12,800 games).
+
+**Cost.** Modal's billing report (`modal.Workspace().billing.report(...)`, hourly):
+
+| app runs | cost |
+| --- | --- |
+| the first bench and the first arena, each of which built image layers | $0.0020, $0.0019 |
+| the other four (a bench or an arena each, 1-3 s of container time) | $0.0002-0.0005 each |
+| **all six** | **$0.0053** |
+
+So a smoke test is a fraction of a cent, and an image rebuild a fifth of one; the $30
+monthly Starter credit would cover this whole set of six about 5,700 times.
+
+### Not done, and why
+
+- **The GPU throughput check** (optional in the brief). Before any GPU run the brief asks
+  whether a workspace spend limit is set in the Modal dashboard; that is the user's setting
+  and I have not asked yet. `ttr cloud run --gpu T4 -- …` is wired; the image has no CUDA
+  torch yet (3.4's PPO runs locally, on MPS).
+- **The spend limit** itself is a user-only step (PLAN.md §14.1); not verified from here.
+
+### Decisions
+
+- **Ephemeral apps, not a deployment**: one command, one app run, nothing idle to bill.
+- **Request = limit** for every job (above).
+- **Merge by natural keys, not by copying the file**: two stores are never the same
+  database, and `record_match` already gives a match-per-transaction write.
+
+### Next
+
+The `OBS_VERSION` 2 bump (the plan walk and `extends_my_chain`), then Phase 3.4, which
+starts with its re-plan note.
+
+---
+
 ## 2026-10-16 — Phase 3.2: the observation encoder, fourteen times cheaper and bit for bit
 
 Complete. One observation costs **8.9 µs cold and 4.6 µs with the encoder cache** (USA 2P,

@@ -387,6 +387,20 @@ dependent adds -- about 3 µs per observation, invisible at 125 µs and a third 
 at 9. It now times only the encoder calls. **When the thing measured gets fast, re-check
 what else the timer covers.**
 
+### Modal's `cpu=` is a request, not a limit
+
+`@app.function(cpu=8.0)` reserves eight cores and caps nothing: the container may burst,
+and it *shows* the whole host slice -- 24 CPUs, no cgroup quota visible under gVisor -- so
+`available_parallelism` said 24 and the engine ran 22 threads on an 8-core reservation.
+With `cpu=(8.0, 8.0)` (request and limit) gVisor shows the container exactly 8 CPUs and
+the engine follows. `ttr cloud` always sets both, and the job sets `TTR_THREADS` to the
+visible count, because the engine's desktop default (all CPUs but two) leaves a quarter of
+a dedicated 8-core container idle.
+
+Related, in the image: `uv sync` is exact, so syncing the project into the interpreter
+Modal runs the function on would uninstall Modal's own client. The project gets its own
+venv.
+
 ---
 
 ## Part 2 — known traps in the work ahead

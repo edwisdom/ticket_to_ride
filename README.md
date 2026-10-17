@@ -15,8 +15,8 @@ training reinforcement learning agents against it via self-play.
 | 3 | Heuristic agents + arena + Elo | done |
 | 3.1 | Retire the Python engine; Rust becomes its own oracle | done |
 | 3.2 | Rust performance (observation encoder) | done |
-| 3.3 | Modal cloud runs | next |
-| 3.4 | PPO spike on TTR-mini (tentative) | |
+| 3.3 | Modal cloud runs | done |
+| 3.4 | PPO spike on TTR-mini (tentative) | next |
 | 4 | Terminal client | |
 | 5 | Determinization + ISMCTS | |
 | 6 | PPO self-play + league | |
@@ -49,7 +49,7 @@ on one thread (126.9 before Phase 3.2), and `VecEnv` -- one call per batch, buff
 written in place -- runs observe + mask + step at **~980,000 env-steps/s** over 1024 USA 2P
 games (`ttr bench --suite vecenv`).
 
-On an M2 Max. 410 Rust tests and 133 Python tests; ttr-core line coverage 96%.
+On an M2 Max. 411 Rust tests and 146 Python tests; ttr-core line coverage 96%.
 
 Five scripted agents, H0–H4, rated over 10,000 paired games in 12.6 s. **H3 is the permanent
 Elo zero**, and its identity is a hash of what it *plays* over a frozen probe set rather than
@@ -106,6 +106,22 @@ print(state.final_scores())
 
 Batched play for training is `VecEnv`, which writes observations and masks for every
 environment into caller-owned buffers in one call.
+
+### On Modal
+
+```bash
+uv sync --group cloud                       # the Modal client; `modal token new` once
+uv run ttr cloud bench --suite engine       # any ttr command, in a container, results pulled
+uv run ttr cloud arena --agents h1,h2,h3 --blocks 100 --check-local
+uv run ttr cloud run --cpu 16 -- arena --agents h3,h4 --blocks 2000
+uv run ttr cloud pull                       # fetch any jobs not yet pulled
+```
+
+`infra/modal_app.py` builds the engine into a Linux image and runs each command in its
+own directory on a `ttr-runs` Volume; arenas come back as their own databases and are
+merged into `runs/results.db`. `--check-local` replays the arena here and requires every
+game to match -- Linux x86 and macOS ARM agree game for game (12,800 games checked).
+Credentials stay in `~/.modal.toml`.
 
 ## Layout
 

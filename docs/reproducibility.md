@@ -9,6 +9,14 @@ Every run records which level it achieved.
 | **L1 — Rerun** | Bitwise, given the same seed + `Cargo.lock` + `uv.lock` + git sha | Engine, heuristics and (from Phase 5) search | `properties::the_same_seed_replays_bitwise` runs a seed twice and diffs the action logs |
 | **L2 — Statistical** | Same distribution, same curve within noise | Neural-network training | Not bitwise, and not claimed to be |
 
+## L1 across machines
+
+The engine and the heuristics are integer and deterministic-by-construction code, so L1
+holds across platforms, not only across runs: an arena on a Modal container (Linux x86,
+under gVisor) reproduces the same arena on an M2 Max (macOS ARM) game for game -- final
+state hash, scores and ranks, seat by seat. Checked by `ttr cloud arena --check-local`
+over 12,800 games across USA 2P and 4P (Phase 3.3), and re-checkable with any arena.
+
 ## Why L2 is not L1
 
 Neural-network training on MPS is not bitwise reproducible across torch versions, and often
