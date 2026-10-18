@@ -259,6 +259,17 @@ fn h5_beats_h4() {
     assert!(h5 > 0.0, "usa: H5 lost to H4 by {h5:+.3}");
 }
 
+#[test]
+fn h6_beats_h5() {
+    // H6 chooses the network its tickets need by the points its routes score, not by its
+    // cars alone. Measured: +177 Elo over H5 at USA 2P, +45 on mini 2P, +160 at USA 4P
+    // (docs/WORKLOG.md, "H6").
+    for map in ["usa", "mini"] {
+        let h6 = paired(map, 2, Tier::H6, Tier::H5, 30);
+        assert!(h6 > 0.0, "{map}: H6 lost to H5 by {h6:+.3}");
+    }
+}
+
 // ---------------------------------------------------------------------------
 // What H3 learned from losing 4-123
 // ---------------------------------------------------------------------------
@@ -399,7 +410,7 @@ fn the_h3_anchor_has_not_moved() {
 /// this is the check that they did. Unlike [`H3_ANCHOR`] these are not the rating scale's
 /// zero -- a deliberate change to H0-H2 or H4 updates its literal here and is noted in the
 /// worklog, since it makes a new agent in every store -- but none may move by accident.
-const BEHAVIOUR_HASHES: [(Tier, &str); 6] = [
+const BEHAVIOUR_HASHES: [(Tier, &str); 7] = [
     (Tier::H0, "5c62d98faf15e624e3248a25c9a1f85a"),
     (Tier::H1, "2cd429112540266c66d055eab0040d79"),
     (Tier::H2, "f7411becf76b49abe316f7fe8a157de4"),
@@ -408,6 +419,7 @@ const BEHAVIOUR_HASHES: [(Tier, &str); 6] = [
     // they take from the plan.
     (Tier::H4, "3099a56f772c213325a2197df3857d69"),
     (Tier::H5, "8c917c3fb99338efb0307b871c1a52bf"),
+    (Tier::H6, "0a0c63864a967ae1de97ab452264e482"),
 ];
 
 #[test]
@@ -747,4 +759,52 @@ fn late_in_the_game_h5_plans_the_network_its_hand_can_pay_for() {
     );
     assert_eq!(g.space.decode_claim(e.chosen).0, calgary);
     assert!(e.candidates[0].facts.contains(&("on_plan", 1.0)));
+}
+
+// ---------------------------------------------------------------------------
+// What H6 learned: a network is worth the points its routes score
+// ---------------------------------------------------------------------------
+
+/// H6 (seat 0) against H5, USA 2P, early in the game: H5's plan reaches Miami through
+/// Charleston, H6's takes Atlanta-Miami, five blue cars for 10 points.
+const POINTS_SEED: u64 = 10_200_003;
+#[rustfmt::skip]
+const POINTS_PREFIX: [u16; 23] = [
+    909, 912, 490, 900, 24, 598, 900, 901, 900, 901, 901, 250, 903, 903, 905, 905, 903, 903,
+    603, 904, 905, 905, 905,
+];
+
+#[test]
+fn h6_plans_the_network_whose_routes_score() {
+    let g = game("usa", 2);
+    let mut state = g.new_initial_state(POINTS_SEED);
+    for &action in &POINTS_PREFIX {
+        state.step(action).unwrap();
+    }
+    assert_eq!(state.current_player(), 0);
+    let miami = route(g.board, "Atlanta", "Miami");
+    let params = HeuristicParams::default();
+    let on_plan = |e: &ttr_core::heuristic::Explanation| {
+        e.candidates
+            .iter()
+            .find(|c| c.action < g.space.claim_end && g.space.decode_claim(c.action).0 == miami)
+            .and_then(|c| {
+                c.facts
+                    .iter()
+                    .find(|(n, _)| *n == "on_plan")
+                    .map(|&(_, v)| v)
+            })
+    };
+
+    let mut h5 = Heuristic::new(Tier::H5, params, 0);
+    h5.begin_game(0, POINTS_SEED);
+    let e5 = h5.explain(&mut state.clone());
+    assert_eq!(on_plan(&e5), Some(0.0), "H5 now plans Atlanta-Miami itself");
+
+    let mut h6 = Heuristic::new(Tier::H6, params, 0);
+    h6.begin_game(0, POINTS_SEED);
+    let e6 = h6.explain(&mut state);
+    assert_eq!(on_plan(&e6), Some(1.0));
+    assert!(e6.chosen < g.space.claim_end);
+    assert_eq!(g.space.decode_claim(e6.chosen).0, miami);
 }

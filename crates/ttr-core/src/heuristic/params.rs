@@ -200,6 +200,14 @@ pub struct HeuristicParams {
     pub late_card_progress: f64,
     /// Train cars a draw is worth when choosing the plan, late in the game.
     pub late_card_weight: f64,
+
+    // -- H6: a plan built for points --------------------------------------
+    /// When choosing the plan's network, a free segment costs its cars less this many cars
+    /// for each point it scores beyond par -- the points a car the board's shortest routes
+    /// pay, one on both maps. Route points grow faster than length (a 6-car route scores
+    /// 15, two 3-car routes 8), so the network worth building is not the one with the
+    /// fewest cars. 0 = the fewest cars.
+    pub plan_route_value: f64,
 }
 
 impl Default for HeuristicParams {
@@ -252,6 +260,8 @@ impl Default for HeuristicParams {
             finished_train_cost: 0.0,
             late_card_progress: 0.7,
             late_card_weight: 0.5,
+
+            plan_route_value: 0.6,
         }
     }
 }
@@ -329,6 +339,7 @@ impl HeuristicParams {
         field!(finished_train_cost, Tier::H5);
         field!(late_card_progress, Tier::H5);
         field!(late_card_weight, Tier::H5);
+        field!(plan_route_value, Tier::H6);
         out
     }
 
@@ -412,6 +423,12 @@ impl HeuristicParams {
         }
         if self.completion_sharpness <= 0.0 {
             return Err("completion_sharpness must be positive".into());
+        }
+        if !(self.plan_route_value >= 0.0 && self.plan_route_value.is_finite()) {
+            return Err(format!(
+                "plan_route_value={} must be finite and at least 0 (0 = fewest cars)",
+                self.plan_route_value
+            ));
         }
         if !(self.plan_card_weight >= 0.0 && self.plan_card_weight.is_finite()) {
             return Err(format!(
@@ -573,6 +590,10 @@ mod tests {
             },
             HeuristicParams {
                 late_card_weight: 0.2,
+                ..base
+            },
+            HeuristicParams {
+                plan_route_value: 0.3,
                 ..base
             },
         ];

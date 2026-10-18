@@ -167,6 +167,11 @@ pub struct Plan {
     /// same board would come out the same, so it is not re-chosen.
     prices: Vec<u16>,
     priced_version: u32,
+    /// Cars of discount per point a free segment scores beyond `par` points a car, when
+    /// choosing the edge set ([`crate::heuristic::HeuristicParams::plan_route_value`]); 0
+    /// chooses the fewest cars.
+    route_value: f64,
+    par: f64,
 }
 
 impl Plan {
@@ -177,6 +182,19 @@ impl Plan {
     /// It never touches [`Plan::steiner_cost`], which stays the exact number of cars the
     /// tickets need: the train budget is cars whatever the cards say.
     pub fn build(state: &mut State, player: usize, card_weight: f64) -> Self {
+        Self::build_for_points(state, player, card_weight, 0.0)
+    }
+
+    /// [`Plan::build`], choosing the edge set with each free segment discounted by
+    /// `route_value` cars per point it scores beyond par -- the points a car the board's
+    /// shortest routes pay. [`Plan::steiner_cost`] is unchanged: still the fewest cars the
+    /// tickets could need, which the edge set may now exceed ([`Plan::edge_cars`]).
+    pub fn build_for_points(
+        state: &mut State,
+        player: usize,
+        card_weight: f64,
+        route_value: f64,
+    ) -> Self {
         let board = state.board;
         let doubles_locked = state.rules.doubles_locked;
         let n_segments = board.n_segments;
@@ -238,6 +256,8 @@ impl Plan {
             cards: Cards::default(),
             prices: Vec::new(),
             priced_version: 0,
+            route_value,
+            par: par_points_per_car(state.board),
         };
         if card_weight > 0.0 {
             plan.cards = Cards::of(state, player);
@@ -305,6 +325,17 @@ impl Plan {
     fn choose_segments(&mut self, state: &State) {
         let board = state.board;
         let prices = (self.card_weight > 0.0).then_some(self.prices.as_slice());
+        let rebates: Option<Vec<u16>> = (self.route_value > 0.0).then(|| {
+            (0..board.n_segments)
+                .map(|s| {
+                    let len = board.seg_len[s];
+                    let beyond_par =
+                        f64::from(board.route_points[len as usize]) - self.par * f64::from(len);
+                    (f64::from(WEIGHT_SCALE) * self.route_value * beyond_par.max(0.0)).round()
+                        as u16
+                })
+                .collect()
+        });
         self.segments = tree_segments(
             board,
             &state.seg_owner[..board.n_segments],
@@ -312,6 +343,7 @@ impl Plan {
             &self.terminals,
             state.rules.doubles_locked,
             prices,
+            rebates.as_deref(),
         );
         self.priced_version = state.board_version;
         self.need = [0; MAX_CARD_TYPES];
@@ -352,6 +384,14 @@ impl Plan {
 
     pub fn is_empty(&self) -> bool {
         self.segments.is_empty()
+    }
+
+    /// Train cars the planned edge set itself needs.
+    pub fn edge_cars(&self, board: &Board) -> u32 {
+        self.segments
+            .iter()
+            .map(|&s| u32::from(board.seg_len[s as usize]))
+            .sum()
     }
 
     pub fn contains(&self, segment: u16) -> bool {
@@ -420,6 +460,15 @@ impl Plan {
     }
 }
 
+/// The points a car the board's shortest-paying routes score: par for
+/// [`Plan::build_for_points`]. One on both maps, where a route of one or two cars pays a point
+/// a car.
+fn par_points_per_car(board: &Board) -> f64 {
+    (1..=usize::from(board.max_len))
+        .map(|len| f64::from(board.route_points[len]) / len as f64)
+        .fold(f64::INFINITY, f64::min)
+}
+
 fn own_segment_count(state: &State, player: u8) -> usize {
     state.seg_owner[..state.board.n_segments]
         .iter()
@@ -444,7 +493,15 @@ pub fn remaining_costs_dense(
     source: u8,
     doubles_locked: bool,
 ) -> Reach {
-    multi_source_costs(board, seg_owner, player, &[source], doubles_locked, None)
+    multi_source_costs(
+        board,
+        seg_owner,
+        player,
+        &[source],
+        doubles_locked,
+        None,
+        None,
+    )
 }
 
 /// Cars `player` still needs to reach each city from the nearest of `sources`. Owned track
@@ -456,7 +513,16 @@ pub fn costs_from(
     sources: &[u8],
     doubles_locked: bool,
 ) -> [u16; MAX_CITIES] {
-    multi_source_costs(board, seg_owner, player, sources, doubles_locked, None).dist
+    multi_source_costs(
+        board,
+        seg_owner,
+        player,
+        sources,
+        doubles_locked,
+        None,
+        None,
+    )
+    .dist
 }
 
 /// Cheapest cost from any of `sources` to each city. With `prices`, a free segment costs
@@ -469,6 +535,7 @@ fn multi_source_costs(
     sources: &[u8],
     doubles_locked: bool,
     prices: Option<&[u16]>,
+    rebates: Option<&[u16]>,
 ) -> Reach {
     let n = board.n_cities;
     let mut reach = Reach {
@@ -500,6 +567,10 @@ fn multi_source_costs(
             }
             let w = match prices {
                 Some(prices) if w > 0 => w * WEIGHT_SCALE + prices[segment as usize],
+                _ => w,
+            };
+            let w = match rebates {
+                Some(rebates) if w > 0 => w.saturating_sub(rebates[segment as usize]).max(1),
                 _ => w,
             };
             let nd = best + w;
@@ -535,6 +606,7 @@ fn tree_segments(
     terminals: &[u8],
     doubles_locked: bool,
     prices: Option<&[u16]>,
+    rebates: Option<&[u16]>,
 ) -> Vec<u16> {
     if terminals.len() < 2 {
         return Vec::new();
@@ -545,7 +617,15 @@ fn tree_segments(
     let mut chosen: Vec<u16> = Vec::new();
 
     while !pending.is_empty() {
-        let reach = multi_source_costs(board, &owner, player, &tree, doubles_locked, prices);
+        let reach = multi_source_costs(
+            board,
+            &owner,
+            player,
+            &tree,
+            doubles_locked,
+            prices,
+            rebates,
+        );
         // Nearest first, ties by city index so the plan is a function of the position and
         // not of iteration order -- the agents are deterministic and must stay that way.
         let Some((at, &target)) = pending
@@ -785,6 +865,43 @@ mod tests {
             let aware = Plan::build(&mut state, 0, 0.5);
             assert_eq!(blind.steiner_cost, aware.steiner_cost, "seed {seed}");
             assert_eq!(blind.terminals, aware.terminals, "seed {seed}");
+        }
+    }
+
+    #[test]
+    fn par_is_what_the_shortest_routes_pay_a_car() {
+        for map in ["usa", "mini"] {
+            assert_eq!(par_points_per_car(game(map, 2).board), 1.0, "{map}");
+        }
+    }
+
+    #[test]
+    fn a_plan_built_for_points_keeps_the_exact_cost_and_spends_cars_for_points() {
+        // The discount chooses *which* network; the fewest cars the tickets could need is
+        // still `steiner_cost`, and the network chosen may need more but never scores less.
+        let g = game("usa", 2);
+        let board = g.board;
+        let points = |plan: &Plan| -> u32 {
+            plan.segments
+                .iter()
+                .map(|&s| u32::from(board.route_points[board.seg_len[s as usize] as usize]))
+                .sum()
+        };
+        for seed in 0..20u64 {
+            let mut state = g.new_initial_state(seed);
+            let cars = Plan::build(&mut state, 0, 0.01);
+            let scored = Plan::build_for_points(&mut state, 0, 0.01, 0.6);
+            assert_eq!(cars.steiner_cost, scored.steiner_cost, "seed {seed}");
+            assert!(scored.edge_cars(board) >= cars.steiner_cost, "seed {seed}");
+            assert!(
+                points(&scored) >= points(&cars),
+                "seed {seed}: fewer points"
+            );
+            let same = Plan::build_for_points(&mut state, 0, 0.01, 0.0);
+            assert_eq!(
+                same.segments, cars.segments,
+                "seed {seed}: a zero discount differs"
+            );
         }
     }
 

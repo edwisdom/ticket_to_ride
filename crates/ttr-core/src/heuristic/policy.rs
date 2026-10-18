@@ -1,11 +1,11 @@
-//! H0-H5. One nested ladder, not six agents.
+//! H0-H6. One nested ladder, not seven agents.
 //!
 //! PLAN.md §7 defines the tiers as strict extensions -- H3 is H2 plus four things, H4 is H3
 //! plus a plan that keeps what it needs and opponent modelling, H5 is H4 plus tickets priced
-//! against its own network -- so they are written that way: one scoring function whose
-//! terms switch on [`Tier`]. Parallel implementations would let the tiers drift apart
-//! in ways that look like strength differences, which is precisely what the ladder is
-//! supposed to measure. H0 and H1 are the exceptions and are deliberately procedural: H0 is
+//! against its own network, H6 is H5 plus a plan built for points -- so they are written that
+//! way: one scoring function whose terms switch on [`Tier`]. Parallel implementations would
+//! let the tiers drift apart in ways that look like strength differences, which is precisely
+//! what the ladder is supposed to measure. H0 and H1 are the exceptions and are deliberately procedural: H0 is
 //! the uniform floor, and H1 is a shallow rule cascade that exists to be beaten.
 //!
 //! **Everything is scored in one currency: points.** Route points are points; a train car
@@ -60,11 +60,14 @@ pub enum Tier {
     /// race priced from both trails, free trains once its tickets are done, and late in the
     /// game a plan the hand can pay for.
     H5 = 5,
+    /// H5 + a plan built for points: among networks that serve its tickets, the one whose
+    /// routes score, since a 6-car route pays 15 and two 3-car routes 8.
+    H6 = 6,
 }
 
 impl Tier {
     pub fn name(self) -> &'static str {
-        ["h0", "h1", "h2", "h3", "h4", "h5"][self as usize]
+        ["h0", "h1", "h2", "h3", "h4", "h5", "h6"][self as usize]
     }
 
     pub fn parse(name: &str) -> Option<Self> {
@@ -75,11 +78,20 @@ impl Tier {
             "h3" => Some(Self::H3),
             "h4" => Some(Self::H4),
             "h5" => Some(Self::H5),
+            "h6" => Some(Self::H6),
             _ => None,
         }
     }
 
-    pub const ALL: [Tier; 6] = [Tier::H0, Tier::H1, Tier::H2, Tier::H3, Tier::H4, Tier::H5];
+    pub const ALL: [Tier; 7] = [
+        Tier::H0,
+        Tier::H1,
+        Tier::H2,
+        Tier::H3,
+        Tier::H4,
+        Tier::H5,
+        Tier::H6,
+    ];
 }
 
 // H1's rules, highest first. Within a rule an action's value ranks it, and every value
@@ -270,7 +282,11 @@ impl Heuristic {
             }
         }
         if !self.plan_ready || !self.plan.is_fresh(state, seat) {
-            self.plan = Plan::build(state, seat, card_weight);
+            self.plan = if self.tier >= Tier::H6 {
+                Plan::build_for_points(state, seat, card_weight, self.params.plan_route_value)
+            } else {
+                Plan::build(state, seat, card_weight)
+            };
             self.plan_ready = true;
         } else {
             self.plan.reweigh(state, card_weight);
@@ -644,7 +660,7 @@ impl Heuristic {
         let p = &self.params;
         let mut extra = 0.0;
         if p.plan_budget_weight > 0.0 {
-            let cost = f64::from(self.plan.steiner_cost);
+            let cost = f64::from(ctx.plan_cars);
             let trains = f64::from(state.trains[ctx.seat]);
             let before = p.completion_odds(cost, trains);
             let after = p.completion_odds(cost, trains - f64::from(length));
@@ -1089,7 +1105,7 @@ impl Heuristic {
         );
 
         let trains = f64::from(state.trains[seat]);
-        let plan_cost = f64::from(self.plan.steiner_cost);
+        let plan_cost = f64::from(ctx.plan_cars);
         let live = f64::from(self.plan.live_points);
         let odds_now = p.completion_odds(plan_cost, trains);
         let held = state.tickets[seat];
@@ -1316,6 +1332,8 @@ struct Ctx {
     affordable: Vec<u16>,
     /// H5+: every held ticket is done, so a train's only use left is points.
     finished: bool,
+    /// Train cars the plan needs, as the train budget prices it.
+    plan_cars: u32,
 }
 
 impl Ctx {
@@ -1408,7 +1426,11 @@ impl Ctx {
                         .unwrap_or(0),
                 ) / supply,
             endgame: f64::from(trains) < params.endgame_train_fraction * supply,
-            plan_completable: plan.steiner_cost <= trains,
+            plan_completable: if tier >= Tier::H6 {
+                plan.steiner_cost.max(plan.edge_cars(board)) <= trains
+            } else {
+                plan.steiner_cost <= trains
+            },
             // Every seat gets exactly one turn once the final round starts, so whoever is to
             // move is on their last. Knowing it is H3's; H2 plays its last turn like any other.
             final_turn: tier >= Tier::H3 && state.final_left != NOT_TRIGGERED,
@@ -1416,12 +1438,22 @@ impl Ctx {
             locomotive_value: params.locomotive_value,
             affordable,
             finished: tier >= Tier::H5 && plan.live_points == 0 && plan.dead_tickets.is_empty(),
+            // H6 plans for points, so its network can need more cars than the fewest the
+            // tickets could; the train budget is what the network it means to build needs.
+            plan_cars: if tier >= Tier::H6 {
+                plan.steiner_cost.max(plan.edge_cars(board))
+            } else {
+                plan.steiner_cost
+            },
         }
     }
 
     /// The decision-wide quantities behind every candidate's terms, for a trace.
     fn report<S: Sink>(&self, plan: &Plan, state: &State, sink: &mut S) {
         sink.context("plan_cost", f64::from(plan.steiner_cost));
+        if self.plan_cars != plan.steiner_cost {
+            sink.context("plan_cars", f64::from(self.plan_cars));
+        }
         sink.context("plan_points", f64::from(plan.live_points));
         sink.context("plan_segments", plan.segments.len() as f64);
         sink.context("unreachable_tickets", plan.dead_tickets.len() as f64);

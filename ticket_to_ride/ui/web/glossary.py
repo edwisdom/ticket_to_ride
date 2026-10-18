@@ -83,6 +83,8 @@ FACTS = {
 #: Quantities of the whole decision.
 CONTEXT = {
     "plan_cost": "Train cars still needed to connect every held ticket.",
+    "plan_cars": "H6: train cars the network it plans needs, which can exceed the fewest "
+    "because it prefers routes that score.",
     "plan_points": "Points riding on the held tickets still open and reachable.",
     "plan_segments": "Unclaimed segments on the planned network.",
     "unreachable_tickets": "Held tickets no route can complete any more.",

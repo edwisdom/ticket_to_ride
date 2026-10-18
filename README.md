@@ -17,7 +17,7 @@ training reinforcement learning agents against it via self-play.
 | 3.2 | Rust performance (observation encoder) | done |
 | 3.3 | Modal cloud runs | done |
 | 3.4 | PPO spike on TTR-mini (tentative) | done |
-| 4 | Web client: play the heuristics in a browser | built (4.1-4.3); your games against H3-H5 next |
+| 4 | Web client: play the heuristics in a browser | built (4.1-4.3); your games against H3-H6 next |
 | 5 | Determinization + ISMCTS | |
 | 6 | PPO self-play + league | |
 | 7 | ISMCTS + learned priors | |
@@ -49,7 +49,7 @@ games (`ttr bench --suite vecenv`).
 On an M2 Max. 366 Rust tests (and 7 `#[ignore]`d sweeps) and 195 Python tests; ttr-core line
 coverage 96%.
 
-Six scripted agents, H0–H5, rated over 15,000 paired games in a few seconds. **H3 is the
+Seven scripted agents, H0–H6, rated over 21,000 paired games in a few seconds. **H3 is the
 Elo anchor, fixed at 1500**, which puts random play near the bottom of a chess-like scale.
 Its identity is a hash of what it *plays* over a frozen probe set rather than of its
 constants — a params hash would leave a reordered tiebreak or a fixed bug free to move
@@ -61,16 +61,17 @@ H4's off-plan claims pay for the trains and cards they take from its plan. H5 pr
 ticket draw against its own network, so it draws tickets late, when they are cheap; it also
 races for the longest route against the longest trail on the board, spends its trains on
 points once its tickets are done, and late in the game plans the network its hand can pay
-for.
+for. H6 chooses its network by the points its routes score, not by its cars alone.
 
 | agent | usa 2P | mini 2P | usa 4P | µs/decision (usa 2P) |
 | --- | --- | --- | --- | --- |
-| h5 | 1693 [1677, 1713] | 1548 [1531, 1566] | 1624 [1618, 1631] | 26.7 |
-| h4 | 1598 [1584, 1612] | 1532 [1517, 1548] | 1564 [1559, 1569] | 25.5 |
-| **h3** | **1500** (anchor) | **1500** | **1500** | 18.0 |
-| h2 | 1329 [1311, 1347] | 1364 [1346, 1383] | 1352 [1344, 1358] | 11.4 |
-| h1 | 691 [632, 744] | 925 [889, 955] | 694 [674, 711] | 0.2 |
-| h0 | 141 [63, 209] | 655 [610, 696] | 180 [156, 202] | 0.2 |
+| h6 | 1869 [1849, 1889] | 1608 [1587, 1629] | 1779 [1771, 1785] | 25.4 |
+| h5 | 1688 [1672, 1706] | 1552 [1536, 1569] | 1614 [1609, 1619] | 26.8 |
+| h4 | 1592 [1578, 1607] | 1536 [1522, 1550] | 1559 [1556, 1564] | 25.7 |
+| **h3** | **1500** (anchor) | **1500** | **1500** | 18.1 |
+| h2 | 1324 [1307, 1340] | 1363 [1344, 1380] | 1348 [1342, 1354] | 11.5 |
+| h1 | 684 [623, 735] | 929 [895, 958] | 746 [732, 759] | 0.2 |
+| h0 | 133 [57, 201] | 656 [617, 695] | 253 [233, 273] | 0.2 |
 
 Bradley–Terry MLE, 95% intervals from a bootstrap that resamples **seed blocks** rather than
 games — games inside a block share a deck, and treating them as independent inflates
@@ -104,7 +105,7 @@ only — half a block is one seating.
 ### Playing the heuristics
 
 `ttr serve` is the game server ([docs/WEB_PROTOCOL.md](docs/WEB_PROTOCOL.md)): play any of
-H0-H5 on either map, watch two of them play with every hand and each decision's reasoning on
+H0-H6 on either map, watch two of them play with every hand and each decision's reasoning on
 screen, and review a finished game move by move with each bot decision's candidates broken
 down by term. The browser never holds hidden information -- no seed, no deck, nothing of an
 opponent's hand beyond what is public -- and every game is recorded in `runs/play.db`, from
@@ -185,7 +186,7 @@ web/          the browser client: Svelte + TypeScript, built by Vite into ui/web
 tools/        gen_board.py: RULES.md -> the engine's board data; gen_protocol.py: the web
               schema; gen_layout.py: the board's layout and basemap for the client
 crates/
-  ttr-core/   the engine, the observation encoder, H0-H5 -- pure Rust, standalone `cargo test`
+  ttr-core/   the engine, the observation encoder, H0-H6 -- pure Rust, standalone `cargo test`
   ttr-py/     thin PyO3 shim (`ttr_rust`); contains no game logic
   ttr-tools/  never shipped: the golden corpus (format, generator, checker) and bench-obs
 tests/golden/ the golden corpus

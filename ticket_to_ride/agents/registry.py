@@ -58,6 +58,8 @@ DESCRIPTIONS = {
     "h5": "H4 plus tickets priced against its own network: early tickets are expensive and "
     "late ones nearly free, so it draws them late, when its network already reaches them. "
     "It also races for the longest route, against the longest trail on the board.",
+    "h6": "H5 plus a network built for points: among the routes that would serve its "
+    "tickets it prefers the long ones, which score far more per car.",
 }
 
 

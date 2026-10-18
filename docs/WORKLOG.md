@@ -5,6 +5,71 @@ session. Decisions that deviate from [PLAN.md](PLAN.md) belong here, with the re
 
 ---
 
+## 2026-10-18 — H6: a network is worth the points its routes score
+
+**H6 is a new tier**: H5, plus a plan that chooses its network by the points its routes
+score. SPRT at `--elo1 30` accepted it over H5 at USA 2P (observed score 0.725), and
+`--elo1 10` accepted it on mini 2P and at USA 4P. Fixed-size estimates over 10,000 games
+(seed root 101,000,000):
+
+| | usa 2P | mini 2P | usa 4P |
+| --- | --- | --- | --- |
+| H6 vs H5 | **+177 [+170, +184]** | +45 [+38, +51] | +160 [+155, +166] |
+| H6 vs H4 | +269 [+260, +278] | +76 [+70, +83] | +210 [+204, +216] |
+| H6 vs H3 | +332 [+323, +343] | +108 [+101, +115] | +279 [+272, +286] |
+
+It costs 25.4 µs a decision at USA 2P, no more than H5.
+
+### Round 6, before it
+
+Round 6 started from the H5 with the late plan. Late-plan stalls fell from 227 to 87 losses
+in 2,000 games against H4, and in about 80% of H5's remaining losses H4 ends the game while
+H5's tickets are open. At that moment H5's plan is usually one segment short (278 of 444
+cases), with 11.8 cards and 8 trains in hand but not the colour it needs. Three ideas did
+nothing:
+
+- Banking tickets near the end, a bonus for a claim that completes one once the opponent is
+  low on trains, measured +0.5 to +2.8. The convex plan value already favours nearly-done
+  tickets.
+- Steeper or later late-card schedules lost: −7 to −21 against weight 0.5 from 70% of the
+  game.
+- Re-tuning H5's own weights (race, budget, card spend, locomotive value) did nothing,
+  within ±5. Opponents raise H5's ticket costs only 0.73 times a game, by about 3 cars, so
+  there is little to gain from ordering claims around them.
+
+Then one idea H5 does not have: plan for points.
+
+### What changed (H6 only)
+
+`plan_route_value` (0.6). When the plan chooses its network, each free segment costs its
+cars less 0.6 cars for every point it scores beyond par. Par is the points a car the board's
+shortest routes pay, 1 on both maps, computed from the board. A 6-car route (15 points)
+plans at 0.6 cars, a 5-car route at 2, a 4-car route at 2.2 and a 3-car route at 2.4;
+routes of 1 and 2 cars cost their length.
+Until now every tier chose the network with the fewest cars, so a ticket was connected
+through whatever short routes made the shortest path. Route points grow much faster than
+length, though, and the train supply is spent by the end either way, so the network worth
+building is the one whose routes score. `steiner_cost` stays the fewest cars the tickets
+could need. H6 prices its train budget by the cars of the network it actually plans
+(`Plan::edge_cars`), which averaged 2.9 cars more than the minimum (13.0) in 75% of
+decisions. Pricing the budget that way was worth +7 [+1, +13] on top.
+
+Against H5, H6 scores 22 more route points a game (79 vs 56) and holds the longest route
+twice as often (7.6 vs 3.8 bonus points). It gives back 11 ticket points, claims fewer and
+longer routes (13.7 vs 15.9), and uses its trains (0.7 left vs 4.3), so it ends games H5
+has not finished.
+
+### Measured and dropped
+
+- **The discount's shape.** Measured from H3's `min_points_per_train` (1.4) as the
+  baseline, weights 0.1, 0.2, 0.4 and 0.8 read +44, +58, +81 and +163 against H5, with the
+  peak at 0.8. Beyond that, 1.2 read +125, 1.6 +69, 2.5 −90, and 4.0 −68. Measured from par
+  (1.0) instead, 0.6 was best twice (+172, +168), against +121 to +139 for 0.4-0.8. The
+  surface is bumpy, because how cheap a 6-car route becomes matters a great deal.
+  Measured from the board's own par it needs one constant, not two.
+
+---
+
 ## 2026-10-18 — Late in the game H5 plans by its hand; blocking is not worth it even with perfect sight
 
 Round 5 started from the H5 that spends its trains once its tickets are done. One smaller
