@@ -1,0 +1,98 @@
+# Board layout of the USA map: where the client draws each city and route.
+#
+# Cities sit at their real latitude and longitude (public factual data), projected by the
+# Lambert conformal conic below and fitted inside the frame's margins. Then, all optional:
+#
+#   nudge  = [dx, dy]   moves a city by board units after projection, where a cluster would
+#                       crowd its routes; cosmetic, never more than a city's neighbourhood
+#   label  = "ne"       the plaque's side of the dot, a compass point; ["ne", [dx, dy]] adds
+#                       a tweak in board units
+#
+# `bends` bow a route into an arc where a straight chain of car spaces would cross a city or
+# squeeze its cars: [from, to, sagitta / chord], positive to the left of from -> to on the page.
+#
+# UI data only, outside DATA_HASH. tools/gen_layout.py turns it into usa.json: run
+# `make layout` after editing. Mini's layout takes its coordinates from this file.
+schema = 1
+map = "usa"
+# The frame: score-track squares along the width and the height (100 in all).
+squares = [31, 21]
+# Scales for the cars and dots, and for the plaques, for a map drawn larger or smaller.
+drawing = 1.0
+lettering = 1.0
+# Room inside the frame around the outermost cities, for their plaques: top, right, bottom, left.
+margin = [34, 70, 40, 46]
+
+[projection]
+center = [39.0, -96.0]
+parallels = [33.0, 45.0]
+
+[cities]
+"Atlanta" = { at = [33.749, -84.388], nudge = [-12, -12], label = ["w", [-18, -3]] }
+"Boston" = { at = [42.36, -71.059], nudge = [0, -24], label = "e" }
+"Calgary" = { at = [51.045, -114.072], nudge = [0, -12], label = ["n", [0, 6]] }
+"Charleston" = { at = [32.777, -79.931], label = "e" }
+"Chicago" = { at = [41.878, -87.63], nudge = [-6, 0], label = ["n", [-3, -18]] }
+"Dallas" = { at = [32.777, -96.797], nudge = [6, 24], label = ["sw", [-6, 0]] }
+"Denver" = { at = [39.739, -104.99], nudge = [0, 6], label = "s" }
+"Duluth" = { at = [46.787, -92.1], nudge = [-6, 18], label = ["s", [6, 0]] }
+"El Paso" = { at = [31.762, -106.485], label = "s" }
+"Helena" = { at = [46.589, -112.039], nudge = [6, 6], label = ["se", [0, -6]] }
+"Houston" = { at = [29.76, -95.37], label = "s" }
+"Kansas City" = { at = [39.1, -94.579], label = ["ne", [0, -6]] }
+"Las Vegas" = { at = [36.17, -115.14], label = "se" }
+"Little Rock" = { at = [34.746, -92.29], label = "se" }
+"Los Angeles" = { at = [34.052, -118.244], label = "sw" }
+"Miami" = { at = [25.762, -80.192], label = "ne" }
+"Montreal" = { at = [45.502, -73.567], nudge = [0, -12], label = "n" }
+"Nashville" = { at = [36.163, -86.781], label = ["s", [-15, 21]] }
+"New Orleans" = { at = [29.951, -90.072], label = ["sw", [0, 12]] }
+"New York" = { at = [40.713, -74.006], nudge = [-18, -12], label = ["e", [0, 6]] }
+"Oklahoma City" = { at = [35.468, -97.516], label = ["e", [24, -12]] }
+"Omaha" = { at = [41.257, -95.935], nudge = [0, -6], label = "w" }
+"Phoenix" = { at = [33.448, -112.074], label = ["sw", [12, 0]] }
+"Pittsburgh" = { at = [40.441, -79.996], nudge = [-18, 0], label = ["nw", [0, -21]] }
+"Portland" = { at = [45.515, -122.679], label = "w" }
+"Raleigh" = { at = [35.78, -78.639], nudge = [-6, -6], label = "e" }
+"Saint Louis" = { at = [38.627, -90.199], nudge = [-12, 12], label = ["sw", [-12, 6]] }
+"Salt Lake City" = { at = [40.761, -111.891], label = ["ne", [0, -3]] }
+"San Francisco" = { at = [37.775, -122.419], label = ["se", [27, 6]] }
+"Santa Fe" = { at = [35.687, -105.938], label = "nw" }
+"Sault St. Marie" = { at = [46.495, -84.345], label = ["ne", [0, -12]] }
+"Seattle" = { at = [47.606, -122.332], nudge = [0, 6], label = ["w", [0, -6]] }
+"Toronto" = { at = [43.653, -79.383], nudge = [12, 0], label = "se" }
+"Vancouver" = { at = [49.283, -123.121], label = "w" }
+"Washington" = { at = [38.907, -77.037], nudge = [12, 6], label = ["se", [6, 0]] }
+"Winnipeg" = { at = [49.895, -97.138], nudge = [-18, -12], label = "ne" }
+
+[routes]
+# [from, to, sagitta / chord]
+bends = [
+  ["Calgary", "Winnipeg", -0.06],
+  ["Chicago", "Duluth", 0.12],
+  ["Chicago", "Toronto", 0.06],
+  ["Denver", "Omaha", 0.12],
+  ["Denver", "Santa Fe", -0.06],
+  ["Duluth", "Helena", 0.06],
+  ["Duluth", "Winnipeg", 0.06],
+  ["El Paso", "Los Angeles", 0.12],
+  ["Helena", "Salt Lake City", -0.06],
+  ["Helena", "Seattle", 0.18],
+  ["Little Rock", "New Orleans", -0.12],
+  ["Montreal", "New York", -0.06],
+  ["New York", "Washington", 0.24],
+  ["Pittsburgh", "Raleigh", -0.06],
+  ["Pittsburgh", "Washington", -0.06],
+  ["Portland", "Seattle", 0.06],
+  ["Sault St. Marie", "Winnipeg", -0.06],
+]
+
+# Decorations, in board units: the compass rose's centre and radius, the route-points
+# legend's top-left corner and scale, and lettering on the water [text, x, y, size, degrees].
+[decor]
+compass = [1442, 872, 50]
+legend = [62, 846, 1.0]
+water = [
+  ["Atlantic Ocean", 1474, 640, 18, -80],
+  ["Gulf of Mexico", 1040, 978, 20, 0],
+]

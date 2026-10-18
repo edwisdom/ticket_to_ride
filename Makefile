@@ -1,4 +1,4 @@
-.PHONY: setup fmt lint type test test-all cov bench bench-check board vectors tb clean clean-rust help \
+.PHONY: setup fmt lint type test test-all cov bench bench-check board layout vectors tb clean clean-rust help \
         rust-fmt rust-lint rust-test rust-sweep rust-cov mutants
 
 help:
@@ -65,6 +65,9 @@ bench-check:  ## Fail if throughput regressed >20% vs the saved baseline (M2, id
 
 board:  ## Regenerate the board data (RULES.md -> usa.toml, board_gen.rs)
 	uv run python tools/gen_board.py
+
+layout:  ## Regenerate the board layouts the client draws (data/layout/*.toml -> *.json)
+	uv run python tools/gen_layout.py
 
 corpus:  ## Verify the golden corpus, every game
 	cargo run -q --release -p ttr-tools --bin gen-corpus -- --check

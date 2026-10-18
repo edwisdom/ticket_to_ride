@@ -1,0 +1,51 @@
+# Board layout of TTR-mini. Same keys as usa.toml, which documents them; the cities are a
+# subset of the USA map's and take their coordinates (`at`) from it.
+#
+# UI data only, outside DATA_HASH. tools/gen_layout.py turns it into mini.json: run
+# `make layout` after editing.
+schema = 1
+map = "mini"
+squares = [26, 26]
+# Mini is drawn at a larger scale than the USA map, so its cars and dots are scaled to match,
+# and its plaques a little less.
+drawing = 1.6
+lettering = 1.3
+margin = [34, 70, 40, 70]
+
+[projection]
+center = [41.0, -110.0]
+parallels = [35.0, 47.0]
+
+[cities]
+"Calgary" = { nudge = [0, -12], label = ["w", [0, -6]] }
+"Denver" = { label = "e" }
+"El Paso" = { nudge = [-6, -6], label = "s" }
+"Helena" = { label = ["e", [0, 6]] }
+"Las Vegas" = { label = "se" }
+"Los Angeles" = { label = "sw" }
+"Phoenix" = { label = "sw" }
+"Portland" = { label = "w" }
+"Salt Lake City" = { label = ["ne", [0, -12]] }
+"San Francisco" = { label = "n" }
+"Santa Fe" = { label = "e" }
+"Seattle" = { label = "w" }
+"Vancouver" = { label = "w" }
+"Winnipeg" = { label = "n" }
+
+[routes]
+# [from, to, sagitta / chord]
+bends = [
+  ["Helena", "Winnipeg", 0.06],
+  ["Los Angeles", "El Paso", -0.12],
+  ["Portland", "Salt Lake City", 0.12],
+  ["Salt Lake City", "Las Vegas", -0.06],
+  ["San Francisco", "Salt Lake City", 0.14],
+  ["Seattle", "Helena", -0.06],
+]
+
+[decor]
+compass = [1120, 600, 80]
+legend = [1012, 1002, 1.3]
+water = [
+  ["Pacific Ocean", 70, 640, 20, -90],
+]
