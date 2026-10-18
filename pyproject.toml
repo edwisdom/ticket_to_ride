@@ -13,6 +13,7 @@ dependencies = [
     # The engine. A workspace member (crates/ttr-py), built by `uv sync` -- see [tool.uv]
     # below for why its cache keys list the Rust sources.
     "ttr-rust",
+    "modal>=1.6.2"
 ]
 
 [project.optional-dependencies]
