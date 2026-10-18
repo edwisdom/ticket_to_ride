@@ -32,7 +32,7 @@ use std::sync::{Mutex, OnceLock};
 
 use crate::actions::BLIND_SLOT;
 use crate::config::RuleConfig;
-use crate::hashing::{blake2b_128_state, hash128_hex};
+use crate::hashing::blake2b_128_state;
 use crate::heuristic::params::HeuristicParams;
 use crate::heuristic::policy::{Heuristic, Tier};
 use crate::state::Game;
@@ -60,7 +60,7 @@ pub fn probe_configs() -> &'static [(&'static str, usize, u64)] {
 /// a couple of hundred milliseconds of real games.
 pub fn behaviour_hash(tier: Tier, params: &HeuristicParams) -> String {
     static CACHE: OnceLock<Mutex<HashMap<(Tier, String), String>>> = OnceLock::new();
-    let key = (tier, params.params_hash());
+    let key = (tier, params.params_hash(tier));
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     if let Some(hit) = cache.lock().expect("probe cache").get(&key) {
         return hit.clone();
@@ -272,12 +272,6 @@ pub fn coverage(
         total.games += 1;
     }
     total
-}
-
-/// A short provenance string for a parameter set: `"<params_hash>"`. Recorded next to every
-/// rating so a tuned agent is traceable to the numbers it ran with.
-pub fn params_hash(params: &HeuristicParams) -> String {
-    hash128_hex(params.canonical().as_bytes())
 }
 
 #[cfg(test)]

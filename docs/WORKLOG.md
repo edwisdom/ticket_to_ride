@@ -5,6 +5,82 @@ session. Decisions that deviate from [PLAN.md](PLAN.md) belong here, with the re
 
 ---
 
+## 2026-10-18 — H4: off-plan claims pay for what they take
+
+**H4 now beats H3**: +81 Elo [+75, +87] at USA 2P, +43 [+37, +49] on mini 2P and +77
+[+73, +81] at USA 4P, over 10,000 games each (seed root 21,000,000, every rotation; at 4P one
+H4 against three H3s). The old H4 scored +4, +14 and +1 in the same games. `ttr arena
+--sprt h4,h3 --elo1 30` accepted after 100 blocks at USA 2P, and `--elo1 10` accepted on
+mini 2P and at USA 4P. This is the first step of a ladder of stronger scripted bots for
+Phases 5 and 6.
+
+### What the losses said
+
+From 1,000 H3 self-play games at USA 2P, tickets decide games. Losing seats keep as many
+tickets as winners (4.8) and miss 1.2 of them, 16.6 points or a 33-point swing; 64% of
+losing seats miss one, against 20% of winners. Blocked (unreachable) tickets are rare, at
+1%. The misses are close, a median of 5 cars short. 68% of losses go to the seat that did
+not end the game, which finishes with 3.4 trains and 9.9 cards.
+
+Stepping through losses with `explain` turned up two habits. Counting them:
+
+- **Off-plan claims that eat the plan's trains.** H3 charges every car a flat 1.4 points.
+  Over 600 games, 25% of seats made an off-plan claim that left fewer trains than their
+  plan still needed. They won 30% of games against 57% for the rest, and 99% of the losers
+  among them missed a ticket. In seed 7,000,000, two tickets worth 39 needed 12 more cars
+  with 24 trains left. H3 spent 17 of those trains on routes no ticket used, each of which
+  out-scored a blind draw on route points alone, and lost 39-137.
+- **Off-plan claims that spend the plan's cards.** Gray cannibalization covered only gray
+  routes. In seed 7,000,009, H3 held five blacks, one short of the 6-black El Paso-Los
+  Angeles that would finish two tickets worth 37, and spent all five on Montreal-Sault
+  St. Marie.
+
+### What changed (H4 only)
+
+- `plan_budget_weight` (1.0): an off-plan claim is charged the expected ticket settlement
+  its trains cost the plan, under `completion_odds`, the model the ticket decisions already
+  use: `2 × live points × (odds(plan cost, trains) − odds(plan cost, trains − cars))`. That
+  is nearly nothing with trains to spare and dominant once they run short.
+- `plan_card_spend_weight` (1.0): it is also charged the cards it spends that the plan
+  would have used, meaning the increase in the plan's card shortfall with locomotives and
+  gray demand included, at one car of plan progress each.
+
+### Measured, kept and dropped
+
+- **The weight hardly matters.** Budget weights 0.5, 1, 2 and 3 were all within noise (+84
+  to +90 in one round robin). The term's job is to stop off-plan claims while the plan is
+  tight, not to rank them finely. It is kept at 1.0, the completion model's own rate.
+- **The card term alone is +50.** On top of the train term it adds +4.3 [+2.7, +5.9] at
+  USA 2P and is neutral on mini 2P (−0.5) and at USA 4P. It is kept: it is the same idea,
+  and USA 2P is where the web game is played.
+- **H4's opponent modelling still pays a little.** On top of the budget it adds +4 at USA
+  2P (50.6% head-to-head over 10,000 games), +10 on mini 2P, and nothing at USA 4P. It is
+  kept.
+- **Cost**: 23.6 µs a decision at USA 2P (old H4 22.6, H3 16.6), 25.2 at 4P, 2.7 on mini.
+
+### Consequences
+
+- **`params_hash` is tier-aware.** It is part of an agent's key in both stores, and adding a
+  field moved every tier's hash, H3's included. That would have orphaned every game and
+  rating recorded against the anchor; `ttr serve` refuses to replay such a game. Under
+  `PARAMS_VERSION` 3, a tier's canonical text carries version 2's fields plus only the later
+  fields it reads. H0-H3 keep `17df54a5…`, H4 becomes `0d41ae8d…`, and `ttr_rust.params_hash`
+  now takes the tier.
+- H4's behaviour hash moves from `c8846dd9` to `3099a56f`. The probe set cannot tell a
+  card weight of 0 from 1 while the train term is on, because its 20 games never reach a
+  position where the card term decides. The two still differ by `params_hash`, and in 10% of
+  arena games.
+- **`ttr arena --sprt` works above two seats.** The challenger takes one seat and the
+  incumbent the rest, and a game scores the challenger's pairwise results against the
+  incumbent seats. At 2P that is the same score as a head-to-head.
+- The README ratings are refreshed (default arena, seed root 0): H4 reads 1593 / 1531 /
+  1568, with a cost column added.
+- Tests: `h4_beats_h3` replaces `h4_is_not_worse_than_h3`; the two reviewed positions are
+  regression tests; and `fields_added_for_one_tier_leave_the_others_hashes_alone` covers the
+  hash rule.
+
+---
+
 ## 2026-10-18 — CI cut to one end-to-end job
 
 At the user's request, so keeping CI green does not slow agents down this early. CI had

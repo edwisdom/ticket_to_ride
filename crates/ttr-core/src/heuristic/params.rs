@@ -25,19 +25,28 @@
 use std::fmt::Write as _;
 
 use crate::hashing::hash128_hex;
+use crate::heuristic::policy::Tier;
 
 /// Bumped when a field is added, removed or renamed -- i.e. when a stored parameter set
 /// from an older build can no longer be interpreted. Editing a *value* does not bump this;
 /// that shows up in [`HeuristicParams::params_hash`] instead.
-pub const PARAMS_VERSION: u32 = 2;
+///
+/// Version 3 added the first fields only some tiers read, and with them the rule in
+/// [`HeuristicParams::canonical`]: a tier's canonical text carries version 2's fields and
+/// only the later fields it reads, so H0-H3 hash exactly as they did under version 2.
+pub const PARAMS_VERSION: u32 = 3;
+
+/// The version whose field list every tier's canonical text carries, and its prefix.
+const BASE_VERSION: u32 = 2;
 
 /// Every constant H1-H4 consult.
 ///
 /// One struct rather than one per tier, because the tiers share machinery and splitting the
 /// constants would mean keeping several copies of "how much is a train worth" in step. The
-/// objection -- that retuning an H4-only field then moves H3's `params_hash` -- does not
-/// bite, because agent *identity* is the behaviour hash, and H4's fields do not change what
-/// H3 plays. `params_hash` is provenance; behaviour is identity.
+/// objection -- that a field added for H4 then moves H3's `params_hash` -- is met in
+/// [`HeuristicParams::canonical`]: a field added after version 2 reaches only the hashes of
+/// the tiers that read it. That matters because `params_hash` is part of an agent's key in
+/// both stores, so moving H3's would orphan every game and rating recorded against it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct HeuristicParams {
     // -- ticket appetite (H1+) ------------------------------------------
@@ -155,6 +164,15 @@ pub struct HeuristicParams {
     /// In 2-3P, grab a contested double-route half this many turns earlier than value alone
     /// would justify, because claiming it closes the pair to everyone.
     pub double_grab_urgency: f64,
+
+    // -- H4: what an off-plan claim takes from the plan -------------------
+    /// Weight on the trains an off-plan claim takes from the plan, priced as the expected
+    /// ticket settlement they cost under [`Self::completion_odds`]. 0 leaves only H3's flat
+    /// [`Self::min_points_per_train`].
+    pub plan_budget_weight: f64,
+    /// Weight on the cards an off-plan claim spends that the plan would have used, at the
+    /// value of a car of plan progress each. 0 leaves only H3's gray cannibalization.
+    pub plan_card_spend_weight: f64,
 }
 
 impl Default for HeuristicParams {
@@ -196,22 +214,51 @@ impl Default for HeuristicParams {
             threat_crowding_penalty: 0.5,
             hoard_safety_margin: 1.25,
             double_grab_urgency: 2.0,
+
+            plan_budget_weight: 1.0,
+            plan_card_spend_weight: 1.0,
         }
     }
 }
 
 impl HeuristicParams {
-    /// Every field as `name=value`, in declaration order.
+    /// `tier`'s parameters as `name=value` text, the input to [`Self::params_hash`]: version
+    /// 2's fields, then each later field `tier` reads, in declaration order.
+    ///
+    /// **Version 2's fields are every tier's**, H4's threat terms included, because that is
+    /// what every hash recorded before version 3 covered; a field added since reaches only
+    /// the tiers that read it. So adding a field for one tier leaves every other tier's
+    /// hash -- and its key in the results store and the play store -- where it was.
     ///
     /// Floats use `{:?}`, which is the shortest representation that round-trips, so the
     /// text is a faithful image of the bits rather than a rounded rendering of them. Only
     /// this crate computes the hash -- Python reads it across the FFI -- so nothing depends
     /// on CPython formatting the same way.
-    pub fn canonical(&self) -> String {
-        let mut out = format!("v{PARAMS_VERSION}");
+    pub fn canonical(&self, tier: Tier) -> String {
+        let mut out = format!("v{BASE_VERSION}");
+        for (name, value, reader) in self.fields() {
+            if reader.is_none_or(|r| tier >= r) {
+                write!(out, "|{name}={value}").expect("String write");
+            }
+        }
+        out
+    }
+
+    /// Every field as `(name, value, reader)`, in declaration order, the value formatted as
+    /// [`Self::canonical`] writes it. `reader` is the lowest tier that reads a field added
+    /// after version 2, and `None` for version 2's own.
+    pub fn fields(&self) -> Vec<(&'static str, String, Option<Tier>)> {
+        let mut out = Vec::new();
         macro_rules! field {
             ($name:ident) => {
-                write!(out, "|{}={:?}", stringify!($name), self.$name).expect("String write")
+                out.push((stringify!($name), format!("{:?}", self.$name), None))
+            };
+            ($name:ident, $reader:expr) => {
+                out.push((
+                    stringify!($name),
+                    format!("{:?}", self.$name),
+                    Some($reader),
+                ))
             };
         }
         field!(ticket_draw_train_fraction);
@@ -239,12 +286,14 @@ impl HeuristicParams {
         field!(threat_crowding_penalty);
         field!(hoard_safety_margin);
         field!(double_grab_urgency);
+        field!(plan_budget_weight, Tier::H4);
+        field!(plan_card_spend_weight, Tier::H4);
         out
     }
 
-    /// blake2b-128 over [`HeuristicParams::canonical`]. Provenance, not identity.
-    pub fn params_hash(&self) -> String {
-        hash128_hex(self.canonical().as_bytes())
+    /// blake2b-128 over [`HeuristicParams::canonical`] for `tier`. Provenance, not identity.
+    pub fn params_hash(&self, tier: Tier) -> String {
+        hash128_hex(self.canonical(tier).as_bytes())
     }
 
     /// Odds that a plan costing `cars` train cars gets completed with `trains` left.
@@ -345,11 +394,13 @@ mod tests {
     #[test]
     fn every_field_reaches_the_hash() {
         // The failure this catches is a field added to the struct and forgotten in
-        // `canonical()`: the parameter would then be tunable and invisible, so two agents
+        // `fields()`: the parameter would then be tunable and invisible, so two agents
         // that play differently would record the same provenance. Mutating each field in
-        // turn is the only check that scales with the struct.
+        // turn is the only check that scales with the struct. The top tier reads every
+        // field, so its hash is the one every field must reach.
+        let top = *Tier::ALL.last().expect("a tier");
         let base = HeuristicParams::default();
-        let baseline = base.params_hash();
+        let baseline = base.params_hash(top);
         let mut mutants = vec![
             HeuristicParams {
                 ticket_draw_train_fraction: 0.5,
@@ -451,11 +502,19 @@ mod tests {
                 double_grab_urgency: 1.0,
                 ..base
             },
+            HeuristicParams {
+                plan_budget_weight: 0.5,
+                ..base
+            },
+            HeuristicParams {
+                plan_card_spend_weight: 0.5,
+                ..base
+            },
         ];
-        // One per field, and every one distinct: a `canonical()` that dropped a field would
+        // One per field, and every one distinct: a `fields()` that dropped a field would
         // collide with the baseline, and one that wrote a field twice would still be
         // distinct, so the count check is what catches a stale list here.
-        let mut hashes: Vec<String> = mutants.iter().map(|m| m.params_hash()).collect();
+        let mut hashes: Vec<String> = mutants.iter().map(|m| m.params_hash(top)).collect();
         for (mutant, hash) in mutants.iter_mut().zip(&hashes) {
             assert_ne!(*hash, baseline, "{mutant:?} did not move params_hash");
         }
@@ -464,9 +523,29 @@ mod tests {
         assert_eq!(hashes.len(), mutants.len(), "two mutants hash alike");
         assert_eq!(
             mutants.len(),
-            base.canonical().matches('=').count(),
+            base.fields().len(),
             "the mutant list has drifted from the field list; add the new field to both"
         );
+    }
+
+    /// H3's `params_hash` under version 2, as stored with every game and rating against it.
+    const H3_PARAMS_HASH: &str = "17df54a531efc8228c222931713e53eb";
+
+    #[test]
+    fn fields_added_for_one_tier_leave_the_others_hashes_alone() {
+        // `params_hash` is part of an agent's key in the results store and the play store,
+        // so a field added for H4 that reached H3's hash would orphan every game and rating
+        // recorded against the anchor: the server would refuse to replay them.
+        let base = HeuristicParams::default();
+        for tier in [Tier::H0, Tier::H1, Tier::H2, Tier::H3] {
+            assert_eq!(base.params_hash(tier), H3_PARAMS_HASH, "{}", tier.name());
+        }
+        let h4_only = HeuristicParams {
+            plan_budget_weight: 0.25,
+            ..base
+        };
+        assert_eq!(h4_only.params_hash(Tier::H3), H3_PARAMS_HASH);
+        assert_ne!(h4_only.params_hash(Tier::H4), base.params_hash(Tier::H4));
     }
 
     #[test]

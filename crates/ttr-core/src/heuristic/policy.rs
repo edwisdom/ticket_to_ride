@@ -1,8 +1,8 @@
 //! H0-H4. One nested ladder, not five agents.
 //!
 //! PLAN.md §7 defines the tiers as strict extensions -- H3 is H2 plus four things, and H4
-//! is H3 plus opponent modeling -- so they are written that way: one scoring function whose
-//! terms switch on [`Tier`]. Five parallel implementations would let the tiers drift apart
+//! is H3 plus a plan that keeps what it needs and opponent modelling -- so they are written
+//! that way: one scoring function whose terms switch on [`Tier`]. Five parallel implementations would let the tiers drift apart
 //! in ways that look like strength differences, which is precisely what the ladder is
 //! supposed to measure. H0 and H1 are the exceptions and are deliberately procedural: H0 is
 //! the uniform floor, and H1 is a shallow rule cascade that exists to be beaten.
@@ -50,7 +50,9 @@ pub enum Tier {
     /// H2 + draw values, a card-aware plan, endgame and last-turn play, longest-path
     /// tiebreaks, ticket-keep EV, convex path cost, gray cannibalization. **The Elo anchor.**
     H3 = 3,
-    /// H3 + opponent modeling: threatened edges, threat pricing, double grabs, hoarding.
+    /// H3 + a plan that keeps what it needs -- off-plan claims pay for the trains and cards
+    /// they take from it -- and opponent modelling: threatened edges, threat pricing, double
+    /// grabs, hoarding.
     H4 = 4,
 }
 
@@ -471,8 +473,73 @@ impl Heuristic {
         }
         if self.tier >= Tier::H4 {
             score += self.h4_claim_terms(state, ctx, segment, length, on_plan, sink);
+            if !on_plan && !self.plan.is_empty() {
+                score += self.off_plan_terms(state, ctx, seg, length, pay, sink);
+            }
         }
         score
+    }
+
+    /// What an off-plan claim takes from the plan: trains the plan would have needed, and
+    /// cards it would have spent.
+    ///
+    /// H3 charges every car the flat [`HeuristicParams::min_points_per_train`], which is
+    /// right while the trains outnumber the plan and badly wrong once they do not. In H3
+    /// self-play a quarter of seats made an off-plan claim that left fewer trains than
+    /// their plan still needed; they won 30% of games against 57% for the rest, and 99% of
+    /// the losers among them missed a ticket. One game: two tickets worth 39 points sat 11
+    /// cars from done with 20 trains left, and H3 spent 17 of them on routes its tickets
+    /// did not use, because each beat a blind draw on route points alone.
+    ///
+    /// So the trains are priced by the completion model the ticket decisions already use
+    /// -- the settlement they cost the plan -- which is nearly nothing with trains to spare
+    /// and dominant when they are short. The cards are priced as cards the plan must now
+    /// draw again: another game spent five blacks on an off-plan route one black short of
+    /// the 6-black route that would have finished 37 points of tickets. Gray
+    /// cannibalization covered only gray routes.
+    fn off_plan_terms<S: Sink>(
+        &self,
+        state: &State,
+        ctx: &Ctx,
+        seg: usize,
+        length: u8,
+        pay: u16,
+        sink: &mut S,
+    ) -> f64 {
+        let p = &self.params;
+        let mut extra = 0.0;
+        if p.plan_budget_weight > 0.0 {
+            let cost = f64::from(self.plan.steiner_cost);
+            let trains = f64::from(state.trains[ctx.seat]);
+            let before = p.completion_odds(cost, trains);
+            let after = p.completion_odds(cost, trains - f64::from(length));
+            let budget =
+                p.plan_budget_weight * 2.0 * f64::from(self.plan.live_points) * (after - before);
+            extra += budget;
+            sink.term("train_budget", budget);
+            sink.fact("completion_odds_after", after);
+        }
+        let payment = if p.plan_card_spend_weight > 0.0 {
+            state.payment_for(seg, length, pay as u8).ok()
+        } else {
+            None
+        };
+        if let Some((colored, wilds)) = payment {
+            let board = state.board;
+            let loco = board.locomotive as usize;
+            let mut hand = [0u8; MAX_CARD_TYPES];
+            hand[..board.n_card_types].copy_from_slice(state.hand_of(ctx.seat));
+            let before = plan_shortfall(&hand, &self.plan.need, board.n_colors, loco);
+            hand[pay as usize] -= colored;
+            hand[loco] -= wilds;
+            let after = plan_shortfall(&hand, &self.plan.need, board.n_colors, loco);
+            let lost = after.saturating_sub(before);
+            let spent = p.plan_card_spend_weight * ctx.plan_car_value * f64::from(lost);
+            extra -= spent;
+            sink.term("plan_cards_spent", -spent);
+            sink.fact("plan_cards_lost", f64::from(lost));
+        }
+        extra
     }
 
     /// A claim on this seat's last turn: its route points, plus every held ticket it
@@ -1163,6 +1230,19 @@ impl Ctx {
             u16::from(best_colour) + u16::from(certain[loco]) + u16::from(state.unknown[o]);
         u16::from(state.trains[o]) >= u16::from(length) && reachable >= u16::from(length)
     }
+}
+
+/// Cards the plan still has to draw with `hand`: each colour's shortfall, plus the gray
+/// demand the colour surplus cannot cover, less the locomotives, which cover either.
+fn plan_shortfall(hand: &[u8], need: &[u16; MAX_CARD_TYPES], n_colors: usize, loco: usize) -> u16 {
+    let (mut short, mut surplus) = (0u16, 0u16);
+    for c in 0..n_colors {
+        let (have, want) = (u16::from(hand[c]), need[c]);
+        short += want.saturating_sub(have);
+        surplus += have.saturating_sub(want);
+    }
+    let gray = need[loco].saturating_sub(surplus);
+    (short + gray).saturating_sub(u16::from(hand[loco]))
 }
 
 /// Whether `seat` holds cards enough to claim `segment` right now.

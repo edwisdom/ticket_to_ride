@@ -237,18 +237,15 @@ fn the_ladder_is_monotone_on_both_maps() {
 }
 
 #[test]
-fn h4_is_not_worse_than_h3() {
-    // Deliberately one-sided, and the reason is recorded rather than hidden. PLAN.md §11
-    // predicts H4 at +130 Elo over H3 (~68% paired). Measured across 2P-5P on both maps it
-    // is +-0.05 mean return -- inside noise at these sample sizes. Public-information
-    // blocking against a strong non-adaptive planner is worth close to nothing here, and
-    // the seat count does not change that; see docs/WORKLOG.md.
-    //
-    // So this asserts what is actually supported: H4 does not *regress*. An H4 that lost
-    // materially would mean the threat pricing had broken again, which it has once.
+fn h4_beats_h3() {
+    // PLAN.md §11 predicted H4 at +130 Elo over H3; its blocking alone measured level with
+    // H3 at 2P and below it at 4P. What H4 gained instead is a plan that keeps what it
+    // needs: off-plan claims pay for the trains and cards they take from it. Measured over
+    // 10,000 games a configuration: +81 Elo at USA 2P, +43 on mini 2P, +77 at USA 4P
+    // (docs/WORKLOG.md, "H4: off-plan claims pay for what they take").
     for map in ["usa", "mini"] {
         let h4 = paired(map, 2, Tier::H4, Tier::H3, 30);
-        assert!(h4 > -0.25, "{map}: H4 lost to H3 by {h4:+.3}");
+        assert!(h4 > 0.0, "{map}: H4 lost to H3 by {h4:+.3}");
     }
 }
 
@@ -397,8 +394,9 @@ const BEHAVIOUR_HASHES: [(Tier, &str); 5] = [
     (Tier::H1, "2cd429112540266c66d055eab0040d79"),
     (Tier::H2, "f7411becf76b49abe316f7fe8a157de4"),
     (Tier::H3, H3_ANCHOR),
-    // H4 is H3 plus opponent modelling, so it moved with the anchor.
-    (Tier::H4, "c8846dd9ee7ece34bfe20475073e9995"),
+    // H4 moved with the anchor, and again when its off-plan claims began paying for what
+    // they take from the plan.
+    (Tier::H4, "3099a56f772c213325a2197df3857d69"),
 ];
 
 #[test]
@@ -427,4 +425,109 @@ fn each_tier_has_a_distinct_identity() {
         );
         seen.push(h);
     }
+}
+
+// ---------------------------------------------------------------------------
+// What H4 learned from H3's self-play losses
+// ---------------------------------------------------------------------------
+
+/// H3 self-play, USA 2P, and seat 0's position after these moves: its two open tickets,
+/// worth 39, need 12 more cars, it has 24 trains, and H3 spends 4 of them and four cards
+/// its plan needs on Chicago-Omaha, which neither ticket uses. It spent 17 trains off its
+/// plan from here and lost 39-137 with both tickets open.
+const OFF_PLAN_SEED: u64 = 7_000_000;
+#[rustfmt::skip]
+const OFF_PLAN_PREFIX: [u16; 81] = [
+    911, 913, 555, 906, 910, 900, 347, 695, 18, 900, 905, 900, 905, 905, 442, 171, 906, 908,
+    906, 907, 900, 903, 900, 686, 813, 901, 902, 900, 901, 204, 902, 903, 903, 903, 561, 905,
+    901, 905, 905, 532, 905, 905, 513, 905, 905, 905, 905, 905, 905, 365, 905, 905, 905, 905,
+    905, 905, 607, 905, 905, 905, 905, 905, 905, 905, 905, 463, 905, 905, 158, 905, 905, 901,
+    905, 437, 673, 905, 905, 905, 905, 905, 905,
+];
+
+/// H3 self-play, USA 2P: seat 0 holds five blacks, one short of the 6-black El Paso-Los
+/// Angeles that finishes two tickets worth 37, and H3 spends all five on Montreal-Sault
+/// St. Marie, off its plan. Both tickets stayed open; it lost 68-128.
+const CARD_SPEND_SEED: u64 = 7_000_009;
+#[rustfmt::skip]
+const CARD_SPEND_PREFIX: [u16; 131] = [
+    909, 911, 906, 908, 608, 161, 906, 911, 906, 910, 812, 228, 901, 900, 900, 900, 900, 901,
+    901, 344, 204, 901, 902, 902, 447, 596, 904, 900, 900, 905, 900, 901, 248, 687, 900, 903,
+    903, 900, 900, 745, 900, 901, 900, 901, 708, 544, 902, 905, 906, 911, 221, 513, 906, 907,
+    901, 903, 903, 905, 364, 183, 904, 904, 904, 905, 905, 905, 906, 910, 905, 905, 902, 902,
+    905, 905, 487, 905, 905, 902, 904, 310, 905, 905, 902, 904, 905, 905, 905, 905, 396, 109,
+    905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 101, 640, 905, 905,
+    905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 475, 905, 905, 905,
+    905, 905, 905, 905, 905,
+];
+
+/// Play `prefix` from `seed`, then have H3 and H4 decide seat 0's move. H3 must claim
+/// `a`-`b`, off its plan, which is the reviewed mistake; H4 must not, and its own pricing of
+/// that claim must carry `term` -- what the claim takes from the plan.
+fn h4_keeps_what_its_plan_needs(seed: u64, prefix: &[u16], a: &str, b: &str, term: &str) {
+    let g = game("usa", 2);
+    let mut state = g.new_initial_state(seed);
+    for &action in prefix {
+        state.step(action).unwrap();
+    }
+    assert_eq!(state.current_player(), 0);
+    let off_plan = route(g.board, a, b);
+    let params = HeuristicParams::default();
+
+    let mut h3 = Heuristic::new(Tier::H3, params, 0);
+    h3.begin_game(0, seed);
+    let action = h3.act(&mut state.clone());
+    assert!(action < g.space.claim_end, "H3 no longer claims here");
+    assert_eq!(
+        g.space.decode_claim(action).0,
+        off_plan,
+        "H3 no longer claims {a}-{b}"
+    );
+
+    let mut h4 = Heuristic::new(Tier::H4, params, 0);
+    h4.begin_game(0, seed);
+    let e = h4.explain(&mut state);
+    let claimed =
+        |action: u16| action < g.space.claim_end && g.space.decode_claim(action).0 == off_plan;
+    assert!(
+        !claimed(e.chosen),
+        "H4 spent its plan's trains and cards on {a}-{b}"
+    );
+    let priced = e
+        .candidates
+        .iter()
+        .find(|c| claimed(c.action))
+        .expect("the claim is still legal");
+    let charge = priced
+        .terms
+        .iter()
+        .find(|(name, _)| *name == term)
+        .map(|&(_, value)| value);
+    assert!(
+        charge.is_some_and(|v| v < 0.0),
+        "{a}-{b} carries no {term} charge: {:?}",
+        priced.terms
+    );
+}
+
+#[test]
+fn h4_does_not_spend_the_trains_its_tickets_need() {
+    h4_keeps_what_its_plan_needs(
+        OFF_PLAN_SEED,
+        &OFF_PLAN_PREFIX,
+        "Chicago",
+        "Omaha",
+        "train_budget",
+    );
+}
+
+#[test]
+fn h4_does_not_spend_the_cards_its_tickets_need() {
+    h4_keeps_what_its_plan_needs(
+        CARD_SPEND_SEED,
+        &CARD_SPEND_PREFIX,
+        "Montreal",
+        "Sault St. Marie",
+        "plan_cards_spent",
+    );
 }

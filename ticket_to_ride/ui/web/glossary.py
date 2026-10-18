@@ -31,6 +31,10 @@ TERMS = {
     "threat": "H4: denies an opponent the route that would join two of their networks.",
     "hoard": "H4: this planned segment is safe to leave for now while a contested one needs "
     "the cards.",
+    "train_budget": "H4: the ticket points this off-plan claim costs by leaving fewer trains "
+    "to finish the plan; little while trains are plentiful, a lot once they run short.",
+    "plan_cards_spent": "H4: cards this off-plan claim spends that the plan would have used, "
+    "each worth a car of progress.",
     "expected_card_value": "What a card from the deck is worth on average, over the cards "
     "this seat cannot account for.",
     "card_value": "What this face-up card is worth to the plan.",
@@ -54,6 +58,9 @@ FACTS = {
     "needed_cards_spent": "Cards spent on this gray route of a colour the plan needs.",
     "locomotives": "Locomotives this payment uses.",
     "pending_detour": "H4: the largest detour among planned segments it cannot pay for yet.",
+    "completion_odds_after": "H4: the odds the trains left can finish the plan after this "
+    "off-plan claim.",
+    "plan_cards_lost": "H4: cards the plan must draw again if this off-plan claim is made.",
     "unseen_cards": "Cards this seat cannot account for: the deck and opponents' blind draws.",
     "plan_needs": "Cards of this colour the plan still needs beyond those in hand.",
     "plan_cost_after": "Train cars the plan would need after this.",

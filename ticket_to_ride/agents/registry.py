@@ -52,8 +52,9 @@ DESCRIPTIONS = {
     "h3": "H2 plus card and ticket values, a plan its cards can pay for, endgame and "
     "last-turn play, longest-route tiebreaks and ticket keeping by expected value. The "
     "rating scale's zero.",
-    "h4": "H3 plus opponent modelling: blocks routes that would join an opponent's network "
-    "and holds claims that are safe to wait on.",
+    "h4": "H3 plus a plan that keeps what it needs: it will not spend the trains or cards its "
+    "tickets still need on other routes. It also blocks routes that would join an "
+    "opponent's network and holds claims that are safe to wait on.",
 }
 
 
@@ -109,7 +110,7 @@ class AgentSpec:
         return AgentRow(
             spec=self.text,
             family=self.family,
-            params_hash=ttr_rust.params_hash(overrides),
+            params_hash=ttr_rust.params_hash(self.family, overrides),
             behaviour_hash=_behaviour_hash(self.family, _frozen(self.overrides)),
         )
 

@@ -886,6 +886,8 @@ fn params_from(overrides: Option<&Bound<'_, PyDict>>) -> PyResult<HeuristicParam
             "threat_crowding_penalty" => p.threat_crowding_penalty = value.extract()?,
             "hoard_safety_margin" => p.hoard_safety_margin = value.extract()?,
             "double_grab_urgency" => p.double_grab_urgency = value.extract()?,
+            "plan_budget_weight" => p.plan_budget_weight = value.extract()?,
+            "plan_card_spend_weight" => p.plan_card_spend_weight = value.extract()?,
             other => {
                 return Err(PyValueError::new_err(format!(
                     "unknown heuristic parameter {other:?}"
@@ -1068,8 +1070,8 @@ impl From<Decoded> for PyDecodedAction {
 fn default_params(py: Python<'_>) -> PyResult<Py<PyDict>> {
     let p = HeuristicParams::default();
     let d = PyDict::new(py);
-    for entry in p.canonical().split('|').skip(1) {
-        let (name, value) = entry.split_once('=').expect("canonical is name=value");
+    for (name, value, _) in p.fields() {
+        let value = value.as_str();
         // Round-trip through the canonical text rather than listing the fields again here:
         // a field added to the struct then appears automatically instead of being silently
         // missing from the dict Python tunes with.
@@ -1089,11 +1091,14 @@ fn default_params(py: Python<'_>) -> PyResult<Py<PyDict>> {
     Ok(d.unbind())
 }
 
-/// blake2b-128 over a parameter set. **Provenance, not identity** -- see `behaviour_hash`.
+/// blake2b-128 over the parameters `tier` reads. **Provenance, not identity** -- see
+/// `behaviour_hash`. A field added for one tier never reaches another tier's hash.
 #[pyfunction]
-#[pyo3(signature = (overrides=None))]
-fn params_hash(overrides: Option<&Bound<'_, PyDict>>) -> PyResult<String> {
-    Ok(params_from(overrides)?.params_hash())
+#[pyo3(signature = (tier, overrides=None))]
+fn params_hash(tier: &str, overrides: Option<&Bound<'_, PyDict>>) -> PyResult<String> {
+    let t =
+        Tier::parse(tier).ok_or_else(|| PyValueError::new_err(format!("unknown tier {tier:?}")))?;
+    Ok(params_from(overrides)?.params_hash(t))
 }
 
 /// A content address for an agent: what it actually plays, over a frozen probe set.

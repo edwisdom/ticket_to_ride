@@ -8,7 +8,9 @@ than remembered.
 from __future__ import annotations
 
 import json
+import sqlite3
 import sys
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -167,13 +169,42 @@ def test_an_arena_with_fewer_agents_than_seats_is_refused(tmp_path: Path) -> Non
     assert "cannot fill" in result.output
 
 
-def test_sprt_needs_two_agents_and_two_seats(tmp_path: Path) -> None:
+def test_sprt_needs_two_agents(tmp_path: Path) -> None:
     result = runner.invoke(
         app,
         ["arena", "--sprt", "h3", "--players", "2", "--db", str(tmp_path / "x.db")],
     )
     assert result.exit_code != 0
     assert "challenger,incumbent" in result.output
+
+
+def test_sprt_above_two_seats_plays_the_challenger_against_the_incumbent(tmp_path: Path) -> None:
+    """One challenger seat and the incumbent in the rest, every rotation: a lopsided pair
+    has to decide for the challenger, scored pairwise against the incumbent seats."""
+    db = tmp_path / "x.db"
+    result = runner.invoke(
+        app,
+        [
+            "arena",
+            "--sprt",
+            "h3,h0",
+            "--map",
+            "mini",
+            "--players",
+            "3",
+            "--blocks",
+            "40",
+            "--sprt-batch",
+            "10",
+            "--db",
+            str(db),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "better than h0" in result.output
+    with closing(sqlite3.connect(db)) as con:
+        lineups = {row[0] for row in con.execute("SELECT lineup FROM match")}
+    assert lineups == {"h3,h0,h0"}
 
 
 # ---------------------------------------------------------------------------

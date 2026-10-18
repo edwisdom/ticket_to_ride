@@ -56,18 +56,21 @@ identity is a hash of what it *plays* over a frozen probe set rather than of its
 the anchor and silently re-base every rating ever recorded. The anchor moves only on
 purpose: it did once, when H3 learned to plan the network its cards can pay for and to
 spend its last turn on points (+36 Elo over its predecessor at USA 2P; docs/WORKLOG.md).
+H4 is H3 plus a plan that keeps what it needs -- an off-plan claim pays for the trains and
+cards it takes from the plan -- and H3's opponent modelling.
 
-| agent | usa 2P | mini 2P | usa 4P |
-| --- | --- | --- | --- |
-| h4 | 1499 [1482, 1516] | 1502 [1489, 1516] | 1480 [1472, 1487] |
-| **h3** | **1500** (anchor) | **1500** | **1500** |
-| h2 | 1344 [1326, 1363] | 1368 [1347, 1389] | 1358 [1349, 1366] |
-| h1 | 691 [635, 739] | 905 [868, 940] | 696 [670, 719] |
-| h0 | 140 [63, 206] | 637 [592, 677] | 174 [137, 206] |
+| agent | usa 2P | mini 2P | usa 4P | µs/decision (usa 2P) |
+| --- | --- | --- | --- | --- |
+| h4 | 1593 [1577, 1611] | 1531 [1516, 1546] | 1568 [1560, 1576] | 24.6 |
+| **h3** | **1500** (anchor) | **1500** | **1500** | 17.1 |
+| h2 | 1338 [1317, 1357] | 1364 [1345, 1384] | 1358 [1350, 1366] | 11.0 |
+| h1 | 709 [647, 761] | 922 [888, 952] | 678 [649, 702] | 0.2 |
+| h0 | 158 [80, 224] | 651 [608, 694] | 152 [114, 184] | 0.2 |
 
 Bradley–Terry MLE, 95% intervals from a bootstrap that resamples **seed blocks** rather than
 games — games inside a block share a deck, and treating them as independent inflates
 significance by about √P. Both seatings of every block are played, never one mirrored.
+The cost column is `ttr bench --suite agents`: one thread, self-play, on an M2 Max.
 
 ## Quickstart
 

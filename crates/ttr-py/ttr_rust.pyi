@@ -29,8 +29,9 @@ def performance_threads() -> int: ...
 def default_params() -> dict[str, float | int | bool]:
     """The Elo anchor's heuristic constants. The one place Python reads them from."""
 
-def params_hash(overrides: dict[str, float | int | bool] | None = None) -> str:
-    """blake2b-128 over a parameter set. Provenance -- see `behaviour_hash` for identity."""
+def params_hash(tier: str, overrides: dict[str, float | int | bool] | None = None) -> str:
+    """blake2b-128 over the parameters `tier` reads. Provenance -- see `behaviour_hash` for
+    identity. A field added for one tier never reaches another tier's hash."""
 
 def behaviour_hash(tier: str, overrides: dict[str, float | int | bool] | None = None) -> str:
     """A content address for an agent: what it plays over a frozen probe set.

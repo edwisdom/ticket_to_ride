@@ -26,7 +26,7 @@ DEFAULT_DB = "runs/results.db"
 #: An even seat split. A CI straddling it means no first-player effect was resolvable.
 EVEN = 0.5
 
-#: SPRT here is a head-to-head decision, so it needs exactly two seats.
+#: SPRT compares exactly two agents: a challenger and an incumbent.
 HEAD_TO_HEAD = 2
 
 
@@ -51,7 +51,11 @@ def arena_command(
     agent_seed: Annotated[int, typer.Option("--agent-seed")] = 0,
     sprt_pair: Annotated[
         str | None,
-        typer.Option("--sprt", help="'challenger,incumbent': stop early once decided."),
+        typer.Option(
+            "--sprt",
+            help="'challenger,incumbent': stop early once decided. Above two seats the "
+            "challenger plays the incumbent in every other seat.",
+        ),
     ] = None,
     elo1: Annotated[float, typer.Option("--elo1", help="SPRT alternative, in Elo.")] = 20.0,
     batch: Annotated[int, typer.Option("--sprt-batch", help="Blocks between SPRT checks.")] = 50,
@@ -64,7 +68,7 @@ def arena_command(
     """
     console = Console()
     specs = _specs(agents, agent_seed)
-    if len(specs) < n_players:
+    if not sprt_pair and len(specs) < n_players:
         raise typer.BadParameter(f"{len(specs)} agents cannot fill {n_players} seats")
 
     with Store(database) as store:
@@ -123,11 +127,17 @@ def _run_sprt(
 
     **Checked on block boundaries only.** Half a block is one seating, and stopping there
     would report exactly the mirrored result the block structure exists to prevent.
+
+    Above two seats the challenger takes one seat and the incumbent every other, so each
+    block seats the challenger once in every position, and a game scores the challenger's
+    pairwise results against the incumbent seats -- the comparisons the Bradley-Terry fit
+    decomposes a game into, and the same score as a head-to-head at two seats.
     """
     names = [p.strip() for p in pair.split(",")]
-    if len(names) != HEAD_TO_HEAD or n_players != HEAD_TO_HEAD:
-        raise typer.BadParameter("--sprt takes 'challenger,incumbent' and needs --players 2")
+    if len(names) != HEAD_TO_HEAD or n_players < HEAD_TO_HEAD:
+        raise typer.BadParameter("--sprt takes 'challenger,incumbent' and needs --players 2+")
     specs = [parse_spec(n, agent_seed) for n in names]
+    lineup = (0,) + (1,) * (n_players - 1)
 
     challenger = store.agent_id(specs[0].identity())
     scores: list[float] = []
@@ -139,7 +149,7 @@ def _run_sprt(
             map_name,
             n_players,
             specs,
-            (0, 1),
+            lineup,
             seed_root=seed_root + done,
             blocks=step,
             threads=threads,
@@ -167,6 +177,10 @@ def _run_sprt(
 def _block_scores(store: Store, match_id: int, challenger: int) -> list[float]:
     """Per-block mean score for `challenger` in one match, in block order.
 
+    A game scores the challenger's pairwise results against every other seat by final
+    rank: 1 for finishing ahead, 0.5 for a tie, 0 for behind. At two seats that is the
+    head-to-head result.
+
     Read back through `agent_id` rather than reconstructed from the seat and the rotation.
     Both would work, and only one of them stays correct if the arena ever returns games in
     a different order -- and a silently transposed score here would make SPRT confidently
@@ -184,12 +198,10 @@ def _block_scores(store: Store, match_id: int, challenger: int) -> list[float]:
 
     per_block: dict[int, list[float]] = {}
     for seats in per_game.values():
-        best = min(int(r["rank"]) for r in seats)
-        winners = [r for r in seats if int(r["rank"]) == best]
-        share = (
-            (1.0 / len(winners)) if any(int(r["agent_id"]) == challenger for r in winners) else 0.0
-        )
-        per_block.setdefault(int(seats[0]["block"]), []).append(share)
+        mine = next(int(r["rank"]) for r in seats if int(r["agent_id"]) == challenger)
+        others = [int(r["rank"]) for r in seats if int(r["agent_id"]) != challenger]
+        pairwise = [1.0 if mine < o else 0.5 if mine == o else 0.0 for o in others]
+        per_block.setdefault(int(seats[0]["block"]), []).append(float(np.mean(pairwise)))
     return [float(np.mean(v)) for _, v in sorted(per_block.items())]
 
 

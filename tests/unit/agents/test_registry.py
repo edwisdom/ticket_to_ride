@@ -52,7 +52,7 @@ def test_identity_is_the_results_store_key() -> None:
     """One bot, one identity everywhere: what the arena stores is what the server seats."""
     row = parse_spec("h3").identity()
     assert (row.spec, row.family, row.checkpoint) == ("h3", "h3", None)
-    assert row.params_hash == ttr_rust.params_hash(None)
+    assert row.params_hash == ttr_rust.params_hash("h3", None)
     assert row.behaviour_hash == ttr_rust.behaviour_hash("h3")
     assert parse_spec("random").identity().behaviour_hash == ttr_rust.behaviour_hash("h0")
 
