@@ -14,9 +14,11 @@ use pyo3::exceptions::{PyBufferError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
 
+use ttr_core::actions::{BLIND_SLOT, Decoded};
 use ttr_core::arena::{self, AgentSpec};
+use ttr_core::board::{FACEUP_SLOTS, GRAY, NO_SIBLING, UNREACHABLE};
 use ttr_core::config::RuleConfig;
-use ttr_core::heuristic::{HeuristicParams, Tier};
+use ttr_core::heuristic::{Explanation, Heuristic, HeuristicParams, Tier};
 use ttr_core::resample::{assert_consistent, resample_from_infoset};
 use ttr_core::rng::Pcg32;
 use ttr_core::state::{Game, State};
@@ -143,6 +145,17 @@ impl PyGame {
             )));
         }
         Ok(self.inner.action_to_string(action))
+    }
+
+    /// What an action id means: its kind and fields, from the one place the layout lives.
+    fn decode_action(&self, action: u16) -> PyResult<PyDecodedAction> {
+        let decoded = self.inner.space.decode(action).ok_or_else(|| {
+            PyValueError::new_err(format!(
+                "action {action} outside 0..{}",
+                self.inner.space.n - 1
+            ))
+        })?;
+        Ok(PyDecodedAction::from(decoded))
     }
 
     fn __repr__(&self) -> String {
@@ -353,6 +366,15 @@ impl PyState {
         ttr_core::scoring::winners(&mut self.inner)
     }
 
+    /// Competition ranks under the full tiebreak chain, 1 for first; ties share a rank.
+    fn ranks(&mut self) -> Vec<u16> {
+        let breakdown = ttr_core::scoring::score_breakdown(&mut self.inner);
+        ttr_core::scoring::competition_ranks(&breakdown)
+            .into_iter()
+            .map(u16::from)
+            .collect()
+    }
+
     fn longest_trails(&self) -> Vec<u16> {
         ttr_core::scoring::longest_trails(&self.inner)
     }
@@ -422,6 +444,50 @@ impl PyState {
     fn unseen_counts(&self, observer: usize) -> PyResult<Vec<i16>> {
         self.check_seat(observer)?;
         Ok(self.inner.unseen_counts(observer))
+    }
+
+    /// The tickets on offer during a keep, in offer order: `KEEP` mask bit `i` is
+    /// `offer()[i]`. Empty outside a keep. A list (a `Vec<u8>` would arrive as `bytes`).
+    fn offer(&self) -> Vec<u16> {
+        self.inner.offer[..usize::from(self.inner.offer_len)]
+            .iter()
+            .map(|&t| u16::from(t))
+            .collect()
+    }
+
+    /// The discard pile's composition, by card type. Public: every card in it was spent
+    /// on a claim in plain view.
+    fn discard(&self) -> Vec<u16> {
+        self.inner.discard[..self.inner.board.n_card_types]
+            .iter()
+            .map(|&c| u16::from(c))
+            .collect()
+    }
+
+    /// Each of `seat`'s tickets as `(ticket, connected, remaining)`, in ticket order:
+    /// `remaining` is the train cars still needed over the seat's own track and open
+    /// track, `None` once no route is left. The observation encoder's own numbers.
+    fn ticket_progress(&self, seat: usize) -> PyResult<Vec<(u8, bool, Option<u16>)>> {
+        self.check_seat(seat)?;
+        Ok(ttr_core::obs::ticket_costs(&self.inner, seat)
+            .into_iter()
+            .map(|(ticket, cost)| (ticket, cost == 0, (cost < UNREACHABLE).then_some(cost)))
+            .collect())
+    }
+
+    /// How the current player would pay for claim `action`: `(coloured cards,
+    /// locomotives)`, by the engine's canonical payment. Raises `IllegalAction` if they
+    /// cannot.
+    fn claim_payment(&self, action: u16) -> PyResult<(u8, u8)> {
+        let Some(Decoded::Claim { segment, pay }) = self.inner.space.decode(action) else {
+            return Err(PyValueError::new_err(format!(
+                "action {action} is not a claim"
+            )));
+        };
+        let length = self.inner.board.seg_len[usize::from(segment)];
+        self.inner
+            .payment_for(usize::from(segment), length, pay)
+            .map_err(|e| IllegalAction::new_err(e.0))
     }
 
     #[getter]
@@ -500,6 +566,16 @@ impl PyState {
 }
 
 impl PyState {
+    /// Deciding needs a position with a move to make.
+    fn check_live(&self) -> PyResult<()> {
+        if self.inner.is_terminal() {
+            return Err(PyValueError::new_err(
+                "the game is over; there is nothing to decide",
+            ));
+        }
+        Ok(())
+    }
+
     fn check_seat(&self, player: usize) -> PyResult<()> {
         let n = self.inner.n_players();
         if player >= n {
@@ -818,6 +894,171 @@ fn params_from(overrides: Option<&Bound<'_, PyDict>>) -> PyResult<HeuristicParam
     }
     p.validate().map_err(PyValueError::new_err)?;
     Ok(p)
+}
+
+/// A scripted agent, H0-H4 (PLAN.md §7), deciding one position at a time.
+///
+/// What the web server's bots are. `explain` is `act` with its reasoning recorded -- one
+/// scorer with a trace sink threaded through it, never a second one -- so it returns the
+/// action `act` would and leaves the agent as `act` would. Call one or the other for a
+/// decision, never both: H0 would draw twice.
+#[pyclass(name = "Heuristic", module = "ttr_rust")]
+pub struct PyHeuristic {
+    inner: Heuristic,
+}
+
+#[pymethods]
+impl PyHeuristic {
+    #[new]
+    #[pyo3(signature = (tier, params=None, seed=0))]
+    fn new(tier: &str, params: Option<&Bound<'_, PyDict>>, seed: u64) -> PyResult<Self> {
+        let t = Tier::parse(tier)
+            .ok_or_else(|| PyValueError::new_err(format!("unknown tier {tier:?}")))?;
+        Ok(Self {
+            inner: Heuristic::new(t, params_from(params)?, seed),
+        })
+    }
+
+    #[getter]
+    fn tier(&self) -> &'static str {
+        self.inner.tier.name()
+    }
+
+    /// Re-seat and re-seed for a new game: the stream is `("agent", seat, game_id)` under
+    /// the agent's seed, and the plan cache is dropped.
+    fn begin_game(&mut self, seat: usize, game_id: u64) {
+        self.inner.begin_game(seat, game_id);
+    }
+
+    /// The action for `state.current_player()`. Always legal.
+    fn act(&mut self, state: &mut PyState) -> PyResult<u16> {
+        state.check_live()?;
+        Ok(self.inner.act(&mut state.inner))
+    }
+
+    /// `act`, with its reasoning: the best `top_k` candidates (and the chosen one wherever
+    /// it ranked), each with its total and per-term breakdown.
+    #[pyo3(signature = (state, top_k=8))]
+    fn explain(
+        &mut self,
+        py: Python<'_>,
+        state: &mut PyState,
+        top_k: usize,
+    ) -> PyResult<PyExplanation> {
+        state.check_live()?;
+        let mut explanation = self.inner.explain(&mut state.inner);
+        explanation.truncate(top_k.max(1));
+        PyExplanation::new(py, explanation)
+    }
+
+    fn __repr__(&self) -> String {
+        format!("<ttr_rust.Heuristic {}>", self.inner.tier.name())
+    }
+}
+
+/// One decision, explained. `candidates` are best first; for H1-H4 the first is `chosen`.
+#[pyclass(name = "Explanation", module = "ttr_rust", frozen, get_all)]
+pub struct PyExplanation {
+    pub tier: &'static str,
+    pub seat: u8,
+    pub phase: &'static str,
+    pub chosen: u16,
+    /// The chosen candidate's rule: H1's cascade step, `"forced"`, `"uniform"` (H0).
+    pub rule: Option<&'static str>,
+    pub context: Vec<(&'static str, f64)>,
+    pub candidates: Vec<Py<PyCandidate>>,
+}
+
+impl PyExplanation {
+    fn new(py: Python<'_>, e: Explanation) -> PyResult<Self> {
+        let candidates = e
+            .candidates
+            .into_iter()
+            .map(|c| {
+                Py::new(
+                    py,
+                    PyCandidate {
+                        action: c.action,
+                        total: c.total,
+                        rule: c.rule,
+                        terms: c.terms,
+                        facts: c.facts,
+                    },
+                )
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+        Ok(Self {
+            tier: e.tier.name(),
+            seat: e.seat,
+            phase: ttr_core::config::PHASE_NAMES[usize::from(e.phase)],
+            chosen: e.chosen,
+            rule: e.rule,
+            context: e.context,
+            candidates,
+        })
+    }
+}
+
+/// One scored action: its total (`-inf` when ruled out), additive terms in points that
+/// sum to it, and the inputs behind them.
+#[pyclass(name = "Candidate", module = "ttr_rust", frozen, get_all)]
+pub struct PyCandidate {
+    pub action: u16,
+    pub total: f64,
+    pub rule: Option<&'static str>,
+    pub terms: Vec<(&'static str, f64)>,
+    pub facts: Vec<(&'static str, f64)>,
+}
+
+/// An action id decoded. Fields that do not apply to `kind` are `None` (or empty).
+#[pyclass(name = "DecodedAction", module = "ttr_rust", frozen, get_all)]
+pub struct PyDecodedAction {
+    /// `"claim"`, `"draw"`, `"draw_tickets"`, `"keep"` or `"pass"`.
+    pub kind: &'static str,
+    pub segment: Option<u16>,
+    /// The card type paid with: a colour, or the locomotive for an all-locomotive claim.
+    pub pay: Option<u8>,
+    /// A face-up draw's slot, 0-4; `None` for a blind draw.
+    pub slot: Option<u16>,
+    pub blind: bool,
+    /// A keep's mask, 1-7.
+    pub mask: Option<u16>,
+    /// A keep's offer positions, ascending: the bits of `mask`.
+    pub offer_indices: Vec<u16>,
+}
+
+impl From<Decoded> for PyDecodedAction {
+    fn from(decoded: Decoded) -> Self {
+        let mut out = Self {
+            kind: "pass",
+            segment: None,
+            pay: None,
+            slot: None,
+            blind: false,
+            mask: None,
+            offer_indices: Vec::new(),
+        };
+        match decoded {
+            Decoded::Claim { segment, pay } => {
+                out.kind = "claim";
+                out.segment = Some(segment);
+                out.pay = Some(pay);
+            }
+            Decoded::Draw { slot } => {
+                out.kind = "draw";
+                out.blind = slot == BLIND_SLOT;
+                out.slot = (slot != BLIND_SLOT).then_some(slot);
+            }
+            Decoded::DrawTickets => out.kind = "draw_tickets",
+            Decoded::Keep { mask } => {
+                out.kind = "keep";
+                out.mask = Some(mask);
+                out.offer_indices = (0..3).filter(|i| mask >> i & 1 != 0).collect();
+            }
+            Decoded::Pass => {}
+        }
+        out
+    }
 }
 
 /// The anchor's defaults, as a dict. The one place Python reads the constants from, so a
@@ -1186,6 +1427,69 @@ fn board_summary(py: Python<'_>, map_name: &str) -> PyResult<Py<PyDict>> {
     Ok(d.unbind())
 }
 
+/// One segment of `board_data`: both cities, length, colour (`None` for gray), sibling.
+type SegmentRow = (u8, u8, u8, Option<u8>, Option<u16>);
+
+/// A board as the engine plays it: its own arrays, in its own order (PLAN.md §14.2).
+///
+/// The web client's only source of board data. A map's TOML is not it -- the generator
+/// canonicalizes mini's segment order, so the TOML's order is not the engine's -- and a
+/// client drawing from anything else would draw a board the engine does not play.
+///
+/// `segments` are `(city_a, city_b, length, colour, sibling)` with `colour` `None` for gray
+/// and `sibling` the other track of a double route; `tickets` are `(city_a, city_b,
+/// points)`; `route_points[n]` scores a route of length `n` (index 0 unused); card types
+/// are the colours in order, then the locomotive.
+#[pyfunction]
+#[pyo3(signature = (map_name="usa"))]
+fn board_data(py: Python<'_>, map_name: &str) -> PyResult<Py<PyDict>> {
+    let board = ttr_core::board::get_board(map_name)
+        .ok_or_else(|| PyValueError::new_err(format!("unknown map {map_name:?}")))?;
+    let raw = board.raw;
+    let segments: Vec<SegmentRow> = (0..board.n_segments)
+        .map(|s| {
+            let colour = board.seg_color[s];
+            let sibling = board.sibling[s];
+            (
+                board.seg_a[s],
+                board.seg_b[s],
+                board.seg_len[s],
+                (colour != GRAY).then_some(colour),
+                (sibling != NO_SIBLING).then_some(sibling),
+            )
+        })
+        .collect();
+    let tickets: Vec<(u8, u8, u8)> = (0..board.n_tickets)
+        .map(|t| (board.ticket_a[t], board.ticket_b[t], board.ticket_points[t]))
+        .collect();
+    // Lists, not `bytes`: PyO3 hands any `Vec<u8>` back as `bytes`.
+    let widen = |values: &[u8]| -> Vec<u16> { values.iter().map(|&v| u16::from(v)).collect() };
+
+    let d = PyDict::new(py);
+    d.set_item("name", board.name)?;
+    d.set_item("data_hash", board.data_hash)?;
+    d.set_item("cities", raw.cities.to_vec())?;
+    d.set_item("segments", segments)?;
+    d.set_item("tickets", tickets)?;
+    d.set_item("colors", raw.color_names.to_vec())?;
+    d.set_item("locomotive", board.locomotive)?;
+    d.set_item("card_counts", widen(&board.deck_composition_counts))?;
+    d.set_item("trains_per_player", raw.trains_per_player)?;
+    d.set_item("route_points", widen(board.route_points))?;
+    d.set_item("longest_bonus", raw.longest_bonus)?;
+    d.set_item(
+        "players",
+        [raw.min_players, raw.max_players].map(u16::from).to_vec(),
+    )?;
+    d.set_item("initial_ticket_deal", raw.initial_ticket_deal)?;
+    d.set_item("initial_ticket_keep_min", raw.initial_ticket_keep_min)?;
+    d.set_item("draw_ticket_deal", raw.draw_ticket_deal)?;
+    d.set_item("draw_ticket_keep_min", raw.draw_ticket_keep_min)?;
+    d.set_item("faceup_slots", FACEUP_SLOTS)?;
+    d.set_item("action_space", ttr_core::actions::ActionSpace::new(board).n)?;
+    Ok(d.unbind())
+}
+
 #[pymodule]
 fn ttr_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(contract_version, m)?)?;
@@ -1199,6 +1503,11 @@ fn ttr_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(run_arena, m)?)?;
     m.add_function(wrap_pyfunction!(board_names, m)?)?;
     m.add_function(wrap_pyfunction!(board_summary, m)?)?;
+    m.add_function(wrap_pyfunction!(board_data, m)?)?;
+    m.add_class::<PyHeuristic>()?;
+    m.add_class::<PyExplanation>()?;
+    m.add_class::<PyCandidate>()?;
+    m.add_class::<PyDecodedAction>()?;
     m.add_class::<PyArenaGames>()?;
     m.add_class::<PyArenaSeats>()?;
     m.add_class::<PyGame>()?;

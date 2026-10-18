@@ -28,7 +28,7 @@ use rayon::prelude::*;
 use crate::heuristic::params::HeuristicParams;
 use crate::heuristic::policy::{Heuristic, Tier};
 use crate::heuristic::probe::Coverage;
-use crate::scoring::{rank_key, returns, score_breakdown};
+use crate::scoring::{competition_ranks, returns, score_breakdown};
 use crate::state::Game;
 
 /// One competitor: a tier, its constants, and the root of its own random stream.
@@ -157,14 +157,13 @@ fn play_one(
 
     let breakdown = score_breakdown(&mut state);
     let rets = returns(&mut state);
-    let keys: Vec<_> = breakdown.iter().map(rank_key).collect();
+    let ranks = competition_ranks(&breakdown);
     let board = state.board;
 
     let outcomes = (0..seats)
         .map(|s| {
             let b = breakdown[s];
-            // Competition ranking: one plus the number of seats strictly ahead.
-            let rank = 1 + keys.iter().filter(|k| **k > keys[s]).count() as u8;
+            let rank = ranks[s];
             SeatOutcome {
                 agent: at[s],
                 score: b.total,

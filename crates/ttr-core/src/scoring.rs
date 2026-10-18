@@ -95,6 +95,16 @@ pub fn rank_key(b: &Breakdown) -> (i16, u8, i16) {
     (b.total, b.completed, b.longest_bonus)
 }
 
+/// Competition ranking under the full tiebreak chain, 1 for first: ties share a rank and
+/// the next rank skips (1, 1, 3).
+pub fn competition_ranks(breakdown: &[Breakdown]) -> Vec<u8> {
+    let keys: Vec<_> = breakdown.iter().map(rank_key).collect();
+    // One plus the number of seats strictly ahead.
+    keys.iter()
+        .map(|key| 1 + keys.iter().filter(|other| *other > key).count() as u8)
+        .collect()
+}
+
 /// Every seat that ties for first under the full tiebreak chain.
 pub fn winners(state: &mut State) -> Vec<usize> {
     let keys: Vec<_> = score_breakdown(state).iter().map(rank_key).collect();

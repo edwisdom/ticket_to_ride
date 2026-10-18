@@ -39,6 +39,28 @@ pub const N_KEEP_ACTIONS: u16 = 7;
 /// 6 draw + 1 draw-tickets + 7 keep + 1 pass.
 pub const N_NON_CLAIM_ACTIONS: u16 = N_DRAW_ACTIONS + 1 + N_KEEP_ACTIONS + 1;
 
+/// An action id, decoded into what it means -- the layout above, applied once, so no caller
+/// (the Python server, the web client) re-derives it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Decoded {
+    /// Claim `segment`, paying with card type `pay`: a colour, or the locomotive for an
+    /// all-locomotive payment.
+    Claim {
+        segment: u16,
+        pay: u8,
+    },
+    /// Draw from face-up slot 0-4, or [`BLIND_SLOT`] for the top of the deck.
+    Draw {
+        slot: u16,
+    },
+    DrawTickets,
+    /// Keep the offered tickets whose bits are set in `mask` (1..=7).
+    Keep {
+        mask: u16,
+    },
+    Pass,
+}
+
 /// Action id arithmetic for one board. Immutable; built once and shared by every state.
 #[derive(Clone, Copy, Debug)]
 pub struct ActionSpace {
@@ -115,48 +137,70 @@ impl ActionSpace {
         action - self.draw_tickets
     }
 
-    /// Human-readable, for the terminal client, replays and test failure messages.
-    pub fn to_string(&self, board: &Board, action: u16) -> String {
-        assert!(action < self.n, "action {action} outside 0..{}", self.n - 1);
-        if action < self.claim_end {
+    /// What `action` means, or `None` outside the space. Every id in range decodes,
+    /// including the ones that are never legal (an empty face-up slot, say): legality is
+    /// the state's question, layout is this one's.
+    pub fn decode(&self, action: u16) -> Option<Decoded> {
+        if action >= self.n {
+            return None;
+        }
+        Some(if action < self.claim_end {
             let (segment, pay) = self.decode_claim(action);
-            let required = board.seg_color[segment as usize];
-            let required_name = if required == GRAY {
-                "gray"
-            } else {
-                board.raw.color_names[required as usize]
-            };
-            let paid = if pay as u8 == board.locomotive {
-                "loco"
-            } else {
-                board.raw.color_names[pay as usize]
-            };
-            return format!(
-                "CLAIM {}-{}[{}{}] pay {}",
-                board.raw.cities[board.seg_a[segment as usize] as usize],
-                board.raw.cities[board.seg_b[segment as usize] as usize],
-                board.seg_len[segment as usize],
-                required_name,
-                paid,
-            );
+            Decoded::Claim {
+                segment,
+                pay: pay as u8,
+            }
+        } else if action < self.draw_tickets {
+            Decoded::Draw {
+                slot: self.decode_draw(action),
+            }
+        } else if action == self.draw_tickets {
+            Decoded::DrawTickets
+        } else if action < self.pass_action {
+            Decoded::Keep {
+                mask: self.decode_keep(action),
+            }
+        } else {
+            Decoded::Pass
+        })
+    }
+
+    /// Human-readable, for replays and test failure messages.
+    pub fn to_string(&self, board: &Board, action: u16) -> String {
+        let decoded = self
+            .decode(action)
+            .unwrap_or_else(|| panic!("action {action} outside 0..{}", self.n - 1));
+        match decoded {
+            Decoded::Claim { segment, pay } => {
+                let required = board.seg_color[segment as usize];
+                let required_name = if required == GRAY {
+                    "gray"
+                } else {
+                    board.raw.color_names[required as usize]
+                };
+                let paid = if pay == board.locomotive {
+                    "loco"
+                } else {
+                    board.raw.color_names[pay as usize]
+                };
+                format!(
+                    "CLAIM {}-{}[{}{}] pay {}",
+                    board.raw.cities[board.seg_a[segment as usize] as usize],
+                    board.raw.cities[board.seg_b[segment as usize] as usize],
+                    board.seg_len[segment as usize],
+                    required_name,
+                    paid,
+                )
+            }
+            Decoded::Draw { slot } if slot == BLIND_SLOT => "DRAW blind".to_string(),
+            Decoded::Draw { slot } => format!("DRAW faceup[{slot}]"),
+            Decoded::DrawTickets => "DRAW_TICKETS".to_string(),
+            Decoded::Keep { mask } => {
+                let kept: Vec<usize> = (0..3).filter(|i| mask & (1 << i) != 0).collect();
+                format!("KEEP offer{kept:?}")
+            }
+            Decoded::Pass => "PASS".to_string(),
         }
-        if action < self.draw_tickets {
-            let slot = self.decode_draw(action);
-            return if slot == BLIND_SLOT {
-                "DRAW blind".to_string()
-            } else {
-                format!("DRAW faceup[{slot}]")
-            };
-        }
-        if action == self.draw_tickets {
-            return "DRAW_TICKETS".to_string();
-        }
-        if action < self.pass_action {
-            let mask = self.decode_keep(action);
-            let kept: Vec<usize> = (0..3).filter(|i| mask & (1 << i) != 0).collect();
-            return format!("KEEP offer{kept:?}");
-        }
-        "PASS".to_string()
     }
 }
 
@@ -241,6 +285,24 @@ mod tests {
                 "{} has unreachable ids",
                 board.name
             );
+        }
+    }
+
+    #[test]
+    fn decoding_inverts_encoding_for_every_id() {
+        for board in all_boards() {
+            let space = ActionSpace::new(board);
+            for action in 0..space.n {
+                let back = match space.decode(action).expect("in range") {
+                    Decoded::Claim { segment, pay } => space.claim(segment, u16::from(pay)),
+                    Decoded::Draw { slot } => space.draw(slot),
+                    Decoded::DrawTickets => space.draw_tickets,
+                    Decoded::Keep { mask } => space.keep(mask),
+                    Decoded::Pass => space.pass_action,
+                };
+                assert_eq!(back, action, "{} action {action}", board.name);
+            }
+            assert_eq!(space.decode(space.n), None);
         }
     }
 

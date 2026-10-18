@@ -102,7 +102,19 @@ def test_module_constants_agree(rust: ModuleType) -> None:
 
 
 @pytest.mark.parametrize(
-    "class_name", ["Game", "State", "VecEnv", "Rng", "ArenaGames", "ArenaSeats"]
+    "class_name",
+    [
+        "Game",
+        "State",
+        "VecEnv",
+        "Rng",
+        "ArenaGames",
+        "ArenaSeats",
+        "Heuristic",
+        "Explanation",
+        "Candidate",
+        "DecodedAction",
+    ],
 )
 def test_class_members_agree(class_name: str, rust: ModuleType) -> None:
     stub = _stub_classes()

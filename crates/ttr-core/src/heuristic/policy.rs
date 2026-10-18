@@ -19,6 +19,11 @@
 //! runs out -- so a claim that pays less per car than that is worse than not claiming. That
 //! single term is what makes the agents prefer dense routes, decline 1-car spurs, and stop
 //! filling the board late; without it each tier needs its own endgame special case.
+//!
+//! **Every decision is explainable, by the same code that makes it.** `act` and `explain`
+//! both run one `decide` -- `act` with a sink that records nothing, `explain` with
+//! one that records each candidate's total, terms and inputs ([`crate::heuristic::trace`]).
+//! The post-game review reads the second; it is never a re-derivation of the first.
 
 use crate::actions::BLIND_SLOT;
 use crate::board::{Board, GRAY, MAX_CARD_TYPES, NO_SIBLING};
@@ -28,6 +33,7 @@ use crate::config::{
 use crate::graph::steiner_cost_exact;
 use crate::heuristic::params::HeuristicParams;
 use crate::heuristic::plan::Plan;
+use crate::heuristic::trace::{Explanation, Recorder, Silent, Sink};
 use crate::rng::{Part, Pcg32, stream};
 use crate::state::State;
 
@@ -65,6 +71,18 @@ impl Tier {
 
     pub const ALL: [Tier; 5] = [Tier::H0, Tier::H1, Tier::H2, Tier::H3, Tier::H4];
 }
+
+// H1's rules, highest first. Within a rule an action's value ranks it, and every value
+// stays below `H1_RULE_SCALE`, so a rule always decides before a value does.
+const H1_CLAIM: f64 = 6.0;
+const H1_TICKETS: f64 = 5.0;
+const H1_FACEUP_LOCOMOTIVE: f64 = 4.0;
+const H1_FACEUP_HELD: f64 = 3.0;
+const H1_BLIND: f64 = 2.0;
+const H1_FACEUP_UNHELD: f64 = 1.0;
+const H1_UNWANTED: f64 = 0.0;
+/// Above any route's points, any hand's count of one colour, and any offer's total cars.
+const H1_RULE_SCALE: f64 = 100.0;
 
 /// A scripted agent. Holds the plan cache and scratch buffers, so a decision allocates
 /// nothing once it is warm.
@@ -139,6 +157,25 @@ impl Heuristic {
     /// cache excluded from every hash, so the mutation is invisible to anything that
     /// compares states.
     pub fn act(&mut self, state: &mut State) -> u16 {
+        self.decide(state, &mut Silent)
+    }
+
+    /// [`Heuristic::act`], with its reasoning: every candidate the decision compared, its
+    /// total, and the terms and inputs that made it (PLAN.md §14.2).
+    ///
+    /// **Not a second scorer.** This is `act` with a [`Recorder`] for its sink, so it returns
+    /// the action `act` would have and leaves the agent as `act` would -- the same plan
+    /// cache, H0's stream advanced by the same draw. Call it *instead of* `act` when the
+    /// reasoning is wanted, never as well: for H0 that would draw twice.
+    pub fn explain(&mut self, state: &mut State) -> Explanation {
+        let seat = state.current_player();
+        let mut recorder = Recorder::default();
+        let chosen = self.decide(state, &mut recorder);
+        recorder.finish(self.tier, seat, state.phase, chosen)
+    }
+
+    /// The one decision procedure behind `act` and `explain`. `sink` only records.
+    fn decide<S: Sink>(&mut self, state: &mut State, sink: &mut S) -> u16 {
         let seat = state.current_player() as usize;
         self.legal.clear();
         state.legal_into(&mut self.legal);
@@ -146,20 +183,32 @@ impl Heuristic {
         debug_assert!(!self.legal.is_empty(), "asked to act in a dead position");
 
         if self.legal.len() == 1 {
+            sink.candidate(self.legal[0]);
+            sink.rule("forced");
+            sink.total(0.0);
             return self.legal[0];
         }
         if self.tier == Tier::H0 {
             let i = self.rng.below(self.legal.len() as u32) as usize;
+            if S::LISTENING {
+                // Nothing is compared, so the record is the distribution drawn from.
+                let p = 1.0 / self.legal.len() as f64;
+                for &action in &self.legal {
+                    sink.candidate(action);
+                    sink.rule("uniform");
+                    sink.total(p);
+                }
+            }
             return self.legal[i];
         }
 
         match state.phase {
-            PHASE_INITIAL_TICKETS | PHASE_TICKET_KEEP => self.act_keep(state, seat),
+            PHASE_INITIAL_TICKETS | PHASE_TICKET_KEEP => self.act_keep(state, seat, sink),
             PHASE_MAIN | PHASE_DRAW_SECOND => {
                 if self.tier == Tier::H1 {
-                    self.act_h1(state, seat)
+                    self.act_h1(state, seat, sink)
                 } else {
-                    self.act_scored(state, seat)
+                    self.act_scored(state, seat, sink)
                 }
             }
             _ => self.legal[0],
@@ -211,33 +260,94 @@ impl Heuristic {
     }
 
     // ------------------------------------------------------------------
-    // H1 -- a shallow rule cascade, kept procedural on purpose
+    // H1 -- a shallow rule cascade, outside the points currency on purpose
     // ------------------------------------------------------------------
 
-    fn act_h1(&mut self, state: &State, seat: usize) -> u16 {
-        let space = state.space;
-        let board = state.board;
-        if state.phase == PHASE_MAIN {
-            // Highest route points, ties by lowest action id so play stays replayable.
-            let mut best: Option<(u8, u16)> = None;
-            for &action in &self.legal {
-                if action >= space.claim_end {
-                    break; // claims sort first
-                }
-                let points =
-                    board.route_points[board.seg_len[(action / space.k) as usize] as usize];
-                if best.is_none_or(|(p, _)| points > p) {
-                    best = Some((points, action));
-                }
-            }
-            if let Some((_, action)) = best {
-                return action;
-            }
-            if self.h1_wants_tickets(state, seat) {
-                return space.draw_tickets;
+    /// H1's cascade -- the route worth the most points, else tickets if it wants them, else
+    /// the face-up colour it holds most of -- as one priority per legal action, taking the
+    /// highest with ties to the lowest id. A priority rather than a chain of early returns,
+    /// so `explain` reports exactly what was compared; the rules and their order are the
+    /// cascade's.
+    fn act_h1<S: Sink>(&mut self, state: &State, seat: usize, sink: &mut S) -> u16 {
+        let wants_tickets = self.h1_wants_tickets(state, seat);
+        let mut best = self.legal[0];
+        let mut best_priority = f64::NEG_INFINITY;
+        for i in 0..self.legal.len() {
+            let action = self.legal[i];
+            sink.candidate(action);
+            let priority = self.h1_priority(state, seat, action, wants_tickets, sink);
+            sink.total(priority);
+            if priority > best_priority {
+                best = action;
+                best_priority = priority;
             }
         }
-        self.h1_draw(state, seat)
+        best
+    }
+
+    /// Which of H1's rules ranks `action`, and where within it: `rule * H1_RULE_SCALE +
+    /// value`.
+    fn h1_priority<S: Sink>(
+        &self,
+        state: &State,
+        seat: usize,
+        action: u16,
+        wants_tickets: bool,
+        sink: &mut S,
+    ) -> f64 {
+        let (space, board) = (state.space, state.board);
+        let (rule, name, value_name, value) = if action < space.claim_end {
+            let points = board.route_points[board.seg_len[(action / space.k) as usize] as usize];
+            (
+                H1_CLAIM,
+                "claim_most_points",
+                "route_points",
+                f64::from(points),
+            )
+        } else if action == space.draw_tickets {
+            if wants_tickets {
+                (H1_TICKETS, "draw_tickets", "", 0.0)
+            } else {
+                (H1_UNWANTED, "tickets_unwanted", "", 0.0)
+            }
+        } else if action < space.draw_tickets {
+            let slot = action - space.draw_base;
+            if slot == BLIND_SLOT {
+                // Holding none of every face-up colour: a blind draw beats starting a new one.
+                (H1_BLIND, "blind_draw", "", 0.0)
+            } else {
+                // A legal face-up draw names a non-empty slot.
+                let card = state.faceup[slot as usize];
+                if card == board.locomotive as i8 && self.params.h1_take_faceup_locomotive {
+                    (H1_FACEUP_LOCOMOTIVE, "faceup_locomotive", "", 0.0)
+                } else {
+                    let held = state.hand[seat * board.n_card_types + card as usize];
+                    if held > 0 {
+                        (
+                            H1_FACEUP_HELD,
+                            "faceup_most_held",
+                            "cards_held",
+                            f64::from(held),
+                        )
+                    } else {
+                        (H1_FACEUP_UNHELD, "faceup_unheld", "", 0.0)
+                    }
+                }
+            }
+        } else {
+            // KEEP is not legal here, and PASS only alone, which returned before scoring.
+            (H1_UNWANTED, "pass", "", 0.0)
+        };
+        debug_assert!(
+            value < H1_RULE_SCALE,
+            "{name}: value {value} reaches the next rule"
+        );
+        sink.rule(name);
+        sink.term("priority", rule * H1_RULE_SCALE);
+        if !value_name.is_empty() {
+            sink.term(value_name, value);
+        }
+        rule * H1_RULE_SCALE + value
     }
 
     fn h1_wants_tickets(&self, state: &State, seat: usize) -> bool {
@@ -252,64 +362,35 @@ impl Heuristic {
         f64::from(state.trains[seat]) >= self.params.ticket_draw_train_fraction * supply
     }
 
-    fn h1_draw(&self, state: &State, seat: usize) -> u16 {
-        let (space, board) = (state.space, state.board);
-        let base = seat * board.n_card_types;
-        let mut best: Option<(u8, u16)> = None;
-        let mut blind: Option<u16> = None;
-        for &action in &self.legal {
-            if !(space.draw_base..space.draw_tickets).contains(&action) {
-                continue;
-            }
-            let slot = action - space.draw_base;
-            if slot == BLIND_SLOT {
-                blind = Some(action);
-                continue;
-            }
-            let card = state.faceup[slot as usize];
-            if card == EMPTY_SLOT {
-                continue;
-            }
-            if card == board.locomotive as i8 && self.params.h1_take_faceup_locomotive {
-                return action;
-            }
-            let held = state.hand[base + card as usize];
-            if best.is_none_or(|(h, _)| held > h) {
-                best = Some((held, action));
-            }
-        }
-        match best {
-            // Holding none of every face-up colour: a blind draw beats starting a new one.
-            Some((0, _)) | None => blind.or_else(|| best.map(|(_, a)| a)),
-            Some((_, action)) => Some(action),
-        }
-        .unwrap_or(self.legal[0])
-    }
-
     // ------------------------------------------------------------------
     // H2-H4 -- the scored ladder
     // ------------------------------------------------------------------
 
-    fn act_scored(&mut self, state: &mut State, seat: usize) -> u16 {
+    fn act_scored<S: Sink>(&mut self, state: &mut State, seat: usize, sink: &mut S) -> u16 {
         self.refresh(state, seat);
         let ctx = Ctx::build(state, seat, &self.params, &self.plan);
+        if S::LISTENING {
+            ctx.report(&self.plan, state, sink);
+        }
         let space = state.space;
 
         let mut best = self.legal[0];
         let mut best_score = f64::NEG_INFINITY;
         for i in 0..self.legal.len() {
             let action = self.legal[i];
+            sink.candidate(action);
             let score = if action < space.claim_end {
-                self.score_claim(state, &ctx, action)
+                self.score_claim(state, &ctx, action, sink)
             } else if action < space.draw_tickets {
-                self.score_draw(state, &ctx, action)
+                self.score_draw(state, &ctx, action, sink)
             } else if action == space.draw_tickets {
-                self.score_draw_tickets(state, &ctx)
+                self.score_draw_tickets(state, &ctx, sink)
             } else {
                 // PASS, which is only legal when nothing else is -- and that case returned
                 // early. Scored below everything so it can never win a real comparison.
                 f64::NEG_INFINITY
             };
+            sink.total(score);
             // Strictly greater: ties go to the lowest action id, which is what keeps every
             // heuristic a deterministic function of the position.
             if score > best_score {
@@ -320,7 +401,13 @@ impl Heuristic {
         best
     }
 
-    fn score_claim(&mut self, state: &mut State, ctx: &Ctx, action: u16) -> f64 {
+    fn score_claim<S: Sink>(
+        &mut self,
+        state: &mut State,
+        ctx: &Ctx,
+        action: u16,
+        sink: &mut S,
+    ) -> f64 {
         let board = state.board;
         let p = &self.params;
         let (segment, pay) = state.space.decode_claim(action);
@@ -331,14 +418,24 @@ impl Heuristic {
         // Every car spent has an opportunity cost. This is the term that makes the ladder
         // prefer dense routes and decline spurs, and it removes the need for a separate
         // endgame "maximize points per train" branch.
-        let mut score =
-            f64::from(board.route_points[length as usize]) - p.min_points_per_train * cars;
+        let points = f64::from(board.route_points[length as usize]);
+        let train_cost = p.min_points_per_train * cars;
+        let mut score = points - train_cost;
+        sink.term("route_points", points);
+        sink.term("train_cost", -train_cost);
+        sink.fact("cars", cars);
 
         let on_plan = self.plan.contains(segment);
+        sink.fact("on_plan", f64::from(u8::from(on_plan)));
         if on_plan {
             let plan_value = ctx.plan_car_value * cars;
             score += plan_value;
-            score += p.contest_weight * f64::from(self.plan.detour_cost(state, segment));
+            sink.term("plan_value", plan_value);
+            let detour = self.plan.detour_cost(state, segment);
+            let contest = p.contest_weight * f64::from(detour);
+            score += contest;
+            sink.term("contest", contest);
+            sink.fact("detour", f64::from(detour));
             // 2-3P: claiming either track of a double closes the sibling to everyone, so a
             // plan segment that is half of a live double is worth taking early.
             let sibling = board.sibling[seg];
@@ -351,22 +448,25 @@ impl Heuristic {
                 } else {
                     1.0
                 };
-                score += p.double_lockout_weight * urgency;
+                let lockout = p.double_lockout_weight * urgency;
+                score += lockout;
+                sink.term("double_lockout", lockout);
             }
         }
 
         if self.tier >= Tier::H3 {
-            score += self.h3_claim_terms(state, ctx, segment, pay, length, on_plan);
+            score += self.h3_claim_terms(state, ctx, segment, pay, length, on_plan, sink);
         }
         if self.tier >= Tier::H4 {
-            score += self.h4_claim_terms(state, ctx, segment, length, on_plan);
+            score += self.h4_claim_terms(state, ctx, segment, length, on_plan, sink);
         }
         score
     }
 
     /// H3's four claim-side additions: longest-chain tiebreak, gray cannibalization,
     /// locomotive thrift, and the endgame re-weighting of plan credit.
-    fn h3_claim_terms(
+    #[allow(clippy::too_many_arguments)]
+    fn h3_claim_terms<S: Sink>(
         &mut self,
         state: &mut State,
         ctx: &Ctx,
@@ -374,6 +474,7 @@ impl Heuristic {
         pay: u16,
         length: u8,
         on_plan: bool,
+        sink: &mut S,
     ) -> f64 {
         let board = state.board;
         let p = &self.params;
@@ -386,7 +487,9 @@ impl Heuristic {
         let touching =
             self.component_cars(state, ctx.seat, a) + self.component_cars(state, ctx.seat, b);
         if touching > 0 {
-            extra += p.longest_chain_weight * f64::from(length);
+            let chain = p.longest_chain_weight * f64::from(length);
+            extra += chain;
+            sink.term("longest_chain", chain);
         }
 
         // What this payment actually costs in flexibility.
@@ -397,11 +500,19 @@ impl Heuristic {
             // your last four blues when the plan needs a 4-blue route is not.
             if board.seg_color[seg] == GRAY && (pay as u8) != board.locomotive {
                 let wasted = u16::from(colored).min(ctx.deficit[pay as usize]);
-                extra -= p.gray_cannibalization_penalty * ctx.plan_car_value * f64::from(wasted);
+                let cannibalized =
+                    p.gray_cannibalization_penalty * ctx.plan_car_value * f64::from(wasted);
+                extra -= cannibalized;
+                sink.term("gray_cannibalization", -cannibalized);
+                sink.fact("needed_cards_spent", f64::from(wasted));
             }
             // A locomotive substitutes for any colour, so spending one where a coloured
             // card would do throws away the difference.
-            extra -= (p.locomotive_value - 1.0).max(0.0) * ctx.plan_car_value * f64::from(wilds);
+            let thrift =
+                (p.locomotive_value - 1.0).max(0.0) * ctx.plan_car_value * f64::from(wilds);
+            extra -= thrift;
+            sink.term("locomotive_thrift", -thrift);
+            sink.fact("locomotives", f64::from(wilds));
         }
 
         // Endgame. Under `endgame_train_fraction` of the supply the binding question is
@@ -410,23 +521,26 @@ impl Heuristic {
         // almost any price.
         if ctx.endgame && on_plan {
             let base = ctx.plan_car_value * f64::from(length);
-            extra += if ctx.plan_completable {
+            let urgency = if ctx.plan_completable {
                 base * (p.endgame_ticket_urgency - 1.0)
             } else {
                 -base
             };
+            extra += urgency;
+            sink.term("endgame", urgency);
         }
         extra
     }
 
     /// H4's claim-side additions: the threatened-edge primitive, and hoard-and-strike.
-    fn h4_claim_terms(
+    fn h4_claim_terms<S: Sink>(
         &mut self,
         state: &mut State,
         ctx: &Ctx,
         segment: u16,
         length: u8,
         on_plan: bool,
+        sink: &mut S,
     ) -> f64 {
         let p = self.params;
         // **Block with track you wanted anyway.** Denial priced on its own merits made H4
@@ -438,11 +552,13 @@ impl Heuristic {
         let useful = on_plan
             || self.component_cars(state, ctx.seat, state.board.seg_a[segment as usize]) > 0
             || self.component_cars(state, ctx.seat, state.board.seg_b[segment as usize]) > 0;
-        let mut extra = if useful {
+        let threat = if useful {
             p.threat_weight * self.threat_value(state, ctx, segment, length)
         } else {
             0.0
         };
+        sink.term("threat", threat);
+        let mut extra = threat;
 
         // Hoard and strike, applied only where waiting is provably free: a plan segment
         // whose detour cost is zero has a parallel alternative, so losing it costs nothing
@@ -458,7 +574,10 @@ impl Heuristic {
                 // them takes it while you wait. Measured, holding everything else fixed:
                 // hoarding alone cost -12.3 Elo at USA 5P and was neutral at 4P and 2P.
                 let rivals = f64::from(state.rules.n_players.saturating_sub(1).max(1));
-                extra -= p.contest_weight * f64::from(pending) / rivals;
+                let hoard = p.contest_weight * f64::from(pending) / rivals;
+                extra -= hoard;
+                sink.term("hoard", -hoard);
+                sink.fact("pending_detour", f64::from(pending));
             }
         }
         extra
@@ -563,7 +682,7 @@ impl Heuristic {
 
     // -- draws ---------------------------------------------------------
 
-    fn score_draw(&self, state: &State, ctx: &Ctx, action: u16) -> f64 {
+    fn score_draw<S: Sink>(&self, state: &State, ctx: &Ctx, action: u16, sink: &mut S) -> f64 {
         let board = state.board;
         let slot = action - state.space.draw_base;
         if slot == BLIND_SLOT {
@@ -571,6 +690,7 @@ impl Heuristic {
             // opponent's blind draws.
             let unseen = state.unseen_counts(ctx.seat);
             let total: i32 = unseen.iter().map(|&c| i32::from(c.max(0))).sum();
+            sink.fact("unseen_cards", f64::from(total));
             if total == 0 {
                 return 0.0;
             }
@@ -580,6 +700,7 @@ impl Heuristic {
                     expected += f64::from(count) / f64::from(total) * ctx.card_value(card as u8);
                 }
             }
+            sink.term("expected_card_value", expected);
             return expected;
         }
         let card = state.faceup[slot as usize];
@@ -588,10 +709,16 @@ impl Heuristic {
         }
         let card = card as u8;
         let mut value = ctx.card_value(card);
+        sink.term("card_value", value);
+        if card != board.locomotive {
+            sink.fact("plan_needs", f64::from(ctx.deficit[card as usize]));
+        }
         // A known card of a colour the plan is short of beats the same card drawn blind:
         // taking it is certain, and certainty is what turns a plan into a claim.
         if self.tier >= Tier::H3 && card != board.locomotive && ctx.deficit[card as usize] > 0 {
-            value += self.params.faceup_needed_bonus * ctx.plan_car_value;
+            let bonus = self.params.faceup_needed_bonus * ctx.plan_car_value;
+            value += bonus;
+            sink.term("needed_bonus", bonus);
         }
         value
     }
@@ -605,11 +732,12 @@ impl Heuristic {
     /// else: whether a commitment is *affordable* is
     /// [`HeuristicParams::completion_odds`], the same function the keep filter uses,
     /// because keeping a ticket and drawing one are the same question asked twice.
-    fn score_draw_tickets(&self, state: &State, ctx: &Ctx) -> f64 {
+    fn score_draw_tickets<S: Sink>(&self, state: &State, ctx: &Ctx, sink: &mut S) -> f64 {
         let p = &self.params;
         let supply = f64::from(state.board.raw.trains_per_player);
         let trains = f64::from(state.trains[ctx.seat]);
         if trains < p.ticket_draw_train_fraction * supply {
+            sink.rule("ticket_gate");
             return f64::NEG_INFINITY;
         }
         let deal = f64::from(state.board.raw.draw_ticket_deal.max(1));
@@ -628,23 +756,29 @@ impl Heuristic {
         let after =
             f64::from(self.plan.steiner_cost as u16) + kept * ctx.mean_ticket_cars * selectivity;
         let odds = p.completion_odds(after, trains);
-        ctx.mean_remaining_ticket_points * (2.0 * odds - 1.0) * kept
+        let value = ctx.mean_remaining_ticket_points * (2.0 * odds - 1.0) * kept;
+        sink.term("expected_settlement", value);
+        sink.fact("plan_cost_after", after);
+        sink.fact("completion_odds", odds);
+        sink.fact("mean_ticket_points", ctx.mean_remaining_ticket_points);
+        value
     }
 
     // ------------------------------------------------------------------
     // Keeping tickets
     // ------------------------------------------------------------------
 
-    fn act_keep(&mut self, state: &mut State, seat: usize) -> u16 {
+    fn act_keep<S: Sink>(&mut self, state: &mut State, seat: usize, sink: &mut S) -> u16 {
         match self.tier {
-            Tier::H1 => self.keep_h1(state),
-            Tier::H2 => self.keep_scored(state, seat, false),
-            _ => self.keep_scored(state, seat, true),
+            Tier::H1 => self.keep_h1(state, sink),
+            Tier::H2 => self.keep_scored(state, seat, false, sink),
+            _ => self.keep_scored(state, seat, true, sink),
         }
     }
 
-    /// H1: keep the fewest tickets allowed, choosing the shortest routes.
-    fn keep_h1(&self, state: &State) -> u16 {
+    /// H1: keep the fewest tickets allowed, choosing the shortest routes -- fewest first,
+    /// then fewest cars, then the lowest id, as one priority so `explain` shows the order.
+    fn keep_h1<S: Sink>(&self, state: &State, sink: &mut S) -> u16 {
         let (board, space) = (state.board, state.space);
         let cost: Vec<u16> = state.offer[..state.offer_len as usize]
             .iter()
@@ -652,21 +786,31 @@ impl Heuristic {
                 board.dist[board.ticket_a[t as usize] as usize][board.ticket_b[t as usize] as usize]
             })
             .collect();
-        *self
-            .legal
-            .iter()
-            .min_by_key(|&&action| {
-                let mask = action - space.keep_base();
-                let kept: Vec<usize> = (0..state.offer_len as usize)
-                    .filter(|i| mask >> i & 1 != 0)
-                    .collect();
-                (
-                    kept.len(),
-                    kept.iter().map(|&i| cost[i]).sum::<u16>(),
-                    action,
-                )
-            })
-            .expect("a legal keep")
+        let mut best = self.legal[0];
+        let mut best_priority = f64::NEG_INFINITY;
+        for &action in &self.legal {
+            let mask = action - space.keep_base();
+            let kept: Vec<usize> = (0..state.offer_len as usize)
+                .filter(|i| mask >> i & 1 != 0)
+                .collect();
+            let cars = f64::from(kept.iter().map(|&i| cost[i]).sum::<u16>());
+            debug_assert!(
+                cars < H1_RULE_SCALE,
+                "{cars} cars reach the next ticket count"
+            );
+            let fewest = -(kept.len() as f64) * H1_RULE_SCALE;
+            let priority = fewest - cars;
+            sink.candidate(action);
+            sink.rule("keep_fewest_shortest");
+            sink.term("tickets_kept", fewest);
+            sink.term("route_cars", -cars);
+            sink.total(priority);
+            if priority > best_priority {
+                best = action;
+                best_priority = priority;
+            }
+        }
+        best
     }
 
     /// H2 minimizes what the keep adds to the plan; H3+ price the keep as what it will
@@ -688,7 +832,13 @@ impl Heuristic {
     /// symptom reached by the opposite route. Expected settlement against the train budget
     /// is the same idea with the missing constraint put back, and it costs one parameter
     /// fewer.
-    fn keep_scored(&mut self, state: &mut State, seat: usize, ev_filter: bool) -> u16 {
+    fn keep_scored<S: Sink>(
+        &mut self,
+        state: &mut State,
+        seat: usize,
+        ev_filter: bool,
+        sink: &mut S,
+    ) -> u16 {
         self.refresh(state, seat);
         let board = state.board;
         let doubles_locked = state.rules.doubles_locked;
@@ -696,10 +846,13 @@ impl Heuristic {
         let base_terminals = self.plan.terminals.clone();
         let base_cost = self.plan.steiner_cost;
         let owner: Vec<u8> = state.seg_owner[..n_segments].to_vec();
+        sink.context("plan_cost", f64::from(base_cost));
+        sink.context("trains", f64::from(state.trains[seat]));
 
         let mut best = self.legal[0];
         let mut best_value = f64::NEG_INFINITY;
         for &action in &self.legal {
+            sink.candidate(action);
             let mask = action - state.space.keep_base();
             let mut terminals = base_terminals.clone();
             let mut points = 0.0;
@@ -725,6 +878,9 @@ impl Heuristic {
                 steiner_cost_exact(board, &owner, seat as u8, &terminals, doubles_locked);
             let marginal = f64::from(cost.saturating_sub(base_cost) as u16);
 
+            sink.fact("ticket_points", points);
+            sink.fact("plan_cost", f64::from(cost as u16));
+            sink.fact("added_cars", marginal);
             let value = if ev_filter {
                 // What this ticket set settles for: `+points` each if completed, `-points`
                 // each if not, weighted by whether the trains left can absorb the whole
@@ -732,11 +888,19 @@ impl Heuristic {
                 // with everything already committed.
                 let trains = f64::from(state.trains[seat]);
                 let odds = self.params.completion_odds(f64::from(cost as u16), trains);
-                points * (2.0 * odds - 1.0) - dead_penalty
+                let settlement = points * (2.0 * odds - 1.0);
+                sink.term("expected_settlement", settlement);
+                sink.fact("completion_odds", odds);
+                settlement - dead_penalty
             } else {
                 // H2: take on as little new track as possible, fewest tickets first.
-                -marginal - f64::from(mask.count_ones()) - dead_penalty
+                let count = f64::from(mask.count_ones());
+                sink.term("added_track", -marginal);
+                sink.term("tickets_kept", -count);
+                -marginal - count - dead_penalty
             };
+            sink.term("dead_tickets", -dead_penalty);
+            sink.total(value);
             if value > best_value {
                 best = action;
                 best_value = value;
@@ -871,6 +1035,22 @@ impl Ctx {
             locomotive_value: params.locomotive_value,
             affordable,
         }
+    }
+
+    /// The decision-wide quantities behind every candidate's terms, for a trace.
+    fn report<S: Sink>(&self, plan: &Plan, state: &State, sink: &mut S) {
+        sink.context("plan_cost", f64::from(plan.steiner_cost));
+        sink.context("plan_points", f64::from(plan.live_points));
+        sink.context("plan_segments", plan.segments.len() as f64);
+        sink.context("dead_tickets", plan.dead_tickets.len() as f64);
+        sink.context("plan_car_value", self.plan_car_value);
+        sink.context("trains", f64::from(state.trains[self.seat]));
+        sink.context("endgame", f64::from(u8::from(self.endgame)));
+        sink.context(
+            "plan_completable",
+            f64::from(u8::from(self.plan_completable)),
+        );
+        sink.context("progress", self.progress);
     }
 
     /// What one card of `card` is worth, in points.
