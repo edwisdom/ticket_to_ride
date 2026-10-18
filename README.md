@@ -17,11 +17,11 @@ training reinforcement learning agents against it via self-play.
 | 3.2 | Rust performance (observation encoder) | done |
 | 3.3 | Modal cloud runs | done |
 | 3.4 | PPO spike on TTR-mini (tentative) | done |
-| 4 | Terminal client | next |
+| 4 | Web client: play the heuristics in a browser | next |
 | 5 | Determinization + ISMCTS | |
 | 6 | PPO self-play + league | |
 | 7 | ISMCTS + learned priors | |
-| 8 | Scaling, web UI, human gauntlet | |
+| 8 | Scaling, public deployment, human gauntlet | |
 
 The engine plays 2–5 players on the USA map and 2–4 on TTR-mini, and it is Rust
 (`crates/ttr-core`). A Python reference engine came first and the two were byte-identical

@@ -5,6 +5,48 @@ session. Decisions that deviate from [PLAN.md](PLAN.md) belong here, with the re
 
 ---
 
+## 2026-10-17 — Plan revision 2: Phase 4 becomes the web client
+
+At the user's direction, Phase 4 is a web client instead of a terminal one: a terminal is a poor
+way to play a game whose state is a map. The user wants to measure the heuristics against
+themselves (an average-to-above-average player) and catch degenerate decisions before H3/H4 become
+the RL initialization and benchmark, and later to open the client to the public to rate the bots
+against people and collect human games as supervision data. PLAN.md §14.2 has the design; the
+superseded Phase 4, §12 and Phase 8 text is marked in place.
+
+Decided with the user:
+
+- **Svelte + TypeScript, built by Vite**, served as static files by FastAPI; Node at build time
+  only. Replaces §12's "one static HTML file, no npm".
+- **Scope:** USA and mini, 2 players, plus spectating bot-vs-bot games with everything visible.
+  Not now: 3-5 players, phone layouts.
+- **Assistance is bot parity** in every rated game: the UI shows the public information the bots'
+  observation holds (known opponent cards, discard and unseen counts, ticket progress and
+  remaining cost), so a rating measures strategy rather than memory.
+- **Review:** a post-game scrubber with all hidden information revealed and each bot decision's
+  candidates broken down by term. Not now: move flagging, same-deal comparisons, live reasoning.
+- **The look follows the physical board.** The user asked for it to look like the board game
+  itself. It will, in style -- vintage map, coloured car spaces, score track around the edge --
+  with original art: the published artwork is copyrighted, so photos of it are a style reference
+  only, never committed, embedded or traced, and the public site needs its own name and logo.
+
+Decided here, open to objection: server-authoritative play with no hidden information in the
+browser, tested by comparing a seat's view of a state with its view of a resampled infoset; the
+play store (`runs/play.db`) as the source of truth, every game rebuilt from seed and actions with
+each bot re-asserting its recorded moves; one scorer with an optional trace sink for the
+heuristics' explanations, never a second scorer; human games rated in the same Bradley-Terry fit
+as the arena's, H3 = 0; a random human seat in rated games, because first-player advantage is real.
+
+Checked while planning: `usa.toml` lists segments in engine order and `mini.toml` does not (the
+generator canonicalizes mini), so the client reads the engine's `board_data`, never the TOML.
+
+### Next
+
+Phase 4.1 (engine additions) and 4.2 (server) in one session, 4.3 (client) alongside it in another,
+starting with the board's look for the user's sign-off.
+
+---
+
 ## 2026-10-17 — Cleanup: `oracle-v1` retired, the Python-migration scaffolding removed
 
 For faster iteration, as asked: less code, one implementation of everything, shorter

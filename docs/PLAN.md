@@ -6,6 +6,9 @@ in docs/WORKLOG.md rather than silently editing this file.
 Revision 1, 2026-10-15, at the user's direction: the Python engine is retired and the Rust
 core becomes its own oracle. New phases 3.1-3.4 are inserted between Phases 3 and 4 (§14,
 §14.1). Superseded text is marked in place rather than deleted. Reasoning in docs/WORKLOG.md.
+
+Revision 2, 2026-10-17, at the user's direction: Phase 4 becomes a web client and the terminal
+client is dropped; the web UI moves up from Phase 8 (§14.2). Superseded text is marked in place.
 -->
 
 # Ticket to Ride — Game Engine + Self-Play RL
@@ -29,7 +32,8 @@ algorithms via self-play until agents beat strong heuristic opponents and eventu
 - Engine supports 2–5 players (incl. 2–3P double-route blocking); training/eval targets 2P first.
 - Ladder runs through search + learning: heuristics → PPO self-play → Information-Set MCTS with learned
   policy/value priors.
-- Rich terminal client now; browser SVG map later.
+- Rich terminal client now; browser SVG map later. *(Superseded by Revision 2: a web client now, and
+  no terminal client. See §14.2.)*
 
 **Hardware:** MacBook Pro M2 Max, 12 cores (8P/4E), 32 GB unified memory, **no CUDA** — PyTorch MPS only.
 Everything below is sized for one machine. This is a weeks-of-overnight-runs project, not a cluster project.
@@ -156,6 +160,8 @@ Four boundaries that carry weight:
 3. **`eval/` does not import `rl/`.** Neural agents come through `agents/registry.py`, which lazy-imports
    torch only for specs like `ppo:runs/x/best.pt`. The arena is then a general tournament tool.
 4. **`ui/render/projection.py` is shared by terminal and web**, so both derive from one lat/lon table.
+   *(Revision 2: there is one client, the web one, and the projection moves into the layout
+   generator. §14.2.)*
 
 Delete `main.py` once `ttr` exists.
 
@@ -801,25 +807,33 @@ historical run.
 
 **A human is just an `Agent`** — `agents/human.py` implements the same protocol, blocking on a caller-supplied
 prompt function. "Human vs bot" is then literally an arena match: no special-casing in the engine, no separate
-game loop, and the human path is exercised by every arena test.
+game loop, and the human path is exercised by every arena test. *(Revision 2: the web server drives turns
+instead. A human seat is where the game service waits for a client message, and bots still go through one
+agent interface. §14.2.)*
 
 **Terminal MVP** (`ttr play --seat 0 --opponents h3`): routes grouped by region and colored by owner, doubles
 marked, your hand as colored counts, the face-up row, your tickets with live *connected?* and *remaining cost
 in trains*, scores/trains/deck, and **a numbered `legal_actions()` menu**. That last item is load-bearing —
 it's exactly the action space the agents see, so it's the human UI and the best debugging tool in one. When a
-bot does something baffling, play the same position and read the menu.
+bot does something baffling, play the same position and read the menu. *(Superseded by Revision 2: no terminal
+client. The menu's virtue survives as the server sending decoded legal actions, so the client never re-derives
+the rules.)*
 
 **Coordinates:** RULES.md has none, so hand-author **real lat/lon** for the 36 cities (~20 minutes, public
 factual data) plus cosmetic `nudge_x/y` for the Boston/NY/Washington cluster, and project once for every
 renderer. Do *not* transcribe positions off the physical board — that artwork is copyrighted. Growth path
 `--map=list | ascii | braille` (braille gives 2×4 subpixels per cell → a 220×160 canvas, smooth lines).
+*(Revision 2: the growth path goes with the terminal client; the lat/lon table and the nudges stay.)*
 
 **Web** (`ttr serve`): FastAPI + **one static HTML file, no npm, no bundler** — vanilla JS + inline SVG from
 the same `projection.py`. `/api/state?seat=0` returning a seat-limited view is also the perfect test that
 information-set masking is correct. Growth: human play → replay scrubber → **agent introspection overlay
 showing policy probabilities and predicted final score as you scrub**. That overlay is the single highest-value
 debugging tool in the project — it turns "the agent is bad" into "the agent thinks claiming Denver–Omaha is
-worth 0.02 on turn 12, which is insane."
+worth 0.02 on turn 12, which is insane." *(Revision 2: Svelte + TypeScript built by Vite into static files,
+not one hand-written HTML file, at the user's choice. Human play and the replay scrubber land in Phase 4,
+with the heuristics' per-term reasoning in the scrubber; the policy/value overlay for learned agents stays in
+Phase 8. §14.2.)*
 
 ## 13. Scope reduction & TTR-mini
 
@@ -863,11 +877,11 @@ determinization validator passes on 1M samples.
 | **3.2** (3–5 d) | *Revision 1.* Rust performance, free of Python's structural constraints: profile, then cache/incrementalize Steiner and `remaining_cost`, fixed-size bitsets instead of maps, f32, no hot-path allocation (§14.1) | observe ≤15 µs CPU/obs single-threaded (from ~150); ≥250k env-steps/s batched observe+mask+step at 1024 envs (from 35k); state hashes identical to `oracle-v1` at every step; H3 behaviour hash unchanged (`5b906156d4b1204b`); every cache asserted against recomputation |
 | **3.3** (1–2 d) | *Revision 1.* Modal: image that builds `ttr_rust`, a runs Volume, `ttr cloud …` wrapper, `device` setting, spend cap (§14.1) | `ttr bench` and a 10k-game arena run on Modal (CPU and GPU containers); arena outcomes identical to local for the same seed root; results land locally; budget cap set; cost per experiment recorded |
 | **3.4** (3–5 d) | *Revision 1, tentative.* PPO spike on TTR-mini 2P, plus the `VecEnv` RL additions it forces: returns before reset, seat→policy routing with scripted opponents stepping in Rust, aux targets, game-record export (§14.1) | beats random ≥95% within 2M steps (§13 ablation 4); beats H1 on mini; `mask_violations == 0`; measured steps/s on MPS and on a Modal GPU replace the §9 estimates |
-| **4** (1–2 d → ~1 d) | `HumanAgent`, projection + lat/lon, terminal client, `ttr play`, `ttr replay` *(Revision 1: trimmed to `ttr play`; `ttr replay` deferred to Phase 8's web UI)* | you play a full 2P game against H3 without confusion; `--map=ascii` legible at 110 cols; **you lose to H3 at least once** |
+| **4** (5–8 d) | *Revision 2: the web client (§14.2).* Engine bindings for one decision at a time with the heuristics' reasoning; a FastAPI game server and play store; a Svelte client with a board in the physical game's style, spectating and post-game review; human ratings. *(Was: `HumanAgent`, projection + lat/lon, terminal client, `ttr play`, `ttr replay`.)* | you play full 2P games against H3 and H4 on both maps without confusion; every game rebuilds from the store; the masking test passes; your rating sits on the bot leaderboard with an interval; **you lose to H3 at least once** |
 | **5** (3–4 d) | Planned API revision pass (§8.1); determinization sampler + validator + particle filter; flat MC; SO-ISMCTS | ISMCTS-1000 beats H4 with SPRT-confirmed Δelo >+100; **strength monotone in sim count (200<500<1000<2000)** — the canonical proof the search is correct; validator passes 1M samples |
 | **6** (4–6 d) | `rl/encode` (versioned); nets; vec env; PPO; league; tracking; run dirs/manifests/checkpoints *(Revision 1 adds: history features as `OBS_VERSION` 2 and the history-probe experiment, §14.1; **now version 3** — 2 went to the plan-walk fix before Phase 3.4, see WORKLOG 2026-10-17)* | run dir complete and `--resume` continues the same trajectory; **`mask_violations == 0` throughout**; beats H3 by ~40M steps and H4 ≥65%; checkpoints refuse to load under a bumped `OBS_VERSION`; `points_per_train` visibly rises; history probe reported either way |
 | **7** (1–2 w) | Batched ISMCTS + learned prior/value + belief head; AZ trainer; PFSP league | R2 beats the PPO agent (SPRT); Elo rises monotonically over ≥5 promotion generations; `cycle_fraction` tracked; BR-probe exploitability trending down; a 24 h unattended run completes |
-| **8** | Transformer net + color-symmetry regularizer; web UI + introspection overlay; human gauntlet; optional R-NaD / Deep-CFR-on-mini | **beats you consistently**; your Elo lands on the same leaderboard as the bots |
+| **8** | Transformer net + color-symmetry regularizer; introspection overlay for learned agents *(Revision 2: the web UI itself moved to Phase 4)*; public deployment and human gauntlet; optional R-NaD / Deep-CFR-on-mini | **beats you consistently**; your Elo lands on the same leaderboard as the bots |
 
 Phase 1 is now the highest-leverage phase in the project: it's the last point at which the rules contract,
 the state layout, and the feature-spec table are free to change. Spend the extra half-day there.
@@ -1009,7 +1023,8 @@ Phase 6 is then re-planned from what it measures.
 #### Additions to later phases
 
 - **Phase 4** is trimmed to `ttr play` (about 1 day). Its exit criterion, that you lose to H3, is a
-  real check that the heuristics are strong. `ttr replay` moves to Phase 8's web UI.
+  real check that the heuristics are strong. `ttr replay` moves to Phase 8's web UI. *(Superseded by
+  Revision 2: Phase 4 is the web client, §14.2. The exit criterion survives.)*
 - **Phase 6** gains:
   - Cheap history features as `OBS_VERSION` 2 *(now 3: version 2 fixed the plan walk and two quirks before Phase 3.4 — WORKLOG 2026-10-17)*: claim turn per segment, tickets I returned, face-up
     colours each opponent passed on, when each opponent last drew tickets.
@@ -1018,6 +1033,175 @@ Phase 6 is then re-planned from what it measures.
     clearly better, a recurrent or history-token network is not worth its estimated 1.5–3× training
     cost and its awkward fit with ISMCTS. If it is, that's the Phase 8 architecture question settled
     with data.
+
+### 14.2 Revision 2 (2026-10-17): Phase 4 becomes the web client
+
+**Why.** A terminal is a poor way to play a game whose state is a map, and Phase 4's job is real: the
+user, an average-to-above-average player, wants to measure the heuristics against themselves and catch
+degenerate decisions before H3/H4 become the RL initialization and benchmark. Later the same client
+opens to the public, to rate the bots against people and to collect human games as supervision data. So
+the web UI moves up from Phase 8, built from the start as something that can be deployed, and the
+terminal client is dropped: no `ttr play`, no `--map=ascii`.
+
+**Decisions confirmed with the user:**
+
+- **Svelte + TypeScript**, built by Vite into static files that FastAPI serves. Node is a build-time
+  tool only. This replaces §12's "one static HTML file, no npm": a polished, animated client with a
+  lobby, a replay scrubber and, later, accounts outgrows hand-written DOM code.
+- **Scope:** USA and mini, 2 players, you against any heuristic; and **spectating** bot-vs-bot games
+  with every hand and ticket visible and each bot's reasoning on screen. Not now: 3–5 players, phone
+  layouts. The protocol stays N-player so neither needs a redesign.
+- **Assistance is bot parity, the same in every rated game.** The UI shows the public information the
+  bots' observation holds: each opponent's known cards (`certain`), the discard composition, unseen
+  counts per colour, and each of your tickets' progress and remaining train cost. Ratings then measure
+  strategy rather than memory. The level is recorded with each game (`assist = "parity-1"`), so a later
+  change splits the data cleanly instead of silently.
+- **Review:** after a game, a scrubber over every decision with all hidden information revealed and, at
+  each bot decision, its top candidates with their scores broken down by term. Not now: flagging moves,
+  same-deal comparisons, bot reasoning during rated play.
+- **Look: the physical board's.** See *Visual design* for what that can and cannot mean.
+
+**Architecture.**
+
+```
+Svelte client ──REST──────────────────▶ FastAPI ──▶ GameService ──▶ ttr_rust: State, Heuristic, board_data
+      ▲  └────── WebSocket /ws/games/{id} ──▲             │
+      └─────────────────────────────────────┘             └──▶ PlayStore: runs/play.db (SQLite WAL, portable SQL)
+```
+
+- **Server-authoritative.** The browser never receives hidden information: no seed, no deck order,
+  nothing of an opponent's hand beyond `certain`, no opponent tickets before the end. Legal actions
+  arrive decoded from the server (claim segment *s* paying 3 blue + 1 locomotive; draw slot 2; keep
+  tickets {4, 17}) -- the old terminal menu's virtue -- so the client implements no rules and there is
+  still one implementation of them.
+- **The store is the source of truth; memory is a cache.** Each decision is appended as it happens, and
+  a game is rebuilt from `(seed, actions)` in microseconds. A rebuild also calls each bot at each of its
+  past decisions and **asserts it reproduces the recorded action**. That warms its plan cache, advances
+  H0's stream, and makes every rebuild an L1 check: a bot whose code changed mid-game is reported, never
+  papered over. A restart, or one day a second server, loses nothing.
+- **Bots run server-side** through `agents/registry.py`: spec strings `h0`–`h4`, `h3@file.toml` for
+  parameter overrides, and later `ppo:path` (torch imported lazily, §2 boundary 3). Agents are identified
+  as in the arena store, `(family, params_hash, behaviour_hash, checkpoint)`, so one bot is one identity
+  everywhere. Moves stream to the client as they are made (search agents will take seconds per move),
+  and the client paces the animation at an adjustable speed.
+- **The human's seat is random in rated games.** First-player advantage is real (seat 0 wins 50.7% on
+  USA 2P and 52.0% on mini; GOTCHAS), and unpaired games cannot rotate it away.
+
+**Protocol (a sketch; 4.2 pins it).** Pydantic models are the source of truth. They emit a JSON Schema,
+checked in with a `--check` mode like the board data, from which the client generates its TypeScript
+types.
+
+- `GET /api/boards/{map}` -- the engine's board data plus the layout (below). The client reads this,
+  never the map TOML: mini's TOML is not in engine order (the generator canonicalizes it).
+- `GET /api/agents` -- opponents, with ratings on the H3 = 0 scale.
+- `POST /api/games` -- `{map, opponent, seat}` to play; `{map, agents: [a, b]}` to spectate.
+- `WS /ws/games/{id}` -- server to client: `snapshot` (view, legal actions, log), `event` (one action,
+  decoded and public, with the view after it), `over` (the final view with everything revealed, and the
+  score breakdown); client to server: `act {ply, action}`, **idempotent on `ply`**, so a double click or
+  a reconnect cannot apply a move twice.
+- `GET /api/games/{id}/review` -- finished games only: the full history, the hidden information, and
+  each bot decision's explanation, **recomputed by replay** rather than stored. It is deterministic; for
+  learned agents the same slot will carry policy probabilities and the value estimate (Phase 8's
+  overlay).
+
+A **seat view** is the public state plus the viewer's private state: the owner of each segment and which
+double halves are closed; face-up cards, deck size, discard counts, ticket-deck size; my hand, my tickets
+with their progress, and my offer during a keep; per opponent, trains, visible score, hand size, known
+cards, ticket count and longest trail; phase, current player, draws left, final-turn countdown; a
+plain-English log. Spectator and review views are omniscient.
+
+**Information-set masking is tested, not assumed.** §12's "perfect test", made exact: on random
+positions, a seat's view of a state equals its view of `resample_from_infoset(seat)` of that state, which
+differs in everything the seat cannot see. A second test searches every pre-terminal payload for the
+seed.
+
+**Engine additions** (`ttr-core`, `ttr-py`). Behaviour-preserving: no change to the rules, `state_hash`,
+the corpus or `OBS_VERSION`, and every tier's behaviour hash unchanged. Heuristic code is touched but the
+rules and encoder are not, so the fast tier plus the behaviour-hash tests are the check; the full sweeps
+do not apply.
+
+- A **`Heuristic` pyclass**: `Heuristic(tier, params=None, seed=0)`, `begin_game(seat, game_id)`,
+  `act(state)`, and `explain(state, top_k)`, which returns each candidate's total and its per-term
+  breakdown (route points, train cost, plan value, contest, double lockout, longest chain, gray
+  cannibalization, locomotive thrift, endgame urgency, H4's threat terms; the keep phase's subsets with
+  their value; H1's rule that fired). **`explain` and `act` share one code path** -- an optional trace
+  sink threaded through the scorer, not a second scorer -- and a test asserts that explain's argmax is
+  act's choice over 10k positions, on both maps, for every tier.
+- `State.offer()`, `State.discard()`, `State.ticket_progress(seat)`; `Game.decode_action(a)`, so neither
+  Python nor TypeScript re-derives the action layout; and `board_data(map)`, the engine's own arrays
+  (cities, segments with siblings, tickets, colours), so the client draws exactly the board the engine
+  plays.
+
+**Visual design.** The user wants it to look like the board game, so the client follows the physical
+board, with photos of it as a style reference: a vintage map of North America (parchment land, blue sea
+and Great Lakes, faint borders); routes as chains of rounded car spaces in the eight card colours, gray
+for any colour, doubles as parallel chains; claimed routes covered by trains in the owner's colour;
+cities as ringed dots with name plaques; the score track around the edge; destination tickets as cream
+cards with a small map; and a train card per colour, with locomotive art. Every colour also carries a
+symbol, for colour-blind players.
+
+**What "looks like" cannot mean: the published artwork is copyrighted.** It is never downloaded into the
+repo, embedded, traced or committed (§12 already ruled out transcribing positions off the board), and
+the public site needs a name and logo of its own. Everything is drawn: geography from Natural Earth
+(public domain), cities at their real lat/lon (§12) through the same projection, cosmetic nudges where
+clusters crowd (New York–Boston–Washington, Vancouver–Seattle–Portland), and per-route curvature where a
+straight chain would cross a city or squeeze its cars. The layout source is
+`data/layout/{usa,mini}.toml` (mini's cities are a subset of USA's), and `tools/gen_layout.py`
+projects it, with the basemap, into checked-in output with a `--check` mode. It is UI data, outside
+`DATA_HASH`, so the engine, the corpus and the contract are untouched. Not under `data/maps/`:
+`gen_board.py` reads every TOML there as a board and asserts the set of maps.
+
+**The play store** is `runs/play.db`, gitignored like `results.db`. It is a separate database because it
+is the web app's operational store, the one that becomes Postgres:
+
+| table | holds |
+| --- | --- |
+| `player` | humans: id and display name now; auth provider and external id later. Bots are rows too, pointing at their agent identity |
+| `game` | map, mode (play or spectate), rated, assist level, status, seed (served only once finished), contract and obs versions, data and rules hashes, git sha, client build, timestamps |
+| `seat` | game, seat, player, final score and its breakdown, rank |
+| `action` | game, ply, seat, action, server time, think time |
+
+Replays and supervision data are these rows replayed; nothing the engine can recompute is stored.
+
+**Ratings.** Finished rated human games join the arena's games in the Bradley–Terry fit, on the same
+H3 = 0 scale, each game its own block (§11), a human identified by player id. A profile page shows your
+rating with its interval, your record per opponent, and score distributions, and the leaderboard lists
+people and bots together -- Phase 8's exit line, "your Elo lands on the same leaderboard as the bots",
+available from Phase 4.
+
+**Layout.**
+
+```
+web/                        Svelte + TypeScript (Vite); builds into ticket_to_ride/ui/web/static/ (gitignored)
+ticket_to_ride/ui/web/      FastAPI app: protocol (pydantic), views, games, store; `ttr serve`
+ticket_to_ride/agents/registry.py
+ticket_to_ride/data/layout/  {usa,mini}.toml, and gen_layout's output
+tools/gen_layout.py
+```
+
+`ui/terminal/` and `ui/render/` are deleted.
+
+#### Sub-phases
+
+| | Deliverable | Exit criterion |
+| --- | --- | --- |
+| **4.1** (1–2 d) | Engine additions: the `Heuristic` pyclass with `explain`, the `State` and `Game` accessors, `board_data` | explain's argmax = act over 10k positions, both maps, H1–H4; every behaviour hash unchanged; stub test green; no rules, hash or corpus change |
+| **4.2** (2–3 d) | Server: registry, game service, play store, REST + WebSocket protocol, views, schema generation, `ttr serve`; human games in the leaderboard | full games through the API on both maps; a restart mid-game rebuilds and continues, every bot reproducing its moves; duplicate and illegal `act` handled; masking test over ≥1k positions × seats × maps; no seed before the end; human games rated on the H3 = 0 scale |
+| **4.3** (3–5 d) | Client: layout, basemap and board renderer, shown to the user and signed off before the screens; then lobby, game screen, spectate, review, profile; a CI job | a full game on both maps against the real server; review shows every bot decision's breakdown; spectating runs live; `svelte-check`, `vitest` and the build green in CI |
+
+4.1 → 4.2 is a strict order. 4.3's board work needs neither (segment order matters only once the board
+is wired to game state), so it runs alongside them, and its screens integrate once 4.2 is merged.
+
+**Phase 4 exit:** you play full 2P games against H3 and H4 on both maps without confusion; every game
+rebuilds from the store; your rating sits on the leaderboard with an interval; and **you lose to H3 at
+least once**.
+
+**Planned for the public deployment, not built now:** one container (a Node stage builds the client;
+Python and `ttr_rust` serve it); the database URL from the environment (Postgres); accounts with guest
+play; a data-use notice, since games become training data; rate limits; one live rated game per player;
+server-timed moves; our own name and art. Modal can host the ASGI app only with an external database,
+since its containers are ephemeral; a small VM with SQLite and Litestream is the alternative. Decide when
+deploying.
 
 ## 15. Main risks
 
@@ -1036,6 +1220,9 @@ Phase 6 is then re-planned from what it measures.
 | Determinization sampler subtly wrong | `assert_consistent` on every sample in debug builds; 1M-sample test. |
 | MPS silently falls back to CPU for one op | `PYTORCH_ENABLE_MPS_FALLBACK=1` + grep logs; CPU-vs-MPS loss comparison at 1e-3. |
 | Luck variance masks real gains | Seed blocks, bootstrap over blocks not games, SPRT for promotions. |
+| *(Rev. 2)* Hidden information leaks to the browser, making human games worthless as ratings or data | Server-authoritative views; the `resample_from_infoset` masking test; no seed in any pre-terminal payload (§14.2) |
+| *(Rev. 2)* A bot's explanation drifts from what it actually plays | One scorer with an optional trace sink, never a second scorer; explain's argmax asserted equal to act over 10k positions |
+| *(Rev. 2)* The board's look copies the published game's art or branding | Original art from public-domain geography; photos are a style reference only, never committed; own name and logo before any public deployment |
 
 ## 16. Verification
 
@@ -1045,8 +1232,8 @@ uv run pytest -m slow                    # 100k random games, golden replays, de
 uv run ttr map --format ascii            # board data + coordinates sanity check
 uv run ttr bench --suite engine          # games/s; absolute floor in CI, 20% regression gate locally
 uv run ttr arena -c configs/arena/panel_v1.toml --blocks 500   # Elo table + win-rate matrix + CIs
-uv run ttr play --opponents h3           # the real check that the rules feel right
-uv run ttr replay <game_id> --web        # scrub a game with the policy/value overlay
+uv run ttr serve                         # play the heuristics in a browser (Revision 2: was `ttr play`)
+                                         # finished games open in the review scrubber (was `ttr replay --web`)
 ```
 
 CI (GitHub Actions on `git@github.com:edwisdom/ticket_to_ride.git`): `lint` (~30 s) and `test-fast`
