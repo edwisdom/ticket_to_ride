@@ -7,7 +7,8 @@
 <script lang="ts">
   import type { Explanation, Glossary, LogEntry } from '../api/protocol';
   import { seatColor } from '../board/palette';
-  import { axis, gloss, num, ranked, words } from './explain';
+  import { axis, gloss, num, ranked, ties, words } from './explain';
+  import { plural } from '../format';
 
   interface Props {
     explanation: Explanation;
@@ -19,6 +20,7 @@
   let { explanation, entry, thinkMs, glossary, playerName }: Props = $props();
 
   const shown = $derived(ranked(explanation));
+  const tied = $derived(ties(explanation));
   const scale = $derived(axis(shown));
 
   // One colour per term name, the same in every candidate.
@@ -48,6 +50,9 @@
   </header>
   <div class="body">
     <p class="played">{entry.text}</p>
+    {#if tied}
+      <p class="rule">A tie: {plural(tied, 'other move')} scored the same as the one played.</p>
+    {/if}
     {#if explanation.rule}
       <p class="rule" title={gloss(glossary, explanation.rule)}>Rule: {gloss(glossary, explanation.rule)}</p>
     {/if}

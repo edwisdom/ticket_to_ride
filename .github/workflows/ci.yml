@@ -77,8 +77,8 @@ jobs:
           import importlib.util, sys;
           sys.exit(1) if importlib.util.find_spec('torch') else print('torch absent, as intended')"
 
-  # The web client: type check, unit tests, production build. Node is a build-time tool
-  # only, so no other job needs it.
+  # The web client: generated types current, type check, unit tests, production build.
+  # Node is a build-time tool only, so no other job needs it.
   web:
     runs-on: ubuntu-latest
     defaults:
@@ -92,6 +92,8 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
+      # The protocol's TypeScript is generated from the server's schema: it must be current.
+      - run: npm run types && git diff --exit-code -- src/api/protocol.ts
       - run: npm run check
       - run: npm test
       - run: npm run build

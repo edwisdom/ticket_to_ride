@@ -18,6 +18,13 @@ export function ranked(explanation: Explanation, limit = 6): Candidate[] {
   return [...(chosen ? [chosen] : []), ...rest].slice(0, limit);
 }
 
+/** How many other candidates scored exactly what the move played did. */
+export function ties(explanation: Explanation): number {
+  const chosen = explanation.candidates.find((c) => c.action.id === explanation.chosen);
+  if (chosen?.total == null) return 0;
+  return explanation.candidates.filter((c) => c !== chosen && c.total === chosen.total).length;
+}
+
 /** Where zero sits and how wide a point is, for drawing every candidate's terms as bars on
  * one scale (0-100): at the left when nothing is negative, the right when nothing is positive,
  * else in the middle. */

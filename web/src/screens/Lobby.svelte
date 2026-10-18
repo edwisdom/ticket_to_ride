@@ -5,7 +5,7 @@
   import { api, HttpError } from '../api/http';
   import type { Agent, GameSummary, MapName } from '../api/protocol';
   import { elo, MAP_NAMES, outcome, ratingOn, versus, when } from '../format';
-  import { me, remember } from '../player.svelte';
+  import { forget, me, remember } from '../player.svelte';
   import { href } from '../router';
 
   const MAPS: MapName[] = ['usa', 'mini'];
@@ -30,7 +30,13 @@
   });
   $effect(() => {
     const id = me.player?.id;
-    if (id) api.games(id).then((g) => (games = g), fail);
+    if (!id) return;
+    // A player this browser remembers but the server does not (its play store was reset)
+    // signs up again.
+    api.profile(id).then(
+      () => api.games(id).then((g) => (games = g), fail),
+      (e) => (e instanceof HttpError && e.status === 404 ? forget() : fail(e)),
+    );
   });
 
   const unfinished = $derived(games.filter((g) => g.status === 'active'));

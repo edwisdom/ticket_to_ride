@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Candidate, Explanation } from '../api/protocol';
-import { axis, gloss, num, ranked, words } from './explain';
+import { axis, gloss, num, ranked, ties, words } from './explain';
 
 const candidate = (id: number, total: number | null, terms: [string, number][] = []): Candidate => ({
   action: { kind: 'pass', id, label: `move ${id}` },
@@ -24,6 +24,14 @@ describe('ranked', () => {
     const e = explanation(2, [candidate(1, 3), candidate(2, 1), candidate(3, null), candidate(4, 5)]);
     expect(ranked(e).map((c) => c.action.id)).toEqual([2, 4, 1, 3]);
     expect(ranked(e, 2).map((c) => c.action.id)).toEqual([2, 4]);
+  });
+});
+
+describe('ties', () => {
+  it('counts the others that scored what the move played did', () => {
+    expect(ties(explanation(1, [candidate(1, 0), candidate(2, 0), candidate(3, 0), candidate(4, -1)]))).toBe(2);
+    expect(ties(explanation(1, [candidate(1, 2), candidate(2, 1)]))).toBe(0);
+    expect(ties(explanation(1, [candidate(1, null), candidate(2, null)]))).toBe(0);
   });
 });
 
