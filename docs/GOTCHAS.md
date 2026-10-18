@@ -466,6 +466,32 @@ index -- an illegal move the engine refused. Sample by Gumbel-max (`argmax(logit
 log(-log(U)))`), which cannot select a -1e9 logit on any device, and keep counting
 `mask_violations`.
 
+### The client needs Node 22.12, and TypeScript 6 for svelte-check
+
+Vite 8, its Svelte plugin and Vitest 5 require Node `^20.19 || >=22.12` (they lean on
+`require(esm)`); an older Node -- nvm's 22.3 on the dev machine -- fails at startup.
+`web/.nvmrc` names 24 and CI reads it. And svelte-check 4.7 supports TypeScript `^5 || ^6`
+only, while npm's `latest` is TypeScript 7 (the Go port): `typescript` is pinned `~6.0`.
+
+### `.gitignore`'s `lib/` would swallow Svelte's `src/lib/`
+
+The Python template's `lib/` pattern matches at any depth, so a SvelteKit-style
+`web/src/lib/` would be silently untracked. The client has no `lib/` directory; keep it
+that way, or add a negation.
+
+### A CSS transform replaces an SVG element's `transform` attribute
+
+A Svelte transition animating `transform` on `<g transform="translate(...) rotate(...)">`
+moves the element to the origin while it runs: the CSS property wins over the attribute.
+The trains' drop animates an outer `<g>` that has no transform attribute of its own.
+
+### `math.copysign(x, y)` keeps only the sign of `y`
+
+`gen_layout.py` put a double route's tracks at `radius + copysign(offset, h)`, which is the
+same radius for `+offset` and `-offset`: both tracks of every bowed double drew on one line,
+and the crowding check reported them overlapping each other. It is `offset * copysign(1,
+h)`; `test_the_tracks_of_a_double_stay_parallel` holds their separation.
+
 ---
 
 ## Part 2 — known traps in the work ahead

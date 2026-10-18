@@ -17,7 +17,7 @@ training reinforcement learning agents against it via self-play.
 | 3.2 | Rust performance (observation encoder) | done |
 | 3.3 | Modal cloud runs | done |
 | 3.4 | PPO spike on TTR-mini (tentative) | done |
-| 4 | Web client: play the heuristics in a browser | engine bindings and server done (4.1, 4.2); client next |
+| 4 | Web client: play the heuristics in a browser | built (4.1-4.3); your games against H3/H4 next |
 | 5 | Determinization + ISMCTS | |
 | 6 | PPO self-play + league | |
 | 7 | ISMCTS + learned priors | |
@@ -81,6 +81,7 @@ uv run ttr bench --suite agents   # microseconds per decision, per heuristic
 uv run ttr arena       # round robin over h0-h4, recorded to runs/results.db
 uv run ttr leaderboard # refit ratings over everything recorded
 uv run ttr serve       # play and watch the heuristics at http://127.0.0.1:8000
+make web               # build the browser client it serves (Node >= 22.12, once per change)
 ```
 
 A Rust toolchain is required: `uv sync` builds the engine's extension, `ttr_rust`, as a
@@ -98,8 +99,32 @@ down by term. The browser never holds hidden information -- no seed, no deck, no
 opponent's hand beyond what is public -- and every game is recorded in `runs/play.db`, from
 which it can be rebuilt and replayed. Rated games put you on the same leaderboard as the
 bots, on the H3 = 0 scale: play H3, or run `ttr arena` first so the other bots are anchored
-to it. The client itself is Phase 4.3 (`web/`); until it is built the server shows a
-placeholder page and serves the API.
+to it.
+
+### The web client
+
+`web/` is the browser client: Svelte and TypeScript, built by Vite into
+`ticket_to_ride/ui/web/static/` (gitignored), which `ttr serve` serves. Node is needed only
+to build it -- 22.12 or later; `web/.nvmrc` names 24 (`nvm install 24`).
+
+```bash
+make web               # npm ci (when the lockfile changed) + the production build
+uv run ttr serve       # then open http://127.0.0.1:8000
+make web-dev           # or: the dev server on :5173, hot reload, proxying /api and /ws to ttr serve
+cd web && npm run check && npm test   # svelte-check and vitest
+```
+
+The board is drawn in the physical game's style with original art: Natural Earth geography,
+cities at their real latitude and longitude, routes as chains of car spaces in the card
+colours with a symbol on each for colour-blind players, claimed routes as raised trains in
+the owner's colour, and the score track around the frame. Its geometry --
+every car space of every track -- comes from `tools/gen_layout.py`, so the client only draws.
+The lobby starts games against any bot or between two; the game screen shows what the bots'
+observation holds (the opponent's known cards, the discards, what you cannot account for,
+your tickets' remaining cost); spectating adds each decision's reasoning; and the review
+scrubs a finished game with everything revealed and every bot decision broken down by term
+(`#/review/{id}?at=N` links a move). Development builds also serve a board gallery at
+`#/dev`.
 
 `ticket_to_ride.engine` re-exports the extension, so Python code never names it:
 
@@ -138,13 +163,16 @@ Credentials stay in `~/.modal.toml`.
 
 ```
 ticket_to_ride/
-  data/       board data (generated from RULES.md), for `ttr map` and the UI
+  data/       board data (generated from RULES.md), for `ttr map` and the UI; layout/, where
+              the client draws each city and route (`make layout`)
   engine/     a thin re-export of the Rust engine
   agents/     agent specs and the registry (the heuristics are Rust); search and learned agents
   rl/         networks, PPO, AlphaZero-style training
   eval/       paired-seed arena, Bradley-Terry ratings, SPRT, results store
   ui/web/     the game server (`ttr serve`): protocol, views, games, play store, ratings
-tools/        gen_board.py: RULES.md -> the engine's board data; gen_protocol.py: the web schema
+web/          the browser client: Svelte + TypeScript, built by Vite into ui/web/static/
+tools/        gen_board.py: RULES.md -> the engine's board data; gen_protocol.py: the web
+              schema; gen_layout.py: the board's layout and basemap for the client
 crates/
   ttr-core/   the engine, the observation encoder, H0-H4 -- pure Rust, standalone `cargo test`
   ttr-py/     thin PyO3 shim (`ttr_rust`); contains no game logic
@@ -165,6 +193,8 @@ test suite. **Do not edit them by hand; regenerate them.**
 | --- | --- | --- |
 | `data/maps/usa.toml`, `crates/ttr-core/src/board_gen.rs` | RULES.md | `make board` |
 | `ui/web/protocol.schema.json` | `ui/web/protocol.py` | `make protocol` |
+| `data/layout/{usa,mini}.json` | `data/layout/*.toml`, the maps, Natural Earth | `make layout` |
+| `web/src/api/protocol.ts` | `ui/web/protocol.schema.json` | `cd web && npm run types` |
 
 The golden corpus under `tests/golden/corpus/` is a **frozen fixture**, not a regenerated
 output: `gen-corpus` checks it and refuses to rewrite it except at a `CONTRACT_VERSION` or

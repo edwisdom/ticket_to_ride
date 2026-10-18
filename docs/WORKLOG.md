@@ -5,6 +5,102 @@ session. Decisions that deviate from [PLAN.md](PLAN.md) belong here, with the re
 
 ---
 
+## 2026-10-18 — Phase 4.3: the web client
+
+Complete, and merged with 4.1-4.2. `make web` builds a Svelte + TypeScript client that
+`ttr serve` serves: a board in the physical game's style with original art, a lobby, play
+against any bot, spectating with each decision's reasoning, a review scrubber, a profile and
+a leaderboard. The user signed off on the board's look before any screen was built. What is
+left of Phase 4 is the user's own games against H3 and H4.
+
+### The board
+
+- **Layout data:** `data/layout/{usa,mini}.toml` -- each city's real latitude and longitude
+  (mini's taken from usa.toml), cosmetic nudges, plaque placement, per-route bends and the
+  decorations -- and `tools/gen_layout.py` (`make layout`, `--check` in pre-commit and the
+  tests), which writes everything the client draws: the frame and score track, city
+  positions, **every car space of every track**, and a basemap. The client only draws.
+- **Geography:** Natural Earth 5.1.2 (public domain) -- land, lakes, rivers, borders and
+  mountain ranges, the last drawn as peak glyphs -- downloaded into a cache outside the repo,
+  pinned by SHA-256, clipped, projected and simplified. One Lambert conformal conic per map
+  (USA: centre 39 N 96 W, parallels 33 and 45; mini: 41 N 110 W, 35 and 47). The basemap is
+  keyed by its inputs, so `--check` is offline and editing a nudge never needs the network.
+- **Car spaces flex in length** (34-56 board units): at real geography USA's routes have
+  128-363 km per car, so uniform spaces either do not fit the tight routes or leave the long
+  ones as dashes. Where a city's routes leave it close together, each starts far enough out
+  to clear its neighbours (from the angle between them), rather than overlapping at the hub.
+- **The generator checks the drawing** and fails on crowding: car spaces on each other or on
+  a city, plaques on a car, a city, each other or off the map, tracks without room. Both
+  maps are clean. The bends, nudges and plaque positions were found by a throwaway search
+  over that same check (fewest problems, then the smallest offsets and bends), finished by
+  hand and reviewed by eye; the search is not kept, the TOML is the data.
+- **The look** (original throughout; photos of the published board were a style reference
+  only, never saved): an oxblood frame with the 100-square score track, parchment land with
+  water-lining along the coasts, routes as rounded car spaces in the card colours with a
+  symbol per colour for colour-blind players, doubles as parallel chains, closed halves
+  ghosted, cities as ringed dots with plaques. A claimed route is a raised train in the
+  owner's colour -- glossy, ribbed, coupled and shadowed -- because a flat drawing has no 3D
+  plastic to tell it from unclaimed spaces of that colour. Train cards (a railcar per
+  colour, the locomotive on all eight) and tickets (a small map of the board) are original
+  art too. Fonts are OFL (Alegreya, Alegreya SC, Alegreya Sans, Rye), bundled.
+
+### The client
+
+- `web/src/api/protocol.ts` is generated from the server's schema (`npm run types`); CI
+  regenerates it and fails on a difference. Boards come only from `/api/boards/{map}`, joined
+  to the layout by city pair, colour and length, the server's siblings checked -- tested on
+  both maps' real payloads, mini's engine order included.
+- **`GameSession`** shows a game at the viewer's pace: moves arrive as fast as the bots make
+  them and are queued, so the legal actions offered are always for the position on screen.
+  A move unanswered for 5 s reconnects for a fresh snapshot (`act` is idempotent on its
+  ply). Pacing, acting once per ply, reconnection and the end are unit-tested with fake
+  timers.
+- **Screens:** the lobby (a name, a game against any bot -- rated with a random seat, or
+  unrated with a chosen one -- two bots to watch, games to resume and review); the game
+  (the board fitted to the window, the opponent's public seat, the face-up cards and piles,
+  your hand and tickets with their remaining cost, the bot-parity panel; claim by clicking
+  a route and choosing a payment; draws, ticket draws and keeps offered only as the server's
+  legal actions; bot moves animated at a chosen speed; a plain-English log; the score
+  breakdown at the end); spectating (both hands and tickets, each decision's reasoning, play,
+  pause, step); the review (a scrubber with everything revealed, stepping by move or by bot
+  decision, the candidates' terms drawn as bars on one scale, the glossary on hover,
+  `?at=N` in the address); the profile and the leaderboard.
+- 4,700 lines of Svelte and TypeScript, 35 vitest tests; the production bundle is 135 kB of
+  JavaScript (46 kB gzipped) and 39 kB of CSS, plus fonts.
+
+### Integration
+
+Built against a throwaway export of the 4.2 branch (`git archive` into scratch space, its
+own environment and play store) until the user said the server was ready; then merged. After
+the merge the types regenerated byte for byte and the board payloads matched the fixtures.
+
+| 4.3 exit criterion | result |
+| --- | --- |
+| a full game on both maps against the real server | USA vs H3 (141 plies) and mini vs H4 (62 plies), rated, through the client's own session |
+| review shows every bot decision's breakdown | 68 of 68 decisions (USA), 31 of 31 (mini); one an endgame tie at 0, now labelled a tie |
+| spectating runs live | H2 vs H4 on mini, H3 vs H4 on USA, paced, paused and stepped |
+| `svelte-check`, `vitest` and the build green in CI | green locally; the CI job is in place but has not run (nothing pushed) |
+| the user's sign-off on the look | given 2026-10-17, before the screens |
+
+The full games were played by a script driving the page's session -- the path every button
+takes -- not by hand; playing for real is the user's half of the Phase 4 exit.
+
+### Open
+
+- City plaques are about 9 px on a laptop-sized board: legible, small. Enlarging them means
+  re-placing them.
+- A few long northern routes (Duluth-Helena, Helena-Winnipeg) read as dashed: real geography
+  gives them more room than the physical board's distortion would.
+- The dev machine's nvm default is Node 22.3, too old to build the client: `nvm install 24`.
+- The server's log says "drew a orange" (reported to the 4.2 session).
+
+### Next
+
+The user plays H3 and H4 on both maps: the Phase 4 exit (lose to H3 at least once), and the
+first look at where the heuristics are weak.
+
+---
+
 ## 2026-10-17 — Phases 4.1 and 4.2: the engine bindings and the game server
 
 Complete. The heuristics explain their decisions through the scorer that makes them, and
