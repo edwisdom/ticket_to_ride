@@ -46,21 +46,23 @@ on one thread (126.9 before Phase 3.2), and `VecEnv` -- one call per batch, buff
 written in place -- runs observe + mask + step at **~980,000 env-steps/s** over 1024 USA 2P
 games (`ttr bench --suite vecenv`).
 
-On an M2 Max. 362 Rust tests (and 7 `#[ignore]`d sweeps) and 195 Python tests; ttr-core line
+On an M2 Max. 366 Rust tests (and 7 `#[ignore]`d sweeps) and 195 Python tests; ttr-core line
 coverage 96%.
 
-Five scripted agents, H0–H4, rated over 10,000 paired games in 12.6 s. **H3 is the permanent
-Elo zero**, and its identity is a hash of what it *plays* over a frozen probe set rather than
-of its constants — a params hash would leave a reordered tiebreak or a fixed bug free to move
-the anchor and silently re-base every rating ever recorded.
+Five scripted agents, H0–H4, rated over 10,000 paired games in 2.1 s. **H3 is the Elo
+zero**, and its identity is a hash of what it *plays* over a frozen probe set rather than of
+its constants — a params hash would leave a reordered tiebreak or a fixed bug free to move
+the anchor and silently re-base every rating ever recorded. The anchor moves only on
+purpose: it did once, when H3 learned to plan the network its cards can pay for and to
+spend its last turn on points (+36 Elo over its predecessor at USA 2P; docs/WORKLOG.md).
 
 | agent | usa 2P | mini 2P | usa 4P |
 | --- | --- | --- | --- |
-| h4 | −4 [−20, +14] | +21 [+8, +33] | −21 [−28, −14] |
+| h4 | −1 [−18, +16] | +2 [−11, +16] | −20 [−28, −13] |
 | **h3** | **0** (anchor) | **0** | **0** |
-| h2 | −100 [−119, −82] | −117 [−137, −99] | −120 [−129, −111] |
-| h1 | −726 [−778, −684] | −545 [−582, −510] | −724 [−744, −706] |
-| h0 | −1276 [−1348, −1217] | −816 [−858, −782] | −1252 [−1279, −1223] |
+| h2 | −156 [−174, −137] | −132 [−153, −111] | −142 [−151, −134] |
+| h1 | −809 [−865, −761] | −595 [−632, −560] | −804 [−830, −781] |
+| h0 | −1360 [−1437, −1294] | −863 [−908, −823] | −1326 [−1363, −1294] |
 
 Bradley–Terry MLE, 95% intervals from a bootstrap that resamples **seed blocks** rather than
 games — games inside a block share a deck, and treating them as independent inflates

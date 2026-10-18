@@ -29,7 +29,7 @@ use crate::hashing::hash128_hex;
 /// Bumped when a field is added, removed or renamed -- i.e. when a stored parameter set
 /// from an older build can no longer be interpreted. Editing a *value* does not bump this;
 /// that shows up in [`HeuristicParams::params_hash`] instead.
-pub const PARAMS_VERSION: u32 = 1;
+pub const PARAMS_VERSION: u32 = 2;
 
 /// Every constant H1-H4 consult.
 ///
@@ -87,6 +87,23 @@ pub struct HeuristicParams {
     /// with a fully-paid plan still prefers useful cards to arbitrary ones.
     pub surplus_card_value: f64,
 
+    // -- H3: a plan the cards can pay for --------------------------------
+    /// Train cars one blind draw is worth when choosing *which* network to plan. 0 plans by
+    /// train cars alone, as H2 does.
+    ///
+    /// The cheapest network by cars is rarely unique, and the cards decide which one gets
+    /// built. A colour-blind plan breaks the tie by city order and then waits on whatever
+    /// colours that happens to need: one H3 game spent its last ten turns drawing toward a
+    /// 6-orange and a 5-yellow route while the draw pile held fewer of those cards than it
+    /// needed, and an equally short network it could pay for -- two face-up cards away --
+    /// went unbuilt. Pricing each segment's missing cards in draws, by what is face up and
+    /// what is still unseen, steers the plan to the network the hand can finish.
+    ///
+    /// Small on purpose: at the default a car outweighs dozens of draws, so in practice the
+    /// cards break ties between equally short networks. Heavier weights trade route length
+    /// for payability and measured worse (docs/WORKLOG.md, "H3 moves").
+    pub plan_card_weight: f64,
+
     // -- H3: the endgame ------------------------------------------------
     /// Below this fraction of the train supply, switch to maximizing points per train.
     ///
@@ -141,10 +158,10 @@ pub struct HeuristicParams {
 }
 
 impl Default for HeuristicParams {
-    /// **The anchor's values.** Changing any of these moves H3, which is the permanent Elo
-    /// zero for the project's lifetime -- `crate::heuristic::probe`'s golden test will fail
-    /// and say so. Tune by constructing a modified copy and registering it as a *new* agent
-    /// (`h3.v2`), never by editing this and re-using the name.
+    /// **The anchor's values.** Changing any of these moves H3, the zero of every rating --
+    /// the golden test in `tests/heuristics.rs` fails and says so. Experiment with a modified
+    /// copy registered as its own spec (`h3@...`), rated against H3; edit these only to move
+    /// the anchor on purpose, with the measurement recorded in docs/WORKLOG.md.
     fn default() -> Self {
         Self {
             ticket_draw_train_fraction: 0.55,
@@ -161,6 +178,8 @@ impl Default for HeuristicParams {
             faceup_needed_bonus: 0.45,
             locomotive_value: 1.6,
             surplus_card_value: 0.15,
+
+            plan_card_weight: 0.01,
 
             endgame_train_fraction: 0.18,
             endgame_ticket_urgency: 2.0,
@@ -207,6 +226,7 @@ impl HeuristicParams {
         field!(faceup_needed_bonus);
         field!(locomotive_value);
         field!(surplus_card_value);
+        field!(plan_card_weight);
         field!(endgame_train_fraction);
         field!(endgame_ticket_urgency);
         field!(convex_path_exponent);
@@ -303,6 +323,12 @@ impl HeuristicParams {
         if self.completion_sharpness <= 0.0 {
             return Err("completion_sharpness must be positive".into());
         }
+        if !(self.plan_card_weight >= 0.0 && self.plan_card_weight.is_finite()) {
+            return Err(format!(
+                "plan_card_weight={} must be finite and at least 0 (0 = colour-blind)",
+                self.plan_card_weight
+            ));
+        }
         Ok(())
     }
 }
@@ -371,6 +397,10 @@ mod tests {
             },
             HeuristicParams {
                 surplus_card_value: 0.0,
+                ..base
+            },
+            HeuristicParams {
+                plan_card_weight: 0.0,
                 ..base
             },
             HeuristicParams {

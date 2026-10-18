@@ -10,8 +10,9 @@
 //!   zero (PLAN.md §11), so a change to its constants *or* its code has to be a deliberate
 //!   act, not something that happens during a refactor.
 
-use ttr_core::config::RuleConfig;
-use ttr_core::heuristic::{Heuristic, HeuristicParams, Tier, probe};
+use ttr_core::board::Board;
+use ttr_core::config::{NOT_TRIGGERED, PHASE_MAIN, RuleConfig};
+use ttr_core::heuristic::{Heuristic, HeuristicParams, Plan, Tier, probe};
 use ttr_core::scoring::returns;
 use ttr_core::state::{Game, State};
 
@@ -252,6 +253,110 @@ fn h4_is_not_worse_than_h3() {
 }
 
 // ---------------------------------------------------------------------------
+// What H3 learned from losing 4-123
+// ---------------------------------------------------------------------------
+
+/// A USA 2P game H3 (seat 0) lost 4-123 to a person, and its first 87 moves. At this
+/// point four of H3's five tickets hinge on joining the two halves of its network, and two
+/// ways of doing it cost the same 11 cars.
+const STALLED_SEED: u64 = 1_120_284_448_765_548_802;
+#[rustfmt::skip]
+const STALLED_PREFIX: [u16; 87] = [
+    909, 911, 906, 911, 901, 903, 21, 905, 904, 688, 695, 901, 902, 901, 901, 901, 905, 905,
+    532, 905, 905, 495, 905, 904, 901, 901, 902, 901, 901, 904, 905, 904, 904, 904, 382, 673,
+    904, 640, 904, 905, 904, 158, 905, 905, 901, 901, 905, 905, 906, 910, 905, 900, 903, 903,
+    573, 903, 905, 905, 191, 250, 905, 905, 221, 905, 905, 905, 905, 616, 905, 905, 905, 905,
+    905, 905, 905, 905, 414, 603, 905, 905, 905, 905, 905, 905, 435, 905, 905,
+];
+
+/// A free-standing route between two cities, by name.
+fn route(board: &Board, a: &str, b: &str) -> u16 {
+    let city = |name: &str| board.raw.cities.iter().position(|&c| c == name).unwrap() as u8;
+    let (a, b) = (city(a), city(b));
+    (0..board.n_segments)
+        .find(|&s| {
+            (board.seg_a[s], board.seg_b[s]) == (a, b) || (board.seg_a[s], board.seg_b[s]) == (b, a)
+        })
+        .unwrap() as u16
+}
+
+#[test]
+fn h3_plans_the_network_its_cards_can_pay_for() {
+    let g = game("usa", 2);
+    let board = g.board;
+    let mut state = g.new_initial_state(STALLED_SEED);
+    for &action in &STALLED_PREFIX {
+        state.step(action).unwrap();
+    }
+    assert_eq!(state.current_player(), 0);
+    let yellow = route(board, "El Paso", "Oklahoma City");
+    let orange = route(board, "Duluth", "Helena");
+    let blue = route(board, "Oklahoma City", "Santa Fe");
+
+    // By cars alone the networks tie, and the tie went to 6 orange + 5 yellow: nine cards
+    // the draw pile did not hold. The old H3 drew blind for the rest of the game.
+    let blind = Plan::build(&mut state, 0, 0.0);
+    assert!(blind.contains(yellow) && blind.contains(orange));
+
+    let params = HeuristicParams::default();
+    let aware = Plan::build(&mut state, 0, params.plan_card_weight);
+    assert_eq!(aware.steiner_cost, blind.steiner_cost);
+    assert!(
+        aware.contains(blue) && !aware.contains(yellow) && !aware.contains(orange),
+        "H3 still plans the network its hand cannot pay for: {:?}",
+        aware.segments
+    );
+
+    let mut h3 = Heuristic::new(Tier::H3, params, 0);
+    h3.begin_game(0, STALLED_SEED);
+    let action = h3.act(&mut state);
+    assert!(action < g.space.claim_end, "H3 drew instead of building");
+    let (segment, _) = g.space.decode_claim(action);
+    assert!(aware.contains(segment), "H3 claimed off its plan");
+}
+
+#[test]
+fn on_its_last_turn_h3_claims_whenever_it_can() {
+    // Once the final round starts every seat has one turn left: a card drawn now is never
+    // spent and a ticket drawn now can only cost. Valuing that turn like any other, the old
+    // H3 drew on it whenever a blind card out-scored its best route -- and ended games
+    // holding a dozen cards.
+    let params = HeuristicParams::default();
+    let mut last_turns = 0;
+    for (map, seats) in all_configs() {
+        let g = game(map, seats);
+        for seed in 0..6u64 {
+            let mut agents: Vec<Heuristic> = (0..seats)
+                .map(|seat| {
+                    let mut agent = Heuristic::new(Tier::H3, params, 1);
+                    agent.begin_game(seat, seed);
+                    agent
+                })
+                .collect();
+            let mut state = g.new_initial_state(seed);
+            while !state.is_terminal() {
+                let seat = state.current_player() as usize;
+                let last_turn = state.final_left != NOT_TRIGGERED && state.phase == PHASE_MAIN;
+                let can_claim = state.legal_actions().iter().any(|&a| a < g.space.claim_end);
+                let action = agents[seat].act(&mut state);
+                if last_turn && can_claim {
+                    last_turns += 1;
+                    assert!(
+                        action < g.space.claim_end,
+                        "{map} {seats}P seed {seed}: H3 passed up a claim on its last turn"
+                    );
+                }
+                state.step(action).unwrap();
+            }
+        }
+    }
+    assert!(
+        last_turns >= 100,
+        "only {last_turns} last turns with a claim to make"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // The anchor
 // ---------------------------------------------------------------------------
 
@@ -259,16 +364,15 @@ fn h4_is_not_worse_than_h3() {
 ///
 /// If this test fails, H3 plays differently than it did when the value was recorded --
 /// because a constant moved, or because code it depends on did. Either way every rating
-/// ever recorded against H3 has silently re-based, so the change has to be deliberate:
+/// ever recorded against H3 has re-based, so the change has to be deliberate: measure the
+/// new H3 against the old one in the arena, then update this literal *and* record the move
+/// and the measurement in docs/WORKLOG.md, because every stored rating predating it is on a
+/// different scale and the leaderboard cannot tell.
 ///
-/// 1. Decide the new H3 is genuinely better, and register it as a **new agent** (`h3.v2`)
-///    rated against the old anchor, which is the supported path.
-/// 2. Or, if the anchor really must move, update this literal *and* record the re-basing
-///    in docs/WORKLOG.md, because every stored rating predating it is now on a different
-///    scale and the leaderboard cannot tell.
-///
-/// What it must never be is quietly refreshed to make the suite green.
-const H3_ANCHOR: &str = "5b906156d4b1204be2d0fbd17700221d";
+/// Moved once so far, on purpose: H3 was too weak to be the bar, so it gained card-aware
+/// planning and final-turn scoring (worklog, "H3 moves: the plan follows the cards"). What
+/// this literal must never be is quietly refreshed to make the suite green.
+const H3_ANCHOR: &str = "1e84ef3c250ad2a947cb2024a60d60ad";
 
 #[test]
 fn the_h3_anchor_has_not_moved() {
@@ -293,7 +397,8 @@ const BEHAVIOUR_HASHES: [(Tier, &str); 5] = [
     (Tier::H1, "2cd429112540266c66d055eab0040d79"),
     (Tier::H2, "f7411becf76b49abe316f7fe8a157de4"),
     (Tier::H3, H3_ANCHOR),
-    (Tier::H4, "1fa8740e078a4b9f791765e61da6f76a"),
+    // H4 is H3 plus opponent modelling, so it moved with the anchor.
+    (Tier::H4, "c8846dd9ee7ece34bfe20475073e9995"),
 ];
 
 #[test]

@@ -28,7 +28,8 @@
 use crate::actions::BLIND_SLOT;
 use crate::board::{Board, GRAY, MAX_CARD_TYPES, NO_SIBLING};
 use crate::config::{
-    EMPTY_SLOT, FREE, PHASE_DRAW_SECOND, PHASE_INITIAL_TICKETS, PHASE_MAIN, PHASE_TICKET_KEEP,
+    EMPTY_SLOT, FREE, NOT_TRIGGERED, PHASE_DRAW_SECOND, PHASE_INITIAL_TICKETS, PHASE_MAIN,
+    PHASE_TICKET_KEEP,
 };
 use crate::graph::steiner_cost_exact;
 use crate::heuristic::params::HeuristicParams;
@@ -46,8 +47,8 @@ pub enum Tier {
     H1 = 1,
     /// Ticket-path: Steiner plan over held tickets, most-contested segment first.
     H2 = 2,
-    /// H2 + draw values, endgame, longest-path tiebreaks, ticket-keep EV, convex path cost,
-    /// gray cannibalization. **The permanent Elo anchor.**
+    /// H2 + draw values, a card-aware plan, endgame and last-turn play, longest-path
+    /// tiebreaks, ticket-keep EV, convex path cost, gray cannibalization. **The Elo anchor.**
     H3 = 3,
     /// H3 + opponent modeling: threatened edges, threat pricing, double grabs, hoarding.
     H4 = 4,
@@ -220,9 +221,17 @@ impl Heuristic {
     // ------------------------------------------------------------------
 
     fn refresh(&mut self, state: &mut State, seat: usize) {
+        // H2 plans by cars alone; pricing the cards is one of H3's additions.
+        let card_weight = if self.tier >= Tier::H3 {
+            self.params.plan_card_weight
+        } else {
+            0.0
+        };
         if !self.plan_ready || !self.plan.is_fresh(state, seat) {
-            self.plan = Plan::build(state, seat);
+            self.plan = Plan::build(state, seat, card_weight);
             self.plan_ready = true;
+        } else {
+            self.plan.follow_cards(state);
         }
         if !self.nets_ready || self.nets_version != state.board_version {
             let n = state.n_players();
@@ -368,7 +377,7 @@ impl Heuristic {
 
     fn act_scored<S: Sink>(&mut self, state: &mut State, seat: usize, sink: &mut S) -> u16 {
         self.refresh(state, seat);
-        let ctx = Ctx::build(state, seat, &self.params, &self.plan);
+        let ctx = Ctx::build(state, seat, &self.params, &self.plan, self.tier);
         if S::LISTENING {
             ctx.report(&self.plan, state, sink);
         }
@@ -419,6 +428,9 @@ impl Heuristic {
         // prefer dense routes and decline spurs, and it removes the need for a separate
         // endgame "maximize points per train" branch.
         let points = f64::from(board.route_points[length as usize]);
+        if ctx.final_turn {
+            return self.score_final_claim(state, ctx, segment, points, sink);
+        }
         let train_cost = p.min_points_per_train * cars;
         let mut score = points - train_cost;
         sink.term("route_points", points);
@@ -459,6 +471,48 @@ impl Heuristic {
         }
         if self.tier >= Tier::H4 {
             score += self.h4_claim_terms(state, ctx, segment, length, on_plan, sink);
+        }
+        score
+    }
+
+    /// A claim on this seat's last turn: its route points, plus every held ticket it
+    /// completes, which swings from minus its value to plus. Nothing else -- no card, train
+    /// or plan outlives the turn -- except the longest-route tiebreak, which is settled
+    /// after it.
+    fn score_final_claim<S: Sink>(
+        &mut self,
+        state: &mut State,
+        ctx: &Ctx,
+        segment: u16,
+        points: f64,
+        sink: &mut S,
+    ) -> f64 {
+        let board = state.board;
+        let seg = segment as usize;
+        let (a, b) = (board.seg_a[seg], board.seg_b[seg]);
+        let (root_a, root_b) = (state.dsu_root(ctx.seat, a), state.dsu_root(ctx.seat, b));
+        let mut finished = 0.0;
+        for ticket in state.tickets_of(ctx.seat) {
+            let t = ticket as usize;
+            let (x, y) = (
+                state.dsu_root(ctx.seat, board.ticket_a[t]),
+                state.dsu_root(ctx.seat, board.ticket_b[t]),
+            );
+            // Open now, and this claim joins exactly the two pieces it spans.
+            if x != y && ((x, y) == (root_a, root_b) || (x, y) == (root_b, root_a)) {
+                finished += 2.0 * f64::from(board.ticket_points[t]);
+            }
+        }
+        sink.term("route_points", points);
+        sink.term("tickets_finished", finished);
+        sink.fact("cars", f64::from(board.seg_len[seg]));
+        let mut score = points + finished;
+        let touching =
+            self.component_cars(state, ctx.seat, a) + self.component_cars(state, ctx.seat, b);
+        if touching > 0 {
+            let chain = self.params.longest_chain_weight * f64::from(board.seg_len[seg]);
+            score += chain;
+            sink.term("longest_chain", chain);
         }
         score
     }
@@ -684,6 +738,10 @@ impl Heuristic {
 
     fn score_draw<S: Sink>(&self, state: &State, ctx: &Ctx, action: u16, sink: &mut S) -> f64 {
         let board = state.board;
+        if ctx.final_turn {
+            sink.rule("final_turn");
+            return 0.0;
+        }
         let slot = action - state.space.draw_base;
         if slot == BLIND_SLOT {
             // Expected over what this seat cannot account for: the deck plus every
@@ -736,6 +794,10 @@ impl Heuristic {
         let p = &self.params;
         let supply = f64::from(state.board.raw.trains_per_player);
         let trains = f64::from(state.trains[ctx.seat]);
+        if ctx.final_turn {
+            sink.rule("final_turn");
+            return f64::NEG_INFINITY;
+        }
         if trains < p.ticket_draw_train_fraction * supply {
             sink.rule("ticket_gate");
             return f64::NEG_INFINITY;
@@ -940,6 +1002,9 @@ struct Ctx {
     progress: f64,
     endgame: bool,
     plan_completable: bool,
+    /// H3+: the final round is under way, so this turn is this seat's last. Nothing drawn
+    /// now is ever spent, and only the points a claim scores this turn count.
+    final_turn: bool,
     surplus_value: f64,
     locomotive_value: f64,
     /// Plan segments this seat can pay for right now.
@@ -947,7 +1012,13 @@ struct Ctx {
 }
 
 impl Ctx {
-    fn build(state: &State, seat: usize, params: &HeuristicParams, plan: &Plan) -> Self {
+    fn build(
+        state: &State,
+        seat: usize,
+        params: &HeuristicParams,
+        plan: &Plan,
+        tier: Tier,
+    ) -> Self {
         let board = state.board;
         let k = board.n_card_types;
         let hand = &state.hand[seat * k..(seat + 1) * k];
@@ -1031,6 +1102,9 @@ impl Ctx {
                 ) / supply,
             endgame: f64::from(trains) < params.endgame_train_fraction * supply,
             plan_completable: plan.steiner_cost <= trains,
+            // Every seat gets exactly one turn once the final round starts, so whoever is to
+            // move is on their last. Knowing it is H3's; H2 plays its last turn like any other.
+            final_turn: tier >= Tier::H3 && state.final_left != NOT_TRIGGERED,
             surplus_value: params.surplus_card_value,
             locomotive_value: params.locomotive_value,
             affordable,
@@ -1051,10 +1125,14 @@ impl Ctx {
             f64::from(u8::from(self.plan_completable)),
         );
         sink.context("progress", self.progress);
+        sink.context("final_turn", f64::from(u8::from(self.final_turn)));
     }
 
     /// What one card of `card` is worth, in points.
     fn card_value(&self, card: u8) -> f64 {
+        if self.final_turn {
+            return 0.0; // nothing after this turn can spend it
+        }
         if card == self.locomotive {
             return self.locomotive_value * self.plan_car_value;
         }

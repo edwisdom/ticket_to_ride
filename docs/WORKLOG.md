@@ -5,6 +5,102 @@ session. Decisions that deviate from [PLAN.md](PLAN.md) belong here, with the re
 
 ---
 
+## 2026-10-18 — H3 moves: the plan follows the cards
+
+**The anchor moved, on purpose.** PLAN.md §11 meant H3 to be the Elo zero for the
+project's lifetime, with tuning done as new agents rated against it. H3 was not strong
+enough to be that bar, so H3 itself changed instead. Every rating recorded before this
+entry is on the old scale.
+
+### Why
+
+A person beat H3 4-123 on USA 2P (seed 1120284448765548802). From mid-game, four of its
+five tickets hinged on joining two halves of its network, and two ways of doing it cost
+the same 11 cars. The plan's tie went by city order to Duluth-Helena (6 orange) and
+El Paso-Oklahoma City (5 yellow). That needed nine more orange, yellow or locomotive
+cards, while the 33-card draw pile held eight; the rest sat in the discard pile, which never
+came back because the pile never ran dry. The other network (Oklahoma City-Santa Fe,
+Santa Fe-El Paso, Denver-Santa Fe, Denver-Helena) was payable from its hand plus two blues
+that sat face up for the whole second half. H3 drew blind on 8 of its last 10 turns and
+ended holding 12 cards and 12 trains. Not a fluke: in 1,000 H3 self-play games, 44% of
+seats ended missing a ticket while holding 10+ cards.
+
+### What changed (H3 and H4; H2 untouched)
+
+- **The plan prices cards** (`plan_card_weight`, 0.01 cars per draw). The edge set is
+  chosen with each free segment costing its cars plus the draws until this seat could pay
+  for it: face-up cards first at one draw each, then blind at the ratio of unseen cards to
+  unseen cards of that colour or locomotives, locomotives in hand counting toward
+  everything, a gray route at its cheapest colour. At this weight a car outweighs dozens
+  of draws, so in practice cards break ties between equally short networks. `steiner_cost`
+  stays the exact car count, so the train budget and every ticket decision are unchanged.
+  The edge set follows the cards (`Plan::follow_cards`); it is recomputed only when the
+  prices or the board moved.
+- **The last turn is the last turn.** Once the final round starts, a draw scores 0,
+  tickets are ruled out (`final_turn`), and a claim scores its route points plus twice
+  the value of each held ticket it completes, plus the longest-chain tiebreak. The old H3
+  valued that turn like any other and drew whenever a blind card out-scored its best route.
+
+### What was measured and dropped
+
+Head-to-head, new vs old H3 in one build: with both changes off, H2-H4 reproduced their
+recorded behaviour hashes exactly, so "off" *was* the old anchor.
+
+- **A heavier card weight loses.** At 0.3-0.5 it costs 8-70 Elo: the plan strings short,
+  cheap-to-pay routes together (route points 61 to 54 per game, since route points are
+  convex in length) and stops contesting the highways its opponent needs. That
+  opponent's ticket points rose from 26 to 33.
+- **Guessing when the game will end loses.** I tried estimating turns left from the
+  fastest opponent's trains at an assumed pace, calling a plan unfinishable when it
+  needed more turns than that, then cashing in (cards devalued, trains free). Against old
+  H3 at USA 2P, 4,000 games each, each piece was neutral or negative: −1 to −4 for the
+  trigger and the turn test, −5 more for devaluing cards, −5 more for free trains. Final-turn
+  scoring alone was +18. The asymmetry explains it: abandoning a finishable ticket costs
+  twice its points, while failing to spend leftover cards costs a few route points, and any
+  estimate of turns left errs on the costly side somewhere.
+- **Card-aware planning is a two-player gain.** Alone it is +26 at USA 2P but −12/−21 at
+  USA 4P/5P. At more seats H3 gains about a point while each opponent gains 1.5, from the
+  face-up row it refreshes for them and the highways it no longer takes. 0.01 is the
+  compromise: positive against old H3 everywhere, largest where the web game is played.
+
+New H3 vs old H3, fresh seeds (seed root 5,000,000), every rotation played; the last
+column is the share of the new H3's seats that ended missing a ticket while holding 10+
+cards (old H3 self-play: 45% at USA 2P):
+
+| configuration | games | Elo vs old H3 [95% CI] | stalled seats |
+| --- | --- | --- | --- |
+| usa 2P | 10,000 | **+36** [+30, +43] | 21% |
+| usa 3P | 9,000 | +20 [+13, +27] | 25% |
+| usa 4P | 10,000 | +12 [+6, +19] | 17% |
+| usa 5P | 10,000 | +7 [−1, +15] | 17% |
+| mini 2P | 10,000 | +12 [+6, +18] | 8% |
+| mini 3P | 9,000 | +11 [+5, +17] | 7% |
+| mini 4P | 10,000 | +20 [+13, +26] | 5% |
+
+The reviewed game, replayed from the stall with the new H3 against the person's recorded
+claims: H3 builds the other network, completes all five tickets and loses 119-123, not
+4-123.
+
+### Consequences
+
+- **Every heuristic is a new identity.** H3 `5b906156` → `1e84ef3c`, H4 `1fa8740e` →
+  `c8846dd9`, H0-H2 play unchanged. A new field means `PARAMS_VERSION` 1 → 2, which moves
+  every agent's `params_hash`, so stored arena results and stored games against any bot
+  no longer match the bots this build plays. `ttr serve` refuses to rebuild such a game
+  (`replay_mismatch`); re-run the arena rather than mixing scales.
+- **Cost.** H3 goes from 10.5 to 17.5 µs per decision at USA 2P (11.8 → 19.3 at 4P, 1.4 →
+  2.1 on mini), single-threaded: the price of re-choosing the network as the cards move.
+  That is still under the 26 µs once accepted, but the Phase 5 rollout budget is now
+  proportionally tighter.
+- **Ratings refreshed** (README): H2 is now −156 at USA 2P (was −100), −132 on mini 2P,
+  −142 at USA 4P; H4 is level with H3 at 2P and −20 at USA 4P.
+- **Tests:** the reviewed position as a regression test (`h3_plans_the_network_its_cards_can_pay_for`);
+  `on_its_last_turn_h3_claims_whenever_it_can` over every map and seat count, which the old
+  H3 fails on its first game; card-price unit tests; the glossary gained
+  `tickets_finished` and `final_turn`.
+
+---
+
 ## 2026-10-18 — Phase 4.3 follow-up: train pieces are not cards
 
 Playing H3 on USA (game `48deeca390e6ddff`), the user claimed Helena-Seattle with their last
