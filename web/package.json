@@ -10,7 +10,8 @@
     "dev": "vite",
     "build": "vite build",
     "check": "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
-    "test": "vitest run"
+    "test": "vitest run",
+    "types": "json2ts -i ../ticket_to_ride/ui/web/protocol.schema.json -o src/api/protocol.ts --unknownAny --no-additionalProperties --maxItems=-1 --style.singleQuote --style.printWidth=110"
   },
   "devDependencies": {
     "@fontsource/alegreya": "^5.3.0",
@@ -20,6 +21,7 @@
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "@tsconfig/svelte": "^5.0.8",
     "@types/node": "^24.19.2",
+    "json-schema-to-typescript": "^16.0.0",
     "svelte": "^5.57.2",
     "svelte-check": "^4.7.7",
     "typescript": "~6.0.3",

@@ -75,33 +75,42 @@ export interface Segment extends EngineSegment {
   sibling: number | null;
 }
 
-export interface BoardModel {
-  map: string;
-  layout: Layout;
-  /** In engine order. */
-  segments: Segment[];
-  cities: Map<string, LayoutCity>;
+export type CardKind = CardColor | 'locomotive';
+
+/** The engine's side of a board, in its own order: what a game's indices refer to. */
+export interface EngineBoard {
+  segments: EngineSegment[];
   /** routePoints[n - 1] scores a route of length n. */
   routePoints: number[];
+  /** Card types: the board's colours, then the locomotive. */
+  cardKinds: CardKind[];
+  cityNames: string[];
+  tickets: { a: string; b: string; points: number }[];
+}
+
+export interface BoardModel extends Omit<EngineBoard, 'segments'> {
+  map: string;
+  layout: Layout;
+  /** In engine order, each with the car spaces the layout draws for it. */
+  segments: Segment[];
+  cities: Map<string, LayoutCity>;
 }
 
 const pairKey = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
 
-/** Joins the engine's segments to the layout's tracks by city pair and colour, so neither
- * side's ordering matters. A segment the layout does not draw is a stale layout: it throws. */
-export function joinBoard(layout: Layout, segments: EngineSegment[], routePoints: number[]): BoardModel {
+/** Joins the engine's segments to the layout's tracks by city pair, colour and length, so
+ * neither side's ordering matters. A segment the layout does not draw, or a track the engine
+ * lacks, is a stale layout: it throws. */
+export function joinBoard(layout: Layout, engine: EngineBoard): BoardModel {
   const pool = new Map<string, LayoutSegment[]>();
   for (const s of layout.segments) {
-    const key = `${pairKey(...s.cities)}|${s.color}`;
+    const key = `${pairKey(...s.cities)}|${s.color}|${s.cars.length}`;
     pool.set(key, [...(pool.get(key) ?? []), s]);
   }
   const byPair = new Map<string, number[]>();
-  const joined = segments.map((seg, index): Segment => {
-    const key = `${pairKey(seg.a, seg.b)}|${seg.color}`;
-    const drawn = pool.get(key)?.shift();
-    if (!drawn || drawn.cars.length !== seg.length) {
-      throw new Error(`layout ${layout.map} does not draw ${seg.a}-${seg.b} (${seg.color}, ${seg.length})`);
-    }
+  const segments = engine.segments.map((seg, index): Segment => {
+    const drawn = pool.get(`${pairKey(seg.a, seg.b)}|${seg.color}|${seg.length}`)?.shift();
+    if (!drawn) throw new Error(`layout ${layout.map} does not draw ${seg.a}-${seg.b} (${seg.color}, ${seg.length})`);
     const pair = pairKey(seg.a, seg.b);
     byPair.set(pair, [...(byPair.get(pair) ?? []), index]);
     return { ...seg, index, cars: drawn.cars, carLength: drawn.length, sibling: null };
@@ -109,28 +118,29 @@ export function joinBoard(layout: Layout, segments: EngineSegment[], routePoints
   for (const idxs of byPair.values()) {
     if (idxs.length === 2) {
       const [i, j] = idxs as [number, number];
-      joined[i]!.sibling = j;
-      joined[j]!.sibling = i;
+      segments[i]!.sibling = j;
+      segments[j]!.sibling = i;
     }
   }
   const left = [...pool.values()].flat();
   if (left.length) throw new Error(`layout ${layout.map} draws segments the engine lacks: ${left.length}`);
   return {
+    ...engine,
     map: layout.map,
     layout,
-    segments: joined,
+    segments,
     cities: new Map(layout.cities.map((c) => [c.name, c])),
-    routePoints,
   };
 }
 
 /** A model straight from the layout, in its own order: for drawing a board with no game. */
 export function layoutOnly(layout: Layout, routePoints: number[]): BoardModel {
-  const segments = layout.segments.map((s) => ({
-    a: s.cities[0],
-    b: s.cities[1],
-    length: s.cars.length,
-    color: s.color,
-  }));
-  return joinBoard(layout, segments, routePoints);
+  const colors = [...new Set(layout.segments.map((s) => s.color))].filter((c) => c !== 'gray').sort();
+  return joinBoard(layout, {
+    segments: layout.segments.map((s) => ({ a: s.cities[0], b: s.cities[1], length: s.cars.length, color: s.color })),
+    routePoints,
+    cardKinds: [...(colors as CardColor[]), 'locomotive'],
+    cityNames: layout.cities.map((c) => c.name),
+    tickets: [],
+  });
 }

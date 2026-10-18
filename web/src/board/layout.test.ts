@@ -1,23 +1,30 @@
 import { describe, expect, it } from 'vitest';
 import mini from '../../../ticket_to_ride/data/layout/mini.json';
 import usa from '../../../ticket_to_ride/data/layout/usa.json';
-import { joinBoard, layoutOnly, type EngineSegment, type Layout } from './layout';
+import { joinBoard, layoutOnly, type EngineBoard, type EngineSegment, type Layout } from './layout';
 
 const layouts = { usa: usa as unknown as Layout, mini: mini as unknown as Layout };
 const POINTS = [1, 2, 4, 7, 10, 15];
+const engine = (segments: EngineSegment[]): EngineBoard => ({
+  segments,
+  routePoints: POINTS,
+  cardKinds: ['locomotive'],
+  cityNames: [],
+  tickets: [],
+});
 
 describe('joinBoard', () => {
   it('matches every engine segment whatever the order, reversed or not', () => {
     for (const layout of Object.values(layouts)) {
-      const engine: EngineSegment[] = layout.segments
+      const segs: EngineSegment[] = layout.segments
         .map((s) => ({ a: s.cities[1], b: s.cities[0], length: s.cars.length, color: s.color }))
         .reverse();
-      const model = joinBoard(layout, engine, POINTS);
-      expect(model.segments).toHaveLength(engine.length);
+      const model = joinBoard(layout, engine(segs));
+      expect(model.segments).toHaveLength(segs.length);
       model.segments.forEach((seg, i) => {
         expect(seg.index).toBe(i);
         expect(seg.cars).toHaveLength(seg.length);
-        expect(new Set([seg.a, seg.b])).toEqual(new Set([engine[i]!.a, engine[i]!.b]));
+        expect(new Set([seg.a, seg.b])).toEqual(new Set([segs[i]!.a, segs[i]!.b]));
       });
     }
   });
@@ -37,14 +44,14 @@ describe('joinBoard', () => {
   });
 
   it('refuses a segment the layout does not draw', () => {
-    const engine: EngineSegment[] = [{ a: 'Seattle', b: 'Miami', length: 6, color: 'red' }];
-    expect(() => joinBoard(layouts.mini, engine, POINTS)).toThrow(/does not draw Seattle-Miami/);
+    const segs: EngineSegment[] = [{ a: 'Seattle', b: 'Miami', length: 6, color: 'red' }];
+    expect(() => joinBoard(layouts.mini, engine(segs))).toThrow(/does not draw Seattle-Miami/);
   });
 
   it('refuses a layout with segments the engine lacks', () => {
     const [first, ...rest] = layouts.mini.segments;
-    const engine = rest.map((s) => ({ a: s.cities[0], b: s.cities[1], length: s.cars.length, color: s.color }));
+    const segs = rest.map((s) => ({ a: s.cities[0], b: s.cities[1], length: s.cars.length, color: s.color }));
     expect(first).toBeDefined();
-    expect(() => joinBoard(layouts.mini, engine, POINTS)).toThrow(/draws segments the engine lacks/);
+    expect(() => joinBoard(layouts.mini, engine(segs))).toThrow(/draws segments the engine lacks/);
   });
 });
