@@ -882,6 +882,7 @@ name = "ticket-to-ride"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "modal", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "numpy", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "rich", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "ttr-rust", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -921,6 +922,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", marker = "extra == 'web'", specifier = ">=0.140" },
+    { name = "modal", specifier = ">=1.6.2" },
     { name = "numpy", specifier = ">=2.5" },
     { name = "rich", specifier = ">=15" },
     { name = "tensorboard", marker = "extra == 'rl'", specifier = ">=2.21" },
