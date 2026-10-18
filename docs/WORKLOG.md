@@ -92,8 +92,6 @@ takes -- not by hand; playing for real is the user's half of the Phase 4 exit.
 - A few long northern routes (Duluth-Helena, Helena-Winnipeg) read as dashed: real geography
   gives them more room than the physical board's distortion would.
 - The dev machine's nvm default is Node 22.3, too old to build the client: `nvm install 24`.
-- The server's log said "drew a orange"; fixed on the 4.2 branch (3a0bf94), which reaches
-  this branch when it is merged again.
 
 ### Next
 
