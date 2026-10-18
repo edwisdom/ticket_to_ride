@@ -14,6 +14,8 @@ from types import ModuleType
 import pytest
 from ttr_rust import State
 
+from ticket_to_ride.agents.registry import TIERS
+
 
 def _to_main(state: State) -> None:
     while state.phase_name != "MAIN":
@@ -21,7 +23,7 @@ def _to_main(state: State) -> None:
 
 
 @pytest.mark.parametrize("map_name", ["usa", "mini"])
-@pytest.mark.parametrize("tier", ["h1", "h2", "h3", "h4"])
+@pytest.mark.parametrize("tier", TIERS[1:])
 def test_explain_returns_what_act_plays(rust: ModuleType, map_name: str, tier: str) -> None:
     game = rust.Game(map_name, 2)
     state, twin = game.new_initial_state(5), game.new_initial_state(5)

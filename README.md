@@ -17,7 +17,7 @@ training reinforcement learning agents against it via self-play.
 | 3.2 | Rust performance (observation encoder) | done |
 | 3.3 | Modal cloud runs | done |
 | 3.4 | PPO spike on TTR-mini (tentative) | done |
-| 4 | Web client: play the heuristics in a browser | built (4.1-4.3); your games against H3/H4 next |
+| 4 | Web client: play the heuristics in a browser | built (4.1-4.3); your games against H3-H5 next |
 | 5 | Determinization + ISMCTS | |
 | 6 | PPO self-play + league | |
 | 7 | ISMCTS + learned priors | |
@@ -49,23 +49,25 @@ games (`ttr bench --suite vecenv`).
 On an M2 Max. 366 Rust tests (and 7 `#[ignore]`d sweeps) and 195 Python tests; ttr-core line
 coverage 96%.
 
-Five scripted agents, H0–H4, rated over 10,000 paired games in 2.1 s. **H3 is the Elo
-anchor, fixed at 1500**, which puts random play near the bottom of a chess-like scale. Its
-identity is a hash of what it *plays* over a frozen probe set rather than of its constants
-— a params hash would leave a reordered tiebreak or a fixed bug free to move
+Six scripted agents, H0–H5, rated over 15,000 paired games in a few seconds. **H3 is the
+Elo anchor, fixed at 1500**, which puts random play near the bottom of a chess-like scale.
+Its identity is a hash of what it *plays* over a frozen probe set rather than of its
+constants — a params hash would leave a reordered tiebreak or a fixed bug free to move
 the anchor and silently re-base every rating ever recorded. The anchor moves only on
 purpose: it did once, when H3 learned to plan the network its cards can pay for and to
 spend its last turn on points (+36 Elo over its predecessor at USA 2P; docs/WORKLOG.md).
-H4 is H3 plus a plan that keeps what it needs -- an off-plan claim pays for the trains and
-cards it takes from the plan -- and H3's opponent modelling.
+Above it, each tier adds one idea, found by stepping through the losses of the tier below:
+H4's off-plan claims pay for the trains and cards they take from its plan, and H5 prices a
+ticket draw against its own network, so it draws tickets late, when they are cheap.
 
 | agent | usa 2P | mini 2P | usa 4P | µs/decision (usa 2P) |
 | --- | --- | --- | --- | --- |
-| h4 | 1593 [1577, 1611] | 1531 [1516, 1546] | 1568 [1560, 1576] | 24.6 |
-| **h3** | **1500** (anchor) | **1500** | **1500** | 17.1 |
-| h2 | 1338 [1317, 1357] | 1364 [1345, 1384] | 1358 [1350, 1366] | 11.0 |
-| h1 | 709 [647, 761] | 922 [888, 952] | 678 [649, 702] | 0.2 |
-| h0 | 158 [80, 224] | 651 [608, 694] | 152 [114, 184] | 0.2 |
+| h5 | 1634 [1620, 1650] | 1522 [1505, 1539] | 1611 [1605, 1617] | 19.6 |
+| h4 | 1590 [1576, 1605] | 1532 [1517, 1547] | 1567 [1562, 1572] | 25.5 |
+| **h3** | **1500** (anchor) | **1500** | **1500** | 18.0 |
+| h2 | 1330 [1312, 1348] | 1365 [1346, 1384] | 1350 [1343, 1356] | 11.3 |
+| h1 | 686 [624, 739] | 920 [885, 952] | 686 [666, 703] | 0.2 |
+| h0 | 135 [58, 203] | 654 [607, 696] | 158 [131, 182] | 0.2 |
 
 Bradley–Terry MLE, 95% intervals from a bootstrap that resamples **seed blocks** rather than
 games — games inside a block share a deck, and treating them as independent inflates
@@ -84,7 +86,7 @@ make corpus            # every golden-corpus game still reproduces
 uv run ttr map         # board data and the invariants it satisfies
 uv run ttr bench       # engine throughput, one thread and all performance cores
 uv run ttr bench --suite agents   # microseconds per decision, per heuristic
-uv run ttr arena       # round robin over h0-h4, recorded to runs/results.db
+uv run ttr arena       # round robin over every tier, recorded to runs/results.db
 uv run ttr leaderboard # refit ratings over everything recorded
 uv run ttr serve       # play and watch the heuristics at http://127.0.0.1:8000
 make web               # build the browser client it serves (Node >= 22.12, once per change)
@@ -99,7 +101,7 @@ only — half a block is one seating.
 ### Playing the heuristics
 
 `ttr serve` is the game server ([docs/WEB_PROTOCOL.md](docs/WEB_PROTOCOL.md)): play any of
-H0-H4 on either map, watch two of them play with every hand and each decision's reasoning on
+H0-H5 on either map, watch two of them play with every hand and each decision's reasoning on
 screen, and review a finished game move by move with each bot decision's candidates broken
 down by term. The browser never holds hidden information -- no seed, no deck, nothing of an
 opponent's hand beyond what is public -- and every game is recorded in `runs/play.db`, from
@@ -180,7 +182,7 @@ web/          the browser client: Svelte + TypeScript, built by Vite into ui/web
 tools/        gen_board.py: RULES.md -> the engine's board data; gen_protocol.py: the web
               schema; gen_layout.py: the board's layout and basemap for the client
 crates/
-  ttr-core/   the engine, the observation encoder, H0-H4 -- pure Rust, standalone `cargo test`
+  ttr-core/   the engine, the observation encoder, H0-H5 -- pure Rust, standalone `cargo test`
   ttr-py/     thin PyO3 shim (`ttr_rust`); contains no game logic
   ttr-tools/  never shipped: the golden corpus (format, generator, checker) and bench-obs
 tests/golden/ the golden corpus

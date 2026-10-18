@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 import ttr_rust
 
+from ticket_to_ride.agents.registry import TIERS
 from ticket_to_ride.ui.web import glossary
 from ticket_to_ride.ui.web import protocol as p
 
@@ -34,7 +35,7 @@ def test_every_name_a_bot_explains_with_is_in_the_glossary() -> None:
     names: dict[str, set[str]] = {"terms": set(), "facts": set(), "context": set(), "rules": set()}
     for map_name in ttr_rust.board_names():
         game = ttr_rust.Game(map_name, 2)
-        for tier in ("h0", "h1", "h2", "h3", "h4"):
+        for tier in TIERS:
             for seed in range(4):
                 bots = [ttr_rust.Heuristic(tier if s == 0 else "h0", seed=seed) for s in range(2)]
                 for seat, bot in enumerate(bots):

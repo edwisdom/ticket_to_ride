@@ -1,8 +1,9 @@
-//! H0-H4. One nested ladder, not five agents.
+//! H0-H5. One nested ladder, not six agents.
 //!
-//! PLAN.md §7 defines the tiers as strict extensions -- H3 is H2 plus four things, and H4
-//! is H3 plus a plan that keeps what it needs and opponent modelling -- so they are written
-//! that way: one scoring function whose terms switch on [`Tier`]. Five parallel implementations would let the tiers drift apart
+//! PLAN.md §7 defines the tiers as strict extensions -- H3 is H2 plus four things, H4 is H3
+//! plus a plan that keeps what it needs and opponent modelling, H5 is H4 plus tickets priced
+//! against its own network -- so they are written that way: one scoring function whose
+//! terms switch on [`Tier`]. Parallel implementations would let the tiers drift apart
 //! in ways that look like strength differences, which is precisely what the ladder is
 //! supposed to measure. H0 and H1 are the exceptions and are deliberately procedural: H0 is
 //! the uniform floor, and H1 is a shallow rule cascade that exists to be beaten.
@@ -54,11 +55,14 @@ pub enum Tier {
     /// they take from it -- and opponent modelling: threatened edges, threat pricing, double
     /// grabs, hoarding.
     H4 = 4,
+    /// H4 + ticket draws priced against its own network: early tickets are expensive and
+    /// late ones are cheap, so it draws them late, with no train gate.
+    H5 = 5,
 }
 
 impl Tier {
     pub fn name(self) -> &'static str {
-        ["h0", "h1", "h2", "h3", "h4"][self as usize]
+        ["h0", "h1", "h2", "h3", "h4", "h5"][self as usize]
     }
 
     pub fn parse(name: &str) -> Option<Self> {
@@ -68,11 +72,12 @@ impl Tier {
             "h2" => Some(Self::H2),
             "h3" => Some(Self::H3),
             "h4" => Some(Self::H4),
+            "h5" => Some(Self::H5),
             _ => None,
         }
     }
 
-    pub const ALL: [Tier; 5] = [Tier::H0, Tier::H1, Tier::H2, Tier::H3, Tier::H4];
+    pub const ALL: [Tier; 6] = [Tier::H0, Tier::H1, Tier::H2, Tier::H3, Tier::H4, Tier::H5];
 }
 
 // H1's rules, highest first. Within a rule an action's value ranks it, and every value
@@ -395,7 +400,11 @@ impl Heuristic {
             } else if action < space.draw_tickets {
                 self.score_draw(state, &ctx, action, sink)
             } else if action == space.draw_tickets {
-                self.score_draw_tickets(state, &ctx, sink)
+                if self.tier >= Tier::H5 && self.params.ticket_draw_network {
+                    self.score_network_ticket_draw(state, &ctx, sink)
+                } else {
+                    self.score_draw_tickets(state, &ctx, sink)
+                }
             } else {
                 // PASS, which is only legal when nothing else is -- and that case returned
                 // early. Scored below everything so it can never win a real comparison.
@@ -893,6 +902,102 @@ impl Heuristic {
         value
     }
 
+    /// What a ticket draw is worth, priced against this seat's own network.
+    ///
+    /// H3 prices the draw by the deck's mean ticket, cheapened by keeping the best of the
+    /// offer, and refuses outright below a share of the trains. Neither knows that a ticket
+    /// whose cities the network or plan already reaches costs nothing to complete. So here
+    /// every ticket this seat might be dealt -- any it does not hold; which ones its
+    /// opponents hold it cannot know -- is priced at the cars from its network and plan to
+    /// the ticket's two cities, settled under the completion model with what it does to the
+    /// tickets already held; a ticket already connected is its face value. The offer is
+    /// worth its expected best keep: the minimum, whatever it is worth, and any ticket more
+    /// that is worth keeping. With no gate a late draw is right exactly when the network is
+    /// likely to have tickets ready.
+    fn score_network_ticket_draw<S: Sink>(
+        &mut self,
+        state: &mut State,
+        ctx: &Ctx,
+        sink: &mut S,
+    ) -> f64 {
+        if ctx.final_turn {
+            sink.rule("final_turn");
+            return f64::NEG_INFINITY;
+        }
+        let board = state.board;
+        let seat = ctx.seat;
+        let p = &self.params;
+        let deal = usize::from(board.raw.draw_ticket_deal.min(state.tdeck_len));
+        let keep_min = usize::from(board.raw.draw_ticket_keep_min.max(1));
+
+        let mut on_tree = [false; crate::board::MAX_CITIES];
+        for s in 0..board.n_segments {
+            if state.seg_owner[s] == seat as u8 {
+                on_tree[board.seg_a[s] as usize] = true;
+                on_tree[board.seg_b[s] as usize] = true;
+            }
+        }
+        for &c in &self.plan.terminals {
+            on_tree[c as usize] = true;
+        }
+        for &s in &self.plan.segments {
+            on_tree[board.seg_a[s as usize] as usize] = true;
+            on_tree[board.seg_b[s as usize] as usize] = true;
+        }
+        let sources: Vec<u8> = (0..board.n_cities as u8)
+            .filter(|&c| on_tree[c as usize])
+            .collect();
+        let reach = crate::heuristic::plan::costs_from(
+            board,
+            &state.seg_owner[..board.n_segments],
+            seat as u8,
+            &sources,
+            state.rules.doubles_locked,
+        );
+
+        let trains = f64::from(state.trains[seat]);
+        let plan_cost = f64::from(self.plan.steiner_cost);
+        let live = f64::from(self.plan.live_points);
+        let odds_now = p.completion_odds(plan_cost, trains);
+        let held = state.tickets[seat];
+        let mut values: Vec<f64> = Vec::with_capacity(board.n_tickets);
+        let mut ready = 0u32;
+        for t in 0..board.n_tickets {
+            if held >> t & 1 != 0 {
+                continue;
+            }
+            let (a, b) = (board.ticket_a[t], board.ticket_b[t]);
+            let points = f64::from(board.ticket_points[t]);
+            if state.dsu_root(seat, a) == state.dsu_root(seat, b) {
+                ready += 1;
+                values.push(points);
+                continue;
+            }
+            let direct = board.dist[a as usize][b as usize];
+            let (da, db) = (reach[a as usize], reach[b as usize]);
+            let cars = if sources.is_empty() {
+                direct
+            } else {
+                da.saturating_add(db)
+                    .min(da.saturating_add(direct))
+                    .min(db.saturating_add(direct))
+            };
+            if cars >= crate::board::UNREACHABLE {
+                values.push(-points);
+                continue;
+            }
+            let odds = p.completion_odds(plan_cost + f64::from(cars), trains);
+            values.push(points * (2.0 * odds - 1.0) - 2.0 * live * (odds_now - odds));
+        }
+        values.sort_unstable_by(|x, y| y.total_cmp(x));
+        let value = offer_value(&values, deal, keep_min);
+        sink.term("network_settlement", value);
+        sink.fact("pool_tickets", values.len() as f64);
+        sink.fact("tickets_ready", f64::from(ready));
+        sink.fact("offer_size", deal as f64);
+        value
+    }
+
     // ------------------------------------------------------------------
     // Keeping tickets
     // ------------------------------------------------------------------
@@ -1232,6 +1337,39 @@ impl Ctx {
     }
 }
 
+/// The expected worth of a `deal`-ticket offer drawn at random from a pool whose tickets are
+/// worth `values`, sorted best first, keeping the best `keep_min` whatever they are worth and
+/// any further ticket worth more than nothing.
+///
+/// Exact over the offer's order statistics: the ticket ranked `k` in the pool is the `j`-th
+/// best of the offer with probability `C(k, j) C(n-k-1, deal-1-j) / C(n, deal)`.
+fn offer_value(values: &[f64], deal: usize, keep_min: usize) -> f64 {
+    let n = values.len();
+    let deal = deal.min(n);
+    if deal == 0 {
+        return f64::NEG_INFINITY;
+    }
+    let total = binomial(n, deal);
+    let mut expected = 0.0;
+    for (k, &value) in values.iter().enumerate() {
+        for j in 0..deal {
+            let p = binomial(k, j) * binomial(n - k - 1, deal - 1 - j) / total;
+            if p > 0.0 {
+                expected += p * if j < keep_min { value } else { value.max(0.0) };
+            }
+        }
+    }
+    expected
+}
+
+/// `n` choose `k`, as a float; 0 when `k > n`.
+fn binomial(n: usize, k: usize) -> f64 {
+    if k > n {
+        return 0.0;
+    }
+    (0..k).fold(1.0, |acc, i| acc * (n - i) as f64 / (i + 1) as f64)
+}
+
 /// Cards the plan still has to draw with `hand`: each colour's shortfall, plus the gray
 /// demand the colour surplus cannot cover, less the locomotives, which cover either.
 fn plan_shortfall(hand: &[u8], need: &[u16; MAX_CARD_TYPES], n_colors: usize, loco: usize) -> u16 {
@@ -1263,5 +1401,40 @@ fn can_pay(state: &State, seat: usize, board: &Board, segment: u16) -> bool {
     } else {
         let held = hand[colour as usize];
         held > 0 && held + wilds >= length
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_offer_is_worth_its_expected_best_keep() {
+        // Four tickets, three dealt, one kept: every offer holding the 10 keeps it, and the
+        // one offer without it keeps the 0 -- three offers of four hold the 10.
+        let values = [10.0, 0.0, -2.0, -4.0];
+        assert!((offer_value(&values, 3, 1) - 7.5).abs() < 1e-12);
+        // A ticket past the minimum is kept only when it is worth something.
+        assert!((offer_value(&[5.0, -3.0, -6.0], 3, 1) - 5.0).abs() < 1e-12);
+        assert!((offer_value(&[5.0, 2.0, -6.0], 3, 1) - 7.0).abs() < 1e-12);
+        // The minimum is kept however bad.
+        assert!((offer_value(&[4.0, -1.0, -6.0], 3, 2) - 3.0).abs() < 1e-12);
+        // A pool smaller than the deal deals what it has, and an empty one nothing.
+        assert!((offer_value(&[5.0, -3.0], 3, 1) - 5.0).abs() < 1e-12);
+        assert_eq!(offer_value(&[], 3, 1), f64::NEG_INFINITY);
+    }
+
+    #[test]
+    fn the_shortfall_counts_gray_demand_and_spends_locomotives_on_either() {
+        let mut need = [0u16; MAX_CARD_TYPES];
+        let loco = 8;
+        need[0] = 4; // four of colour 0
+        need[loco] = 3; // and three of any colour
+        let mut hand = [0u8; MAX_CARD_TYPES];
+        hand[0] = 2;
+        hand[1] = 2; // surplus, covering two of the gray three
+        assert_eq!(plan_shortfall(&hand, &need, 8, loco), 2 + 1);
+        hand[loco] = 2;
+        assert_eq!(plan_shortfall(&hand, &need, 8, loco), 1);
     }
 }

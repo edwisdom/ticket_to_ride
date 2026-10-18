@@ -1,4 +1,4 @@
-//! The scripted agent ladder, H0-H4, and the machinery that keeps H3 a usable Elo anchor.
+//! The scripted agent ladder, H0-H5, and the machinery that keeps H3 a usable Elo anchor.
 //!
 //! These live in Rust rather than Python for one reason (PLAN.md §7, §8.3): **H3 doubles as
 //! the ISMCTS rollout policy in Phase 5**, and a rollout that crosses the FFI boundary once

@@ -35,6 +35,8 @@ TERMS = {
     "to finish the plan; little while trains are plentiful, a lot once they run short.",
     "plan_cards_spent": "H4: cards this off-plan claim spends that the plan would have used, "
     "each worth a car of progress.",
+    "network_settlement": "H5: ticket points an offer is expected to settle for, each ticket "
+    "it might deal priced by how far its cities are from this seat's network and plan.",
     "expected_card_value": "What a card from the deck is worth on average, over the cards "
     "this seat cannot account for.",
     "card_value": "What this face-up card is worth to the plan.",
@@ -61,6 +63,9 @@ FACTS = {
     "completion_odds_after": "H4: the odds the trains left can finish the plan after this "
     "off-plan claim.",
     "plan_cards_lost": "H4: cards the plan must draw again if this off-plan claim is made.",
+    "pool_tickets": "H5: tickets this seat might be dealt: every ticket it does not hold.",
+    "tickets_ready": "H5: of those, tickets its network already completes.",
+    "offer_size": "H5: tickets an offer would deal.",
     "unseen_cards": "Cards this seat cannot account for: the deck and opponents' blind draws.",
     "plan_needs": "Cards of this colour the plan still needs beyond those in hand.",
     "plan_cost_after": "Train cars the plan would need after this.",

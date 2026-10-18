@@ -25,6 +25,7 @@ from ticket_to_ride.eval.store import Store
 
 pytestmark = pytest.mark.slow
 
+#: The Phase 3 exit criteria are stated over these five agents.
 LADDER = ("h0", "h1", "h2", "h3", "h4")
 
 

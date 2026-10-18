@@ -31,6 +31,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from ticket_to_ride.agents.registry import TIERS
 from ticket_to_ride.engine import configurations as all_configurations
 
 
@@ -63,7 +64,6 @@ def rust_playouts(map_name: str, n_players: int, games: int, threads: int = 1) -
 
 
 #: The scripted ladder, in order.
-TIERS = ("h0", "h1", "h2", "h3", "h4")
 
 
 class AgentBench(NamedTuple):

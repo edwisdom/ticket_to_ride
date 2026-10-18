@@ -29,6 +29,9 @@ def performance_threads() -> int: ...
 def default_params() -> dict[str, float | int | bool]:
     """The Elo anchor's heuristic constants. The one place Python reads them from."""
 
+def tier_names() -> list[str]:
+    """Every heuristic tier's name, weakest first."""
+
 def params_hash(tier: str, overrides: dict[str, float | int | bool] | None = None) -> str:
     """blake2b-128 over the parameters `tier` reads. Provenance -- see `behaviour_hash` for
     identity. A field added for one tier never reaches another tier's hash."""

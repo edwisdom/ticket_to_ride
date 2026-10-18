@@ -285,7 +285,7 @@ mod tests {
         let b = compute_behaviour_hash(Tier::H2, &params);
         assert_eq!(a, b, "the probe is not deterministic");
         let mut seen = vec![a];
-        for tier in [Tier::H0, Tier::H1, Tier::H3, Tier::H4] {
+        for tier in Tier::ALL.into_iter().filter(|&t| t != Tier::H2) {
             let h = compute_behaviour_hash(tier, &params);
             assert!(
                 !seen.contains(&h),

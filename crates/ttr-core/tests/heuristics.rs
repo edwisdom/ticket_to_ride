@@ -110,14 +110,14 @@ fn every_heuristic_plays_only_legal_actions_everywhere() {
 }
 
 #[test]
-fn h1_through_h4_are_deterministic_functions_of_the_position() {
+fn every_tier_above_h0_is_a_deterministic_function_of_the_position() {
     // Paired evaluation and the behaviour hash both rest on this. H0 is excluded: it is
     // the one agent that is *supposed* to be random, and it is reproducible from its seed
     // rather than deterministic in the position.
     let params = HeuristicParams::default();
     for (map, seats) in all_configs() {
         let g = game(map, seats);
-        for tier in [Tier::H1, Tier::H2, Tier::H3, Tier::H4] {
+        for tier in Tier::ALL[1..].iter().copied() {
             let tiers = vec![tier; seats];
             let (a, log_a) = play(&g, &tiers, &params, 11);
             let (b, log_b) = play(&g, &tiers, &params, 11);
@@ -182,7 +182,7 @@ fn every_heuristic_exercises_every_action_type_on_both_maps() {
     // actually offered. Both showed up here as `draw_tickets` at zero on TTR-mini.
     let params = HeuristicParams::default();
     for (map, seats) in all_configs() {
-        for tier in [Tier::H1, Tier::H2, Tier::H3, Tier::H4] {
+        for tier in Tier::ALL[1..].iter().copied() {
             let c = probe::coverage(map, seats, tier, &params, 0..40);
             assert!(
                 c.missing().is_empty(),
@@ -247,6 +247,16 @@ fn h4_beats_h3() {
         let h4 = paired(map, 2, Tier::H4, Tier::H3, 30);
         assert!(h4 > 0.0, "{map}: H4 lost to H3 by {h4:+.3}");
     }
+}
+
+#[test]
+fn h5_beats_h4() {
+    // H5 prices a ticket draw against its own network instead of the deck's mean ticket, and
+    // drops H3's train gate, so it draws late, when its network already reaches the tickets.
+    // Measured: +31 Elo over H4 at USA 2P and +35 at USA 4P, level on mini 2P, where the
+    // network is rarely big enough to make a late ticket cheap (docs/WORKLOG.md, "H5").
+    let h5 = paired("usa", 2, Tier::H5, Tier::H4, 30);
+    assert!(h5 > 0.0, "usa: H5 lost to H4 by {h5:+.3}");
 }
 
 // ---------------------------------------------------------------------------
@@ -389,7 +399,7 @@ fn the_h3_anchor_has_not_moved() {
 /// this is the check that they did. Unlike [`H3_ANCHOR`] these are not the rating scale's
 /// zero -- a deliberate change to H0-H2 or H4 updates its literal here and is noted in the
 /// worklog, since it makes a new agent in every store -- but none may move by accident.
-const BEHAVIOUR_HASHES: [(Tier, &str); 5] = [
+const BEHAVIOUR_HASHES: [(Tier, &str); 6] = [
     (Tier::H0, "5c62d98faf15e624e3248a25c9a1f85a"),
     (Tier::H1, "2cd429112540266c66d055eab0040d79"),
     (Tier::H2, "f7411becf76b49abe316f7fe8a157de4"),
@@ -397,6 +407,7 @@ const BEHAVIOUR_HASHES: [(Tier, &str); 5] = [
     // H4 moved with the anchor, and again when its off-plan claims began paying for what
     // they take from the plan.
     (Tier::H4, "3099a56f772c213325a2197df3857d69"),
+    (Tier::H5, "ce10c9e19b2bfa51664b49a250508913"),
 ];
 
 #[test]
@@ -530,4 +541,50 @@ fn h4_does_not_spend_the_cards_its_tickets_need() {
         "Sault St. Marie",
         "plan_cards_spent",
     );
+}
+
+// ---------------------------------------------------------------------------
+// What H5 learned: a ticket costs its distance from the network
+// ---------------------------------------------------------------------------
+
+/// H5 (seat 0) against H4, USA 2P: with 10 trains left, long past H3's gate, H5's network
+/// already reaches enough of the tickets it might be dealt that an offer is worth drawing.
+const LATE_TICKETS_SEED: u64 = 7_900_000;
+#[rustfmt::skip]
+const LATE_TICKETS_PREFIX: [u16; 119] = [
+    912, 911, 870, 906, 912, 900, 905, 491, 768, 900, 900, 900, 595, 663, 900, 900, 900, 901,
+    902, 748, 248, 901, 902, 905, 900, 900, 900, 900, 48, 607, 902, 905, 532, 902, 902, 905,
+    905, 191, 118, 900, 902, 905, 900, 902, 905, 902, 902, 902, 902, 905, 902, 905, 43, 437,
+    902, 905, 902, 905, 905, 905, 225, 905, 905, 906, 910, 905, 905, 695, 905, 905, 901, 901,
+    905, 905, 901, 903, 873, 903, 905, 905, 171, 905, 905, 903, 905, 903, 616, 905, 905, 903,
+    903, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 794, 905, 905,
+    905, 905, 475, 905, 905, 478, 905, 905, 882, 905, 905,
+];
+
+#[test]
+fn h5_draws_tickets_late_when_its_network_reaches_them() {
+    let g = game("usa", 2);
+    let mut state = g.new_initial_state(LATE_TICKETS_SEED);
+    for &action in &LATE_TICKETS_PREFIX {
+        state.step(action).unwrap();
+    }
+    assert_eq!(state.current_player(), 0);
+    assert_eq!(state.trains[0], 10);
+    let params = HeuristicParams::default();
+
+    // H3's gate closed at 25 trains, so H4 does something else.
+    let mut h4 = Heuristic::new(Tier::H4, params, 0);
+    h4.begin_game(0, LATE_TICKETS_SEED);
+    assert_ne!(h4.act(&mut state.clone()), g.space.draw_tickets);
+
+    let mut h5 = Heuristic::new(Tier::H5, params, 0);
+    h5.begin_game(0, LATE_TICKETS_SEED);
+    let e = h5.explain(&mut state);
+    assert_eq!(e.chosen, g.space.draw_tickets, "H5 passed up a cheap offer");
+    let draw = &e.candidates[0];
+    let value = |name: &str, of: &[(&'static str, f64)]| {
+        of.iter().find(|(n, _)| *n == name).map(|&(_, v)| v)
+    };
+    assert!(value("network_settlement", &draw.terms).is_some_and(|v| v > 0.0));
+    assert!(value("tickets_ready", &draw.facts).is_some_and(|v| v >= 1.0));
 }

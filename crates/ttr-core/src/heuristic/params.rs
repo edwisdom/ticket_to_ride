@@ -173,6 +173,12 @@ pub struct HeuristicParams {
     /// Weight on the cards an off-plan claim spends that the plan would have used, at the
     /// value of a car of plan progress each. 0 leaves only H3's gray cannibalization.
     pub plan_card_spend_weight: f64,
+
+    // -- H5: tickets priced against the network ----------------------------
+    /// Price a ticket draw against this seat's own network: each ticket it might be dealt
+    /// at the cars from its network and plan to the ticket's cities, the offer at its
+    /// expected best keep, and no train gate. Off is H3's mean-ticket model with its gate.
+    pub ticket_draw_network: bool,
 }
 
 impl Default for HeuristicParams {
@@ -217,6 +223,8 @@ impl Default for HeuristicParams {
 
             plan_budget_weight: 1.0,
             plan_card_spend_weight: 1.0,
+
+            ticket_draw_network: true,
         }
     }
 }
@@ -288,6 +296,7 @@ impl HeuristicParams {
         field!(double_grab_urgency);
         field!(plan_budget_weight, Tier::H4);
         field!(plan_card_spend_weight, Tier::H4);
+        field!(ticket_draw_network, Tier::H5);
         out
     }
 
@@ -508,6 +517,10 @@ mod tests {
             },
             HeuristicParams {
                 plan_card_spend_weight: 0.5,
+                ..base
+            },
+            HeuristicParams {
+                ticket_draw_network: false,
                 ..base
             },
         ];

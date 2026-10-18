@@ -5,6 +5,84 @@ session. Decisions that deviate from [PLAN.md](PLAN.md) belong here, with the re
 
 ---
 
+## 2026-10-18 — H5: a ticket costs its distance from the network
+
+**H5 is a new tier**: H4, plus a ticket draw priced against its own network. SPRT at
+`--elo1 30` accepted it over H4 at USA 2P twice: once for the toggle on H4, after 300
+blocks, and once for the H5 tier, after 400 blocks, both on fresh seed roots. Fixed-size
+estimates over 10,000 games (seed root 51,000,000):
+
+| | usa 2P | mini 2P | usa 4P |
+| --- | --- | --- | --- |
+| H5 vs H4 | +27 [+20, +33] | −2.5 [−6.9, +1.8] | +41 [+36, +46] |
+| H5 vs H3 | +130 [+123, +137] | +32 [+26, +38] | +111 [+106, +116] |
+
+Across five USA 2P runs on different roots, H5 vs H4 read +26 to +31. On mini it is level
+with H4: the network is rarely big enough there to make a late ticket cheap.
+
+### What H4's losses said
+
+From 2,000 H4-vs-H3 games, 65% of H4's losses were clean, with every ticket completed. Those
+came down to ticket points (the winner had +10.9), the longest route (+5.5) and route points
+(+2.3). Stalls were 25% of losses: H4 holding 11.6 cards and trains to spare, missing a
+ticket because the game ended. H3's ticket-draw model is behind the first: it prices a draw
+by the deck's mean ticket and refuses outright below 55% of the trains. It never knows
+that a ticket whose cities its network already reaches costs nothing.
+
+### What changed (H5 only)
+
+`ticket_draw_network` (on for H5): every ticket the seat might be dealt (any it does not
+hold, since it cannot know which its opponent holds) is priced at the cars from its network
+and plan to the ticket's two cities, using one Dijkstra from the network. It is then settled
+under the completion model, including what it does to the tickets already held. A ticket
+the network already connects is worth its face value. The offer is worth its exact expected
+best keep: the minimum whatever it costs, plus any further ticket worth keeping, over the
+offer's order statistics. There is no train gate.
+
+### Measured, kept and dropped
+
+- **The gain is drawing late, and the whole model is needed for it.** Network pricing with
+  H3's gate kept was −30 against H4. H3's model above the gate with network pricing below it
+  was +13 (−20 head-to-head against the full model). Priced against its network, H5 draws
+  fewer tickets early (1.4 a game above 25 trains, against H4's 2.2), when the network is
+  small and tickets are dear, and more late. Per draw, the tickets it keeps net +15 points
+  above 30 trains, +14 at 20-30, +11 at 12-20 and +8 below 12, where it draws 1.15 times a
+  game and a third of what it keeps is already complete.
+- Charging the draw for the second card the turn forgoes changed nothing (−0.1
+  head-to-head). Dropped.
+- **A higher completion target is not a gain.** At `plan_utilization_target` 0.85, H4 gains
+  +24 against H4, and the network bot reads +36 against H4 rather than +28. Head-to-head
+  against the network bot at the default it is +1 at USA 2P, −3 on mini and +10 at 4P: it
+  exploits H4 rather than playing better. Dropped. It would also have needed a second field,
+  because the shared one is H3's.
+- A heavier static card weight still loses with H4's budget in place (0.03: −3, 0.1: −17,
+  0.3: −91 against H4), so stalls need something targeted.
+- Per game at USA 2P, against H4: it keeps 6.4 tickets rather than 4.8 and completes 5.9
+  rather than 4.6, for +13 ticket points; it gives back 2 route points and 1 point of
+  longest route, and ends with 3.1 trains rather than 1.6.
+- **Cost: H5 is cheaper than H4**, at 19.6 µs a decision at USA 2P against 25.5 (20.1 and
+  26.7 at 4P; 3.6 and 2.9 on mini). It holds 2.0 open tickets a decision against H4's 3.1,
+  and four or more in 7% of decisions against 44%. The exact Steiner solve is exponential in
+  open terminals, and tickets taken when they are nearly done keep that set small.
+
+### Consequences
+
+- `Tier::H5`. Rust's `Tier::ALL` is now the only tier list: `ttr_rust.tier_names()` feeds
+  the registry's `TIERS`, which the bench, `ttr arena`'s default round robin, `ttr serve`'s
+  opponents and the every-tier tests read. A tier from here on is a Rust change plus a
+  description.
+- H5 is behaviour `ce10c9e1…`, params `d0365309…`. `ticket_draw_network` reaches only H5's
+  params_hash, and H0-H4 keep theirs.
+- README ratings are refreshed with six tiers, H5 at 1634 / 1522 / 1611. On mini, H5 sits
+  10 points under H4, inside both intervals.
+- Tests: `h5_beats_h4`; `h5_draws_tickets_late_when_its_network_reaches_them`, a reviewed
+  position at 10 trains where H4's gate is long shut; unit tests for the offer's order
+  statistics and the plan's card shortfall.
+- **Next**: stalls are still a quarter of losses, and H5's losses add tickets it ran out of
+  trains for.
+
+---
+
 ## 2026-10-18 — H4: off-plan claims pay for what they take
 
 **H4 now beats H3**: +81 Elo [+75, +87] at USA 2P, +43 [+37, +49] on mini 2P and +77

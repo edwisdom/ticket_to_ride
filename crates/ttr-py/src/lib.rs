@@ -724,7 +724,7 @@ impl PyVecEnv {
         self.inner.states()[0].board.n_tickets
     }
 
-    /// Give environment `env`'s seats to `"learner"` or a heuristic (`"h0"`..`"h4"`).
+    /// Give environment `env`'s seats to `"learner"` or a heuristic tier (`"h0"`, `"h1"`, ...).
     /// Scripted seats then move inside Rust, so every env is either finished or waiting on
     /// a learner seat after each call.
     fn assign(&mut self, env: usize, seats: Vec<String>) -> PyResult<()> {
@@ -743,7 +743,7 @@ impl PyVecEnv {
             .map(|name| match name.as_str() {
                 "learner" => Ok(Seat::Learner),
                 other => Tier::parse(other).map(Seat::Scripted).ok_or_else(|| {
-                    PyValueError::new_err(format!("unknown seat {other:?}: learner or h0-h4"))
+                    PyValueError::new_err(format!("unknown seat {other:?}: learner or a tier"))
                 }),
             })
             .collect::<PyResult<Vec<Seat>>>()?;
@@ -888,6 +888,7 @@ fn params_from(overrides: Option<&Bound<'_, PyDict>>) -> PyResult<HeuristicParam
             "double_grab_urgency" => p.double_grab_urgency = value.extract()?,
             "plan_budget_weight" => p.plan_budget_weight = value.extract()?,
             "plan_card_spend_weight" => p.plan_card_spend_weight = value.extract()?,
+            "ticket_draw_network" => p.ticket_draw_network = value.extract()?,
             other => {
                 return Err(PyValueError::new_err(format!(
                     "unknown heuristic parameter {other:?}"
@@ -899,7 +900,7 @@ fn params_from(overrides: Option<&Bound<'_, PyDict>>) -> PyResult<HeuristicParam
     Ok(p)
 }
 
-/// A scripted agent, H0-H4 (PLAN.md §7), deciding one position at a time.
+/// A scripted agent, one of the tiers (PLAN.md §7), deciding one position at a time.
 ///
 /// What the web server's bots are. `explain` is `act` with its reasoning recorded -- one
 /// scorer with a trace sink threaded through it, never a second one -- so it returns the
@@ -1089,6 +1090,12 @@ fn default_params(py: Python<'_>) -> PyResult<Py<PyDict>> {
         }
     }
     Ok(d.unbind())
+}
+
+/// Every heuristic tier's name, weakest first: the one list of tiers the Python side reads.
+#[pyfunction]
+fn tier_names() -> Vec<&'static str> {
+    Tier::ALL.iter().map(|t| t.name()).collect()
 }
 
 /// blake2b-128 over the parameters `tier` reads. **Provenance, not identity** -- see
@@ -1506,6 +1513,7 @@ fn ttr_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(performance_threads, m)?)?;
     m.add_function(wrap_pyfunction!(default_params, m)?)?;
     m.add_function(wrap_pyfunction!(params_hash, m)?)?;
+    m.add_function(wrap_pyfunction!(tier_names, m)?)?;
     m.add_function(wrap_pyfunction!(behaviour_hash, m)?)?;
     m.add_function(wrap_pyfunction!(run_arena, m)?)?;
     m.add_function(wrap_pyfunction!(board_names, m)?)?;

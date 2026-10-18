@@ -117,14 +117,14 @@ fn sweep(map: &str, tier: Tier) {
 
 #[test]
 fn explain_chooses_what_act_chooses_on_usa() {
-    for tier in [Tier::H1, Tier::H2, Tier::H3, Tier::H4] {
+    for tier in Tier::ALL[1..].iter().copied() {
         sweep("usa", tier);
     }
 }
 
 #[test]
 fn explain_chooses_what_act_chooses_on_mini() {
-    for tier in [Tier::H1, Tier::H2, Tier::H3, Tier::H4] {
+    for tier in Tier::ALL[1..].iter().copied() {
         sweep("mini", tier);
     }
 }

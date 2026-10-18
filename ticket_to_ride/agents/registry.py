@@ -3,7 +3,7 @@
 A **spec** names an agent the same way on a command line, in a config file, in the arena's
 store, on the web server and on a leaderboard row:
 
-* `h0` ... `h4` -- the Rust heuristics (`random` is an alias for `h0`);
+* `h0`, `h1`, ... -- the Rust heuristics, one per tier (`random` is an alias for `h0`);
 * `h3@configs/agents/h3_v2.toml` -- a tier with parameter overrides, a `[params]` table or
   a bare one. A tuned agent is a *different spec*, never an edit to the anchor's constants:
   `h3` stays the anchor of the rating scale and `h3@...` is a new competitor rated against it;
@@ -29,8 +29,8 @@ import ttr_rust
 
 from ticket_to_ride.eval.store import AgentRow
 
-#: Tiers `ttr_rust` knows.
-TIERS = ("h0", "h1", "h2", "h3", "h4")
+#: Tiers `ttr_rust` knows, weakest first. Rust's list is the only one.
+TIERS = tuple(ttr_rust.tier_names())
 
 #: Other names for a tier.
 ALIASES = {"random": "h0"}
@@ -55,6 +55,8 @@ DESCRIPTIONS = {
     "h4": "H3 plus a plan that keeps what it needs: it will not spend the trains or cards its "
     "tickets still need on other routes. It also blocks routes that would join an "
     "opponent's network and holds claims that are safe to wait on.",
+    "h5": "H4 plus tickets priced against its own network: early tickets are expensive and "
+    "late ones nearly free, so it draws them late, when its network already reaches them.",
 }
 
 
@@ -161,5 +163,6 @@ def _load_learned(spec: AgentSpec) -> Bot:
 
 def _not_yet(spec: AgentSpec) -> NotImplementedError:
     return NotImplementedError(
-        f"{spec.text}: learned agents arrive in Phase 6; this build plays the heuristics h0-h4"
+        f"{spec.text}: learned agents arrive in Phase 6; this build plays the heuristics "
+        f"{', '.join(TIERS)}"
     )

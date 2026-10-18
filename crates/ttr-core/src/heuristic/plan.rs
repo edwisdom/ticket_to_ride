@@ -427,6 +427,18 @@ pub fn remaining_costs_dense(
     multi_source_costs(board, seg_owner, player, &[source], doubles_locked, None)
 }
 
+/// Cars `player` still needs to reach each city from the nearest of `sources`. Owned track
+/// is free, free track costs its length, everyone else's is impassable.
+pub fn costs_from(
+    board: &Board,
+    seg_owner: &[u8],
+    player: u8,
+    sources: &[u8],
+    doubles_locked: bool,
+) -> [u16; MAX_CITIES] {
+    multi_source_costs(board, seg_owner, player, sources, doubles_locked, None).dist
+}
+
 /// Cheapest cost from any of `sources` to each city. With `prices`, a free segment costs
 /// its cars in [`WEIGHT_SCALE`] units plus its price there, so distances are scaled; owned
 /// track is free either way.

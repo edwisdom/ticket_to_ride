@@ -15,7 +15,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from ticket_to_ride.agents.registry import AgentSpec, parse_spec
+from ticket_to_ride.agents.registry import TIERS, AgentSpec, parse_spec
 from ticket_to_ride.eval.arena import round_robin, run_match, run_round_robin
 from ticket_to_ride.eval.leaderboard import Report, fit
 from ticket_to_ride.eval.stats import ANCHOR_ELO, elo_to_score, sprt
@@ -36,8 +36,8 @@ def _specs(agents: str, seed: int) -> list[AgentSpec]:
 
 def arena_command(
     agents: Annotated[
-        str, typer.Option("--agents", help="Comma-separated specs, e.g. 'h0,h1,h2,h3,h4'.")
-    ] = "h0,h1,h2,h3,h4",
+        str, typer.Option("--agents", help="Comma-separated specs; every tier by default.")
+    ] = ",".join(TIERS),
     map_name: Annotated[str, typer.Option("--map")] = "usa",
     n_players: Annotated[int, typer.Option("--players")] = 2,
     blocks: Annotated[
