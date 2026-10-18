@@ -5,6 +5,37 @@ session. Decisions that deviate from [PLAN.md](PLAN.md) belong here, with the re
 
 ---
 
+## 2026-10-18 — H6's route value, scaled by the spare trains
+
+Round 7 started from the new H6. Re-tuning its other weights (train cost, late cards,
+race, completion target, budget) found nothing: each was neutral or worse. A larger route
+value did help at USA 2P, though: 0.9 read +22 against 0.6. The surface is bumpy (0.8 +14,
+1.0 +3), and the gain came at a price on mini, where 0.9 read −20 and the optimum stays at
+0.6 (0.2-0.5 all lose 10-23). Trading cars for points is cheap only while there are trains
+to spare, and mini's 20-train supply leaves less.
+
+### Kept: the route value at 0.9, scaled by the spare trains
+
+`plan_route_value` 0.6 → 0.9, and `route_slack_share` (0.4). The discount applies in full
+while the trains the fewest-car plan leaves spare are at least 40% of the board's supply,
+and shrinks in proportion below that. Early in a USA game, with 45 trains and a 20-car plan,
+it applies in full. It fades as the spare trains run out, and it fades sooner on mini.
+
+New H6 vs the previous one: SPRT at `--elo1 10` accepted. Fixed-size: **+28 [+21, +34] at
+USA 2P**, +0.4 [−3, +4] on mini 2P, +20 [+15, +25] at USA 4P. H6 now leads H5 by +212 /
++44 / +188 and H3 by +353 / +110 / +297, at 25.2 µs a decision.
+
+### Dropped: scaling by the spare trains relative to the plan
+
+The first form scaled by spare trains relative to the plan's own cost, `min(1, (trains −
+cost) / cost)`. At USA it was better: +33, confirmed three times, and +27 at 4P. On mini
+it cost 8-11 at every base value tried (0.75, 0.8, 0.9), so it fails the "no worse on mini"
+bar every fold here has had to meet. Softer forms of it (`k × cost` with k = 1.5 or 2)
+were worse on both maps. The spare trains as a share of the board's supply are a quantity
+the board defines, and they read +27 / +0 / +20: clean on all three.
+
+---
+
 ## 2026-10-18 — H6: a network is worth the points its routes score
 
 **H6 is a new tier**: H5, plus a plan that chooses its network by the points its routes
@@ -41,7 +72,8 @@ Then one idea H5 does not have: plan for points.
 
 ### What changed (H6 only)
 
-`plan_route_value` (0.6). When the plan chooses its network, each free segment costs its
+`plan_route_value` (0.6; raised to 0.9 and scaled by the spare trains in the next entry).
+When the plan chooses its network, each free segment costs its
 cars less 0.6 cars for every point it scores beyond par. Par is the points a car the board's
 shortest routes pay, 1 on both maps, computed from the board. A 6-car route (15 points)
 plans at 0.6 cars, a 5-car route at 2, a 4-car route at 2.2 and a 3-car route at 2.4;

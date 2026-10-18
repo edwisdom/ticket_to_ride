@@ -419,7 +419,7 @@ const BEHAVIOUR_HASHES: [(Tier, &str); 7] = [
     // they take from the plan.
     (Tier::H4, "3099a56f772c213325a2197df3857d69"),
     (Tier::H5, "8c917c3fb99338efb0307b871c1a52bf"),
-    (Tier::H6, "0a0c63864a967ae1de97ab452264e482"),
+    (Tier::H6, "15ca9669cb150a49a5c89efd5990a135"),
 ];
 
 #[test]

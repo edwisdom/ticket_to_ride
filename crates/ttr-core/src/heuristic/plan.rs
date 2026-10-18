@@ -182,18 +182,21 @@ impl Plan {
     /// It never touches [`Plan::steiner_cost`], which stays the exact number of cars the
     /// tickets need: the train budget is cars whatever the cards say.
     pub fn build(state: &mut State, player: usize, card_weight: f64) -> Self {
-        Self::build_for_points(state, player, card_weight, 0.0)
+        Self::build_for_points(state, player, card_weight, 0.0, 0.0)
     }
 
     /// [`Plan::build`], choosing the edge set with each free segment discounted by
     /// `route_value` cars per point it scores beyond par -- the points a car the board's
-    /// shortest routes pay. [`Plan::steiner_cost`] is unchanged: still the fewest cars the
-    /// tickets could need, which the edge set may now exceed ([`Plan::edge_cars`]).
+    /// shortest routes pay -- and the discount scaled down while the trains the fewest-car
+    /// plan leaves spare are under `slack_share` of the board's supply (0: never scaled).
+    /// [`Plan::steiner_cost`] is unchanged: still the fewest cars the tickets could need,
+    /// which the edge set may now exceed ([`Plan::edge_cars`]).
     pub fn build_for_points(
         state: &mut State,
         player: usize,
         card_weight: f64,
         route_value: f64,
+        slack_share: f64,
     ) -> Self {
         let board = state.board;
         let doubles_locked = state.rules.doubles_locked;
@@ -256,7 +259,13 @@ impl Plan {
             cards: Cards::default(),
             prices: Vec::new(),
             priced_version: 0,
-            route_value,
+            route_value: if slack_share > 0.0 {
+                let spare = f64::from(state.trains[player]) - f64::from(steiner_cost);
+                let supply = f64::from(board.raw.trains_per_player);
+                route_value * (spare / (slack_share * supply)).clamp(0.0, 1.0)
+            } else {
+                route_value
+            },
             par: par_points_per_car(state.board),
         };
         if card_weight > 0.0 {
@@ -890,14 +899,14 @@ mod tests {
         for seed in 0..20u64 {
             let mut state = g.new_initial_state(seed);
             let cars = Plan::build(&mut state, 0, 0.01);
-            let scored = Plan::build_for_points(&mut state, 0, 0.01, 0.6);
+            let scored = Plan::build_for_points(&mut state, 0, 0.01, 0.6, 0.0);
             assert_eq!(cars.steiner_cost, scored.steiner_cost, "seed {seed}");
             assert!(scored.edge_cars(board) >= cars.steiner_cost, "seed {seed}");
             assert!(
                 points(&scored) >= points(&cars),
                 "seed {seed}: fewer points"
             );
-            let same = Plan::build_for_points(&mut state, 0, 0.01, 0.0);
+            let same = Plan::build_for_points(&mut state, 0, 0.01, 0.0, 0.0);
             assert_eq!(
                 same.segments, cars.segments,
                 "seed {seed}: a zero discount differs"

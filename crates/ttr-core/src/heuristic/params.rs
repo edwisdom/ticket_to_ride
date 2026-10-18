@@ -208,6 +208,11 @@ pub struct HeuristicParams {
     /// 15, two 3-car routes 8), so the network worth building is not the one with the
     /// fewest cars. 0 = the fewest cars.
     pub plan_route_value: f64,
+    /// Spare trains -- those the fewest-car plan leaves -- as a share of the board's supply,
+    /// at and above which [`Self::plan_route_value`] applies in full. Below it the value
+    /// shrinks in proportion: extra cars for points are cheap only while trains are. 0 = in
+    /// full always.
+    pub route_slack_share: f64,
 }
 
 impl Default for HeuristicParams {
@@ -261,7 +266,8 @@ impl Default for HeuristicParams {
             late_card_progress: 0.7,
             late_card_weight: 0.5,
 
-            plan_route_value: 0.6,
+            plan_route_value: 0.9,
+            route_slack_share: 0.4,
         }
     }
 }
@@ -340,6 +346,7 @@ impl HeuristicParams {
         field!(late_card_progress, Tier::H5);
         field!(late_card_weight, Tier::H5);
         field!(plan_route_value, Tier::H6);
+        field!(route_slack_share, Tier::H6);
         out
     }
 
@@ -395,6 +402,7 @@ impl HeuristicParams {
             ),
             ("plan_utilization_target", self.plan_utilization_target),
             ("endgame_train_fraction", self.endgame_train_fraction),
+            ("route_slack_share", self.route_slack_share),
         ];
         for (name, value) in fractions {
             if !(0.0..=1.0).contains(&value) {
@@ -594,6 +602,10 @@ mod tests {
             },
             HeuristicParams {
                 plan_route_value: 0.3,
+                ..base
+            },
+            HeuristicParams {
+                route_slack_share: 0.2,
                 ..base
             },
         ];

@@ -283,7 +283,13 @@ impl Heuristic {
         }
         if !self.plan_ready || !self.plan.is_fresh(state, seat) {
             self.plan = if self.tier >= Tier::H6 {
-                Plan::build_for_points(state, seat, card_weight, self.params.plan_route_value)
+                Plan::build_for_points(
+                    state,
+                    seat,
+                    card_weight,
+                    self.params.plan_route_value,
+                    self.params.route_slack_share,
+                )
             } else {
                 Plan::build(state, seat, card_weight)
             };
