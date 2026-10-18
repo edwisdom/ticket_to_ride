@@ -89,9 +89,9 @@ uv run ty check -c 'terminal.nonsense-key=true'   # must error
 
 ### ty needs torch installed to check `rl/`
 
-Hence `typecheck` is a separate CI job that syncs `--all-extras`, while `lint` (ruff) and
-`test-fast` stay torch-free. Merging them back would either slow the fast loop or produce
-spurious `unresolved-import` diagnostics.
+Hence `make type` needs the `--all-extras` environment `make setup` builds, while the test
+suite stays torch-free. Checking without torch produces spurious `unresolved-import`
+diagnostics.
 
 ### `aim` is unusable on cp314
 
@@ -234,10 +234,10 @@ field widths when the real difference is one value several fields earlier.
 
 ### `make bench-check` needs an idle machine
 
-Run alongside anything else — the nightly sweeps are the obvious offender — pytest-benchmark reports a **40–80% "regression"** that is purely core
+Run alongside anything else — `make rust-sweep` is the obvious offender — pytest-benchmark reports a **40–80% "regression"** that is purely core
 contention, complete with a `PerformanceRegression` traceback that names your code.
 Measured, not hypothesised. The absolute figures are only meaningful on a quiet box, which
-is also why the gate is local-only and CI asserts a *ratio* instead.
+is also why the gate is local-only and the test suite asserts a *ratio* instead.
 
 ### `cargo test --workspace` was aborting on macOS and reading as green
 

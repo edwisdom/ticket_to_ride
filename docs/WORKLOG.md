@@ -5,6 +5,20 @@ session. Decisions that deviate from [PLAN.md](PLAN.md) belong here, with the re
 
 ---
 
+## 2026-10-18 — CI cut to one end-to-end job
+
+At the user's request, so keeping CI green does not slow agents down this early. CI had
+been red on `main` since the Modal merge, all because of one test that matched help
+text Rich colours under GitHub Actions. Seven jobs (lint, rust, typecheck, test-fast,
+web, test-rl, nightly) became one, `e2e`, on pushes to `main` and on PRs, with no
+schedule. It builds `ttr_rust` and the web client, then runs
+`test_a_full_game_through_the_api` (USA vs H3 and H4, mini vs H3; about 12 s locally),
+which covers the engine, the heuristics, the server, the play store and replay together.
+Everything else still exists and runs locally: pre-commit (ruff, clippy, the generators'
+`--check`), `make test`, `make rust-test`, `make type`, `make rust-sweep`, `npm test`.
+
+---
+
 ## 2026-10-18 — H3 reads 1500, not 0
 
 **Departs from PLAN.md §11** ("anchor H3 = 0"). H3 is still the anchor, pinned by its

@@ -1,11 +1,13 @@
 name: CI
 
+# Deliberately minimal: one end-to-end check that the project still builds and plays.
+# Everything else (ruff, clippy, cargo test, the full pytest suite, ty, vitest, the sweeps)
+# runs locally through pre-commit and the Makefile, so CI stays cheap to keep green.
+
 on:
   push:
     branches: [main]
   pull_request:
-  schedule:
-    - cron: "0 6 * * *"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -15,38 +17,7 @@ env:
   UV_FROZEN: "1"
 
 jobs:
-  # ruff only, and the project is not installed (`--no-install-workspace`), so this is the
-  # one job that needs no Rust toolchain -- it stays the fast feedback loop.
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-      - run: uv sync --group dev --no-install-workspace
-      - run: uv run --no-sync ruff check .
-      - run: uv run --no-sync ruff format --check .
-
-  # The engine: every Rust test's fast tier, the naive in-crate references and a prefix of
-  # the golden corpus included.
-  rust:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo fmt --all -- --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
-
-  # ty must see torch to resolve imports under rl/, ttr_rust (built by `uv sync`) to
-  # resolve the engine, and modal (the `cloud` group) to check infra/ and `ttr cloud` -- so
-  # this needs a Rust toolchain as well as the torch install. Linux torch comes from the
-  # pytorch-cpu index, so this is ~200MB, not ~3GB.
-  typecheck:
+  e2e:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -55,77 +26,16 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-      - run: uv sync --all-extras --group dev --group cloud
-      - run: uv run ty check --output-format github
-
-  # The Python suite, still with NO torch installed: that is what keeps it at a couple of
-  # minutes and avoids the CUDA wheels entirely. `uv sync` builds ttr_rust; the `web` extra
-  # (FastAPI, uvicorn) is what the game server's tests run against.
-  test-fast:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-      - run: uv sync --group dev --extra web
-      - run: uv run pytest -n auto
-      - name: assert torch is absent
-        run: uv run python -c "
-          import importlib.util, sys;
-          sys.exit(1) if importlib.util.find_spec('torch') else print('torch absent, as intended')"
-
-  # The web client: generated types current, type check, unit tests, production build.
-  # Node is a build-time tool only, so no other job needs it.
-  web:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
-    steps:
-      - uses: actions/checkout@v5
       - uses: actions/setup-node@v7
         with:
           node-version-file: web/.nvmrc
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - run: npm ci
-      # The protocol's TypeScript is generated from the server's schema: it must be current.
-      - run: npm run types && git diff --exit-code -- src/api/protocol.ts
-      - run: npm run check
-      - run: npm test
-      - run: npm run build
-
-  test-rl:
-    runs-on: ubuntu-latest
-    if: contains(github.event.pull_request.labels.*.name, 'rl') || github.event_name == 'schedule'
-    steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-      # Resolves torch through the pytorch-cpu index (see [tool.uv.sources]); plain
-      # torch on linux/cp314 would drag in 18 CUDA packages, ~3GB.
-      - run: uv sync --extra rl --group dev
-      - run: uv run pytest -n auto -m "torch"
-
-  # The sweeps behind #[ignore]: the whole golden corpus, the naive references at width and
-  # the 10k-game encoder-cache check. Then Python's slow tier (arena statistics at scale).
-  nightly:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'schedule'
-    timeout-minutes: 120
-    steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-      - run: cargo test --workspace --release -- --ignored
-      - run: uv sync --all-extras --group dev
-      - run: uv run pytest -n auto -m "slow"
+      # Builds the Rust engine (ttr_rust) and installs the game server.
+      - run: uv sync --group dev --extra web
+      # The browser client builds.
+      - run: npm ci && npm run build
+        working-directory: web
+      # Full games against the bots through the server's API on both maps, each replayed
+      # from its seed to the same scores: engine, heuristics, server and store together.
+      - run: uv run pytest tests/unit/web/test_play.py -k full_game

@@ -1236,8 +1236,8 @@ uv run ttr serve                         # play the heuristics in a browser (Rev
                                          # finished games open in the review scrubber (was `ttr replay --web`)
 ```
 
-CI (GitHub Actions on `git@github.com:edwisdom/ticket_to_ride.git`): `lint` (~30 s) and `test-fast`
-(~1–2 min, **no torch installed**) on every push; `test-rl` via the pytorch-cpu index only on PRs touching
-`rl/**`; nightly full arena + PPO smoke asserting no crash, `mask_violations == 0`, and loss decreased.
-Include the determinism check in `test-fast` — it's ~2 seconds and it guards the property everything else
-depends on.
+CI (GitHub Actions on `git@github.com:edwisdom/ticket_to_ride.git`): *(Revised 2026-10-18: cut to
+one end-to-end job, so keeping CI green does not slow early work.)* On every push to `main` and every PR,
+`e2e` builds the engine and the web client and plays full games against the bots through the server's
+API on both maps, each replayed from its seed to the same scores. Lint, clippy, `cargo test`, the full
+pytest suite, `ty`, vitest and the sweeps run locally (pre-commit and the Makefile), not in CI.
