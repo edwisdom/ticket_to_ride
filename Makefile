@@ -1,5 +1,5 @@
-.PHONY: setup fmt lint type test test-all cov bench bench-check board protocol serve vectors tb clean \
-        clean-rust help rust-fmt rust-lint rust-test rust-sweep rust-cov mutants
+.PHONY: setup fmt lint type test test-all cov bench bench-check board vectors tb clean clean-rust help \
+        rust-fmt rust-lint rust-test rust-sweep rust-cov mutants
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-13s\033[0m %s\n", $$1, $$2}'
@@ -66,14 +66,18 @@ bench-check:  ## Fail if throughput regressed >20% vs the saved baseline (M2, id
 board:  ## Regenerate the board data (RULES.md -> usa.toml, board_gen.rs)
 	uv run python tools/gen_board.py
 
+corpus:  ## Verify the golden corpus, every game
+	cargo run -q --release -p ttr-tools --bin gen-corpus -- --check
+
+# --- The game server -----------------------------------------------------
+
+.PHONY: protocol serve
+
 protocol:  ## Regenerate the web protocol's JSON Schema (protocol.py -> protocol.schema.json)
 	uv run python tools/gen_protocol.py
 
 serve:  ## Serve the game and the built web client on http://127.0.0.1:8000
 	uv run ttr serve
-
-corpus:  ## Verify the golden corpus, every game
-	cargo run -q --release -p ttr-tools --bin gen-corpus -- --check
 
 tb:  ## Launch tensorboard over all runs
 	uv run tensorboard --logdir runs/
