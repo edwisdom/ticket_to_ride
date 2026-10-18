@@ -99,10 +99,10 @@ Client to server, a `ClientMessage`: `{"type": "act", "ply": n, "action": id}`.
 A `View` is a position for one viewer: segment owners (`owners`, and `closed` for the
 other track of a claimed double at 2-3 players), face-up cards, deck size, discard counts,
 ticket-deck size, phase, current player, draws left, the final-round countdown
-(`final_turns`), and per seat its trains, banked route points, hand size, publicly known
-cards (`known`), ticket count and longest trail. The viewer's own `hand` and `tickets`
-(each with `connected` and `remaining` train cars) are filled in, and `offer` during the
-viewer's keep.
+(`final_turns`), and per seat its train pieces left (`trains`: the plastic trains, not
+cards), banked route points, hand size, publicly known cards (`known`), ticket count and
+longest trail. The viewer's own `hand` and `tickets` (each with `connected` and `remaining`
+train pieces) are filled in, and `offer` during the viewer's keep.
 
 **Bot parity** (`assist: "parity-1"`, recorded with every game): a seat view also carries
 what the bots' observation holds -- opponents' known cards, the discard composition,

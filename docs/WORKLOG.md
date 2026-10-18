@@ -5,6 +5,37 @@ session. Decisions that deviate from [PLAN.md](PLAN.md) belong here, with the re
 
 ---
 
+## 2026-10-18 — Phase 4.3 follow-up: train pieces are not cards
+
+Playing H3 on USA (game `48deeca390e6ddff`), the user claimed Helena-Seattle with their last
+6 pieces while holding 6 cards, read the cards as "6 trains", and took the final round that
+followed -- and a last turn with no claim -- for bugs. A review found the engine and the
+final-round rule right: the client let a supply of plastic trains and a hand of cards with
+railcars on them share one word. Now:
+
+- **Pieces are labelled as pieces** wherever the supply shows: "6 of 45 train pieces left"
+  beside "6 cards in hand" over your hand, "Train pieces" in each seat panel (red at the
+  trigger or below, with a tooltip saying they are not cards), "pieces to go" on tickets, and
+  the glossary's `trains`.
+- **The claim picker says what a claim takes**: "Takes 2 of your 6 train pieces, leaving 4."
+  When it leaves 2 or fewer before the final round: "This starts the final round. Uses your
+  last 6 train pieces: everyone, you included, gets one more turn, and you will have none
+  left to claim with."
+- **The prompt names only the moves the server allows**, and when train pieces rule out
+  every open route it says why: "No route can be claimed: you have no train pieces left."
+- **The log**: "Edwin has no train pieces left: everyone gets one more turn." -- "no", not
+  "0", which the body font draws as a small o (see GOTCHAS).
+- **The threshold is the engine's**: `board_data` and `Board` carry `end_trigger_trains` (2),
+  so the client warns by the engine's constant, not one of its own; a test plays games and
+  checks that the final round starts exactly there.
+- The status bar no longer clips the speed control when the prompt is long.
+
+Checked in the browser on a copy of the play store with that game cut back to just before
+the claim: the warning, the last turn's prompt, the log line and the review read as above,
+and the game replays to the same 123-4.
+
+---
+
 ## 2026-10-18 — Phase 4.3: the web client
 
 Complete, and merged with 4.1-4.2. `make web` builds a Svelte + TypeScript client that

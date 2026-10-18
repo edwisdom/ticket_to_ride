@@ -485,6 +485,20 @@ A Svelte transition animating `transform` on `<g transform="translate(...) rotat
 moves the element to the origin while it runs: the CSS property wins over the attribute.
 The trains' drop animates an outer `<g>` that has no transform attribute of its own.
 
+### Alegreya's old-style figures draw 0 as a small o
+
+The body font's default figures are old-style, and its zero is the height of a lowercase
+letter: "0 of 45 train pieces" read as "o of 45". Counts a player acts on use
+`font-variant-numeric: lining-nums` (the seat panels' stats, your own counts), and the log
+says "no train pieces" rather than "0".
+
+### A `.choices` row can shrink to nothing in a flex row
+
+`.choices` hides its overflow, for its rounded corners, and an element that hides its
+overflow has no automatic minimum size in flexbox: in the game's status bar a long prompt
+squeezed the speed control until it was clipped. Beside text that can wrap, give it `flex:
+none`.
+
 ### `math.copysign(x, y)` keeps only the sign of `y`
 
 `gen_layout.py` put a double route's tracks at `radius + copysign(offset, h)`, which is the
