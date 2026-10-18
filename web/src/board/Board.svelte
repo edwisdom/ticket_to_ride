@@ -9,11 +9,13 @@
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { fade, type TransitionConfig } from 'svelte/transition';
   import BoardBackground from './BoardBackground.svelte';
   import type { BoardModel, Segment } from './layout';
   import { couplings, plaqueRect, scoreMarkers } from './geometry';
   import { SEAT_COLORS, SWATCH, SYMBOL, seatColor } from './palette';
   import { textWidth } from './measure';
+  import { plural } from '../format';
 
   interface Props {
     model: BoardModel;
@@ -27,6 +29,8 @@
     highlight?: string[];
     /** Segments that can be clicked; none when absent. */
     selectable?: Set<number> | null;
+    /** The segment the last move claimed: its train is pointed out. */
+    recent?: number | null;
     onselect?: (segment: number) => void;
     onhover?: (segment: number | null) => void;
   }
@@ -38,6 +42,7 @@
     scores = [],
     highlight = [],
     selectable = null,
+    recent = null,
     onselect,
     onhover,
   }: Props = $props();
@@ -72,6 +77,11 @@
   const hot = $derived(new Set(highlight));
   const hoveredSeg = $derived(hovered === null ? null : model.segments[hovered]);
 
+  /** A train car lands on its space: dropped in, one car after another. */
+  function drop(_node: Element, { delay = 0 }: { delay?: number }): TransitionConfig {
+    return { delay, duration: 380, css: (t) => `opacity: ${t}; transform: translateY(${(1 - t) * -14}px)` };
+  }
+
   function hover(seg: number | null) {
     hovered = seg;
     onhover?.(seg);
@@ -84,7 +94,7 @@
     const mid = seg.cars[Math.floor(seg.cars.length / 2)]!;
     const points = model.routePoints[seg.length - 1] ?? 0;
     const text = `${seg.a} – ${seg.b}`;
-    const sub = `${seg.length} ${SWATCH[seg.color].label.toLowerCase()} · ${points} point${points === 1 ? '' : 's'}`;
+    const sub = `${seg.length} ${SWATCH[seg.color].label.toLowerCase()} · ${plural(points, 'point')}`;
     const w = Math.max(textWidth(text, '600 14px "Alegreya Sans"'), textWidth(sub, '400 13px "Alegreya Sans"')) + 20;
     const x = Math.min(Math.max(mid[0] - w / 2, layout.square + 4), W - layout.square - w - 4);
     const y = mid[1] > H / 2 ? mid[1] - 64 : mid[1] + 18;
@@ -120,7 +130,6 @@
         class="segment"
         class:closed={isClosed}
         class:pickable={canPick}
-        class:dimmed={selectable !== null && !canPick && owner[seg.index] == null}
         class:hovered={hovered === seg.index}
         role="button"
         tabindex={canPick ? 0 : -1}
@@ -149,7 +158,7 @@
       {@const seat = owner[seg.index] ?? 0}
       {@const c = seatColor(seat)}
       {@const L = seg.carLength}
-      <g class="train" pointer-events="none">
+      <g class="train" class:recent={seg.index === recent} pointer-events="none">
         {#each seg.cars as [x, y, deg], k (k)}
           <rect
             transform="translate({x + 1.8} {y + 2.6}) rotate({deg})"
@@ -161,18 +170,22 @@
             fill="#1d1208"
             opacity="0.55"
             filter="url(#{id}-shadow)"
+            in:fade={{ delay: k * 70 + 200, duration: 200 }}
           />
         {/each}
         {#each couplings(seg.cars, L + 2) as [x1, y1, x2, y2], k (k)}
-          <line {x1} {y1} {x2} {y2} stroke={c.dark} stroke-width="3" stroke-linecap="round" />
+          <line {x1} {y1} {x2} {y2} stroke={c.dark} stroke-width="3" stroke-linecap="round" in:fade={{ delay: seg.cars.length * 70 + 150 }} />
         {/each}
         {#each seg.cars as [x, y, deg], k (k)}
-          <g transform="translate({x} {y}) rotate({deg})">
-            <rect x={-L / 2 - 1} y={-CW / 2 - 1.5} width={L + 2} height={CW + 3} rx="3" fill="url(#{id}-train-{seat % SEAT_COLORS.length})" stroke={c.dark} stroke-width="1.3" />
-            <rect x={-L / 2 + 2.5} y={-CW / 2 + 0.3} width={L - 5} height="2.2" rx="1.1" fill="#fff" opacity="0.38" />
-            {#each [-0.25, 0, 0.25] as f (f)}
-              <line x1={f * L} y1={-CW / 2 + 0.5} x2={f * L} y2={CW / 2 - 0.5} stroke={c.dark} stroke-width="0.7" opacity="0.55" />
-            {/each}
+          <!-- The outer group drops (a CSS transform would replace an SVG one); the inner places. -->
+          <g in:drop={{ delay: k * 70 }}>
+            <g transform="translate({x} {y}) rotate({deg})">
+              <rect x={-L / 2 - 1} y={-CW / 2 - 1.5} width={L + 2} height={CW + 3} rx="3" fill="url(#{id}-train-{seat % SEAT_COLORS.length})" stroke={c.dark} stroke-width="1.3" />
+              <rect x={-L / 2 + 2.5} y={-CW / 2 + 0.3} width={L - 5} height="2.2" rx="1.1" fill="#fff" opacity="0.38" />
+              {#each [-0.25, 0, 0.25] as f (f)}
+                <line x1={f * L} y1={-CW / 2 + 0.5} x2={f * L} y2={CW / 2 - 0.5} stroke={c.dark} stroke-width="0.7" opacity="0.55" />
+              {/each}
+            </g>
           </g>
         {/each}
       </g>
@@ -243,15 +256,25 @@
   .segment {
     transition: opacity 120ms;
   }
+  .train.recent {
+    animation: claimed 2.4s ease-out;
+  }
+  @keyframes claimed {
+    0%,
+    40% {
+      filter: drop-shadow(0 0 6px #ffe08a) drop-shadow(0 0 3px #ffe08a);
+    }
+  }
   .segment.closed {
     opacity: 0.28;
     filter: saturate(0.3);
   }
-  .segment.dimmed {
-    opacity: 0.45;
-  }
   .segment.pickable {
     cursor: pointer;
+  }
+  .segment.pickable .space {
+    stroke: #ffd76a;
+    stroke-width: 2.2;
   }
   .segment.hovered .space {
     stroke: #fff4cf;

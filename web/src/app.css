@@ -1,12 +1,25 @@
+/* The table the game sits on: dark felt, with parchment panels in the board's palette. */
 :root {
   --ink: #2e1d10;
   --ink-soft: #6a5039;
   --paper: #f4e8cb;
-  --paper-deep: #e6d3a6;
+  --paper-deep: #e8d7ab;
+  --paper-line: #c9b282;
   --oxblood: #5c1d16;
+  --oxblood-hi: #7a2a20;
   --gilt: #c9a35a;
-  --felt: #20302a;
-  font-family: 'Alegreya Sans', system-ui, sans-serif;
+  --gilt-soft: #e3c98f;
+  --felt: #1b2823;
+  --felt-hi: #2d4339;
+  --cream: #fbf3dd;
+  --good: #2f7a3a;
+  --bad: #a3271d;
+  --serif: 'Alegreya', Georgia, serif;
+  --caps: 'Alegreya SC', Georgia, serif;
+  --sans: 'Alegreya Sans', system-ui, sans-serif;
+  --display: 'Rye', Georgia, serif;
+  font-family: var(--sans);
+  font-size: 15px;
   color: var(--ink);
   background: var(--felt);
 }
@@ -18,14 +31,162 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background:
-    radial-gradient(ellipse at 50% 30%, #2d4339 0%, #1b2823 70%, #141d19 100%);
+  background: radial-gradient(ellipse at 50% 20%, var(--felt-hi) 0%, var(--felt) 60%, #111a16 100%) fixed;
 }
 
 h1,
 h2,
-h3 {
-  font-family: 'Alegreya SC', serif;
+h3,
+h4 {
+  font-family: var(--caps);
   font-weight: 700;
   margin: 0;
+}
+
+a {
+  color: inherit;
+}
+
+/* A parchment panel, its heading on an oxblood band. */
+.panel {
+  background: var(--paper);
+  border: 1px solid var(--paper-line);
+  border-radius: 8px;
+  box-shadow:
+    0 1px 0 rgb(255 255 255 / 0.4) inset,
+    0 6px 18px rgb(0 0 0 / 0.35);
+  overflow: hidden;
+}
+.panel > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px;
+  background: linear-gradient(var(--oxblood-hi), var(--oxblood));
+  color: var(--cream);
+  border-bottom: 2px solid var(--gilt);
+}
+.panel > header h2,
+.panel > header h3 {
+  font-size: 15px;
+  letter-spacing: 0.03em;
+}
+.panel > .body {
+  padding: 10px 12px;
+}
+
+button,
+.button {
+  font: 600 14px var(--sans);
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--oxblood);
+  background: linear-gradient(var(--oxblood-hi), var(--oxblood));
+  color: var(--cream);
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+button:hover:not(:disabled),
+.button:hover {
+  filter: brightness(1.12);
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+button.quiet,
+.button.quiet {
+  background: transparent;
+  color: var(--oxblood);
+  border-color: var(--paper-line);
+}
+button.quiet:hover:not(:disabled) {
+  background: var(--paper-deep);
+  filter: none;
+}
+button:focus-visible,
+.button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--gilt);
+  outline-offset: 2px;
+}
+
+input,
+select {
+  font: 15px var(--sans);
+  padding: 5px 8px;
+  border-radius: 5px;
+  border: 1px solid var(--paper-line);
+  background: var(--cream);
+  color: var(--ink);
+}
+
+/* A row of choices that behaves like radio buttons. */
+.choices {
+  display: inline-flex;
+  border: 1px solid var(--paper-line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.choices button {
+  border: 0;
+  border-radius: 0;
+  background: var(--cream);
+  color: var(--ink);
+  font-weight: 500;
+}
+.choices button + button {
+  border-left: 1px solid var(--paper-line);
+}
+.choices button.on {
+  background: linear-gradient(var(--oxblood-hi), var(--oxblood));
+  color: var(--cream);
+}
+
+table.ledger {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.ledger th {
+  font: 700 13px var(--caps);
+  text-align: left;
+  color: var(--ink-soft);
+  border-bottom: 1px solid var(--paper-line);
+  padding: 4px 8px;
+}
+.ledger td {
+  padding: 5px 8px;
+  border-bottom: 1px dotted var(--paper-line);
+}
+.ledger td.num,
+.ledger th.num {
+  text-align: right;
+}
+.ledger tr.me td {
+  background: rgb(201 163 90 / 0.18);
+}
+
+.muted {
+  color: var(--ink-soft);
+}
+
+/* A seat's colour, as a small disc. */
+.seat-dot {
+  display: inline-block;
+  width: 0.8em;
+  height: 0.8em;
+  border-radius: 50%;
+  border: 1px solid rgb(0 0 0 / 0.5);
+  vertical-align: -0.05em;
+}
+
+.error {
+  color: var(--bad);
+  font-weight: 600;
 }
