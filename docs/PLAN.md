@@ -1089,7 +1089,7 @@ Svelte client ──REST──────────────────�
 
 **Protocol (a sketch; 4.2 pins it).** Pydantic models are the source of truth. They emit a JSON Schema,
 checked in with a `--check` mode like the board data, from which the client generates its TypeScript
-types.
+types. *(Pinned in 4.2: docs/WEB_PROTOCOL.md, which lists where it departs from this sketch.)*
 
 - `GET /api/boards/{map}` -- the engine's board data plus the layout (below). The client reads this,
   never the map TOML: mini's TOML is not in engine order (the generator canonicalizes it).
