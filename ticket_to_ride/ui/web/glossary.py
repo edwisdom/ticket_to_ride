@@ -37,6 +37,8 @@ TERMS = {
     "each worth a car of progress.",
     "network_settlement": "H5: ticket points an offer is expected to settle for, each ticket "
     "it might deal priced by how far its cities are from this seat's network and plan.",
+    "longest_race": "H5: what this claim does to the odds of ending with the longest route, "
+    "against the longest rival trail: the bonus, plus the rival's loss of it.",
     "expected_card_value": "What a card from the deck is worth on average, over the cards "
     "this seat cannot account for.",
     "card_value": "What this face-up card is worth to the plan.",
@@ -66,6 +68,8 @@ FACTS = {
     "pool_tickets": "H5: tickets this seat might be dealt: every ticket it does not hold.",
     "tickets_ready": "H5: of those, tickets its network already completes.",
     "offer_size": "H5: tickets an offer would deal.",
+    "longest_after": "H5: this seat's longest continuous trail after the claim, in cars.",
+    "rival_longest": "H5: the longest continuous trail any rival has, in cars.",
     "unseen_cards": "Cards this seat cannot account for: the deck and opponents' blind draws.",
     "plan_needs": "Cards of this colour the plan still needs beyond those in hand.",
     "plan_cost_after": "Train cars the plan would need after this.",

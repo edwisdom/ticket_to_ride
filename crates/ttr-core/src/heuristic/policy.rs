@@ -32,7 +32,7 @@ use crate::config::{
     EMPTY_SLOT, FREE, NOT_TRIGGERED, PHASE_DRAW_SECOND, PHASE_INITIAL_TICKETS, PHASE_MAIN,
     PHASE_TICKET_KEEP,
 };
-use crate::graph::steiner_cost_exact;
+use crate::graph::{longest_trail, steiner_cost_exact};
 use crate::heuristic::params::HeuristicParams;
 use crate::heuristic::plan::Plan;
 use crate::heuristic::trace::{Explanation, Recorder, Silent, Sink};
@@ -55,8 +55,9 @@ pub enum Tier {
     /// they take from it -- and opponent modelling: threatened edges, threat pricing, double
     /// grabs, hoarding.
     H4 = 4,
-    /// H4 + ticket draws priced against its own network: early tickets are expensive and
-    /// late ones are cheap, so it draws them late, with no train gate.
+    /// H4 + ticket draws priced against its own network -- early tickets are expensive and
+    /// late ones are cheap, so it draws them late, with no train gate -- and the
+    /// longest-route race priced from both trails.
     H5 = 5,
 }
 
@@ -110,6 +111,21 @@ pub struct Heuristic {
     nets_version: u32,
     nets_ready: bool,
     legal: Vec<u16>,
+    /// The longest-route race for the current decision, when this tier runs it: this seat's
+    /// longest trail, the longest rival's, and per segment the trail a claim of it would
+    /// leave (`u16::MAX` until asked).
+    race: Option<Race>,
+    trail_after: Vec<u16>,
+    owner_scratch: Vec<u8>,
+}
+
+/// Where the longest-route race stands for one decision.
+#[derive(Clone, Copy, Debug)]
+struct Race {
+    mine: u16,
+    rival: u16,
+    /// The logistic's scale, in cars: how far a lead still is from a sure thing.
+    scale: f64,
 }
 
 impl Clone for Heuristic {
@@ -135,6 +151,9 @@ impl Heuristic {
             nets_version: 0,
             nets_ready: false,
             legal: Vec::new(),
+            race: None,
+            trail_after: Vec::new(),
+            owner_scratch: Vec::new(),
         }
     }
 
@@ -385,6 +404,7 @@ impl Heuristic {
     fn act_scored<S: Sink>(&mut self, state: &mut State, seat: usize, sink: &mut S) -> u16 {
         self.refresh(state, seat);
         let ctx = Ctx::build(state, seat, &self.params, &self.plan, self.tier);
+        self.start_race(state, seat);
         if S::LISTENING {
             ctx.report(&self.plan, state, sink);
         }
@@ -486,7 +506,88 @@ impl Heuristic {
                 score += self.off_plan_terms(state, ctx, seg, length, pay, sink);
             }
         }
+        score += self.race_term(state, ctx, segment, sink);
         score
+    }
+
+    /// Set up the longest-route race for this decision, or switch it off.
+    fn start_race(&mut self, state: &State, seat: usize) {
+        self.race = None;
+        if self.tier < Tier::H5 || self.params.longest_race_weight <= 0.0 {
+            return;
+        }
+        let board = state.board;
+        let owner = &state.seg_owner[..board.n_segments];
+        let mine = longest_trail(board, owner, seat as u8);
+        let (mut rival, mut rival_trains) = (0u16, 0u8);
+        for o in 0..state.n_players() {
+            if o == seat {
+                continue;
+            }
+            let theirs = longest_trail(board, owner, o as u8);
+            if theirs > rival || (theirs == rival && state.trains[o] > rival_trains) {
+                rival = theirs;
+                rival_trains = state.trains[o];
+            }
+        }
+        let unplaced = f64::from(state.trains[seat]) + f64::from(rival_trains);
+        self.race = Some(Race {
+            mine,
+            rival,
+            scale: 1.0 + self.params.longest_race_spread * unplaced,
+        });
+        self.trail_after.clear();
+        self.trail_after.resize(board.n_segments, u16::MAX);
+        self.owner_scratch.clear();
+        self.owner_scratch.extend_from_slice(owner);
+    }
+
+    /// The longest-route race's share of a claim: the bonus, plus the rival's loss of it
+    /// shared among the rivals, times how much the claim moves the odds of ending longest.
+    ///
+    /// H3 weighs a claim that extends a network by its length, a tiebreak that knows
+    /// neither trail -- and is worth 27 Elo to H5 even so. The bonus decides games: in H5's
+    /// losses to H4, H4 held it alone and the margin was under its 20-point swing in 31% of
+    /// them. Priced exactly, the race replaces the tiebreak: with both, play measured the
+    /// same as with the race alone.
+    fn race_term<S: Sink>(
+        &mut self,
+        state: &mut State,
+        ctx: &Ctx,
+        segment: u16,
+        sink: &mut S,
+    ) -> f64 {
+        let Some(race) = self.race else {
+            return 0.0;
+        };
+        let seg = segment as usize;
+        if self.trail_after[seg] == u16::MAX {
+            let board = state.board;
+            let (a, b) = (board.seg_a[seg], board.seg_b[seg]);
+            let touches = self.component_cars(state, ctx.seat, a) > 0
+                || self.component_cars(state, ctx.seat, b) > 0;
+            self.trail_after[seg] = if touches {
+                let before = self.owner_scratch[seg];
+                self.owner_scratch[seg] = ctx.seat as u8;
+                let after = longest_trail(board, &self.owner_scratch, ctx.seat as u8);
+                self.owner_scratch[seg] = before;
+                after
+            } else {
+                race.mine.max(u16::from(board.seg_len[seg]))
+            };
+        }
+        let after = self.trail_after[seg];
+        let odds = |trail: u16| {
+            let lead = f64::from(trail) - f64::from(race.rival);
+            1.0 / (1.0 + (-lead / race.scale).exp())
+        };
+        let rivals = f64::from(state.rules.n_players.saturating_sub(1).max(1));
+        let stake = f64::from(state.board.raw.longest_bonus) * (1.0 + 1.0 / rivals);
+        let value = self.params.longest_race_weight * stake * (odds(after) - odds(race.mine));
+        sink.term("longest_race", value);
+        sink.fact("longest_after", f64::from(after));
+        sink.fact("rival_longest", f64::from(race.rival));
+        value
     }
 
     /// What an off-plan claim takes from the plan: trains the plan would have needed, and
@@ -583,12 +684,16 @@ impl Heuristic {
         sink.term("tickets_finished", finished);
         sink.fact("cars", f64::from(board.seg_len[seg]));
         let mut score = points + finished;
-        let touching =
-            self.component_cars(state, ctx.seat, a) + self.component_cars(state, ctx.seat, b);
-        if touching > 0 {
-            let chain = self.params.longest_chain_weight * f64::from(board.seg_len[seg]);
-            score += chain;
-            sink.term("longest_chain", chain);
+        if self.race.is_some() {
+            score += self.race_term(state, ctx, segment, sink);
+        } else {
+            let touching =
+                self.component_cars(state, ctx.seat, a) + self.component_cars(state, ctx.seat, b);
+            if touching > 0 {
+                let chain = self.params.longest_chain_weight * f64::from(board.seg_len[seg]);
+                score += chain;
+                sink.term("longest_chain", chain);
+            }
         }
         score
     }
@@ -613,13 +718,16 @@ impl Heuristic {
 
         // The longest-path bonus is 10 points and often decisive, but it is a tiebreak, not
         // a plan: weight it by the cars this claim adds to a component that already exists.
-        let (a, b) = (board.seg_a[seg], board.seg_b[seg]);
-        let touching =
-            self.component_cars(state, ctx.seat, a) + self.component_cars(state, ctx.seat, b);
-        if touching > 0 {
-            let chain = p.longest_chain_weight * f64::from(length);
-            extra += chain;
-            sink.term("longest_chain", chain);
+        // H5 prices the race itself instead ([`Heuristic::race_term`]).
+        if self.race.is_none() {
+            let (a, b) = (board.seg_a[seg], board.seg_b[seg]);
+            let touching =
+                self.component_cars(state, ctx.seat, a) + self.component_cars(state, ctx.seat, b);
+            if touching > 0 {
+                let chain = p.longest_chain_weight * f64::from(length);
+                extra += chain;
+                sink.term("longest_chain", chain);
+            }
         }
 
         // What this payment actually costs in flexibility.

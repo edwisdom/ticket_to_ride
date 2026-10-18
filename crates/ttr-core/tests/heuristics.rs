@@ -407,7 +407,7 @@ const BEHAVIOUR_HASHES: [(Tier, &str); 6] = [
     // H4 moved with the anchor, and again when its off-plan claims began paying for what
     // they take from the plan.
     (Tier::H4, "3099a56f772c213325a2197df3857d69"),
-    (Tier::H5, "ce10c9e19b2bfa51664b49a250508913"),
+    (Tier::H5, "17159cb8bb8daa26b3418eef23ddeb05"),
 ];
 
 #[test]
@@ -587,4 +587,63 @@ fn h5_draws_tickets_late_when_its_network_reaches_them() {
     };
     assert!(value("network_settlement", &draw.terms).is_some_and(|v| v > 0.0));
     assert!(value("tickets_ready", &draw.facts).is_some_and(|v| v >= 1.0));
+}
+
+/// H5 (seat 0) against H4, USA 2P, both seats on 7 trains: Chicago-Omaha takes H5's longest
+/// trail from 31 cars to 35, past the rival's 31, with the game a few turns from its end.
+const RACE_SEED: u64 = 8_400_039;
+#[rustfmt::skip]
+const RACE_PREFIX: [u16; 152] = [
+    909, 909, 597, 906, 907, 905, 905, 906, 907, 905, 905, 906, 910, 247, 900, 902, 900, 904,
+    905, 905, 905, 685, 605, 864, 906, 911, 905, 905, 901, 901, 661, 433, 905, 905, 901, 905,
+    204, 158, 905, 905, 905, 905, 124, 905, 905, 905, 905, 905, 905, 905, 905, 905, 903, 905,
+    905, 905, 905, 573, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905,
+    578, 396, 905, 905, 362, 905, 905, 544, 905, 905, 515, 905, 905, 228, 905, 905, 905, 905,
+    905, 905, 905, 905, 213, 221, 905, 905, 906, 909, 905, 905, 447, 905, 905, 906, 908, 875,
+    905, 905, 905, 905, 905, 905, 905, 905, 106, 478, 905, 905, 905, 905, 905, 905, 905, 905,
+    905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905,
+    905, 905, 905, 905, 905, 905, 455, 132,
+];
+
+#[test]
+fn h5_races_for_the_longest_route() {
+    let g = game("usa", 2);
+    let mut state = g.new_initial_state(RACE_SEED);
+    for &action in &RACE_PREFIX {
+        state.step(action).unwrap();
+    }
+    assert_eq!(state.current_player(), 0);
+    let race_route = route(g.board, "Chicago", "Omaha");
+    let params = HeuristicParams::default();
+
+    // H3's tiebreak alone does not see the race: H5 without it plays something else.
+    let tiebreak = HeuristicParams {
+        longest_race_weight: 0.0,
+        ..params
+    };
+    let mut without = Heuristic::new(Tier::H5, tiebreak, 0);
+    without.begin_game(0, RACE_SEED);
+    let action = without.act(&mut state.clone());
+    assert!(action >= g.space.claim_end || g.space.decode_claim(action).0 != race_route);
+
+    let mut h5 = Heuristic::new(Tier::H5, params, 0);
+    h5.begin_game(0, RACE_SEED);
+    let e = h5.explain(&mut state);
+    assert!(e.chosen < g.space.claim_end, "H5 did not claim");
+    assert_eq!(
+        g.space.decode_claim(e.chosen).0,
+        race_route,
+        "H5 let the race go"
+    );
+    let chosen = &e.candidates[0];
+    let get = |name: &str, of: &[(&'static str, f64)]| {
+        of.iter().find(|(n, _)| *n == name).map(|&(_, v)| v)
+    };
+    assert!(get("longest_race", &chosen.terms).is_some_and(|v| v > 0.0));
+    let after = get("longest_after", &chosen.facts).unwrap();
+    let rival = get("rival_longest", &chosen.facts).unwrap();
+    assert!(
+        after > rival,
+        "the claim leaves H5 at {after} against {rival}"
+    );
 }

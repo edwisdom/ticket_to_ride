@@ -58,16 +58,17 @@ purpose: it did once, when H3 learned to plan the network its cards can pay for 
 spend its last turn on points (+36 Elo over its predecessor at USA 2P; docs/WORKLOG.md).
 Above it, each tier adds one idea, found by stepping through the losses of the tier below:
 H4's off-plan claims pay for the trains and cards they take from its plan, and H5 prices a
-ticket draw against its own network, so it draws tickets late, when they are cheap.
+ticket draw against its own network, so it draws tickets late, when they are cheap; H5
+also races for the longest route against the longest trail on the board.
 
 | agent | usa 2P | mini 2P | usa 4P | µs/decision (usa 2P) |
 | --- | --- | --- | --- | --- |
-| h5 | 1634 [1620, 1650] | 1522 [1505, 1539] | 1611 [1605, 1617] | 19.6 |
-| h4 | 1590 [1576, 1605] | 1532 [1517, 1547] | 1567 [1562, 1572] | 25.5 |
+| h5 | 1642 [1626, 1659] | 1535 [1518, 1553] | 1618 [1612, 1624] | 27.5 |
+| h4 | 1593 [1578, 1609] | 1530 [1515, 1545] | 1566 [1561, 1571] | 25.5 |
 | **h3** | **1500** (anchor) | **1500** | **1500** | 18.0 |
-| h2 | 1330 [1312, 1348] | 1365 [1346, 1384] | 1350 [1343, 1356] | 11.3 |
-| h1 | 686 [624, 739] | 920 [885, 952] | 686 [666, 703] | 0.2 |
-| h0 | 135 [58, 203] | 654 [607, 696] | 158 [131, 182] | 0.2 |
+| h2 | 1326 [1309, 1343] | 1366 [1347, 1386] | 1351 [1344, 1357] | 11.4 |
+| h1 | 685 [624, 738] | 923 [887, 954] | 681 [660, 699] | 0.2 |
+| h0 | 134 [58, 202] | 655 [608, 698] | 161 [134, 184] | 0.2 |
 
 Bradley–Terry MLE, 95% intervals from a bootstrap that resamples **seed blocks** rather than
 games — games inside a block share a deck, and treating them as independent inflates

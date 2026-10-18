@@ -56,7 +56,8 @@ DESCRIPTIONS = {
     "tickets still need on other routes. It also blocks routes that would join an "
     "opponent's network and holds claims that are safe to wait on.",
     "h5": "H4 plus tickets priced against its own network: early tickets are expensive and "
-    "late ones nearly free, so it draws them late, when its network already reaches them.",
+    "late ones nearly free, so it draws them late, when its network already reaches them. "
+    "It also races for the longest route, against the longest trail on the board.",
 }
 
 

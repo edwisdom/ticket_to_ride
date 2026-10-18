@@ -5,6 +5,57 @@ session. Decisions that deviate from [PLAN.md](PLAN.md) belong here, with the re
 
 ---
 
+## 2026-10-18 — H5 races for the longest route; re-planning a stall still loses
+
+Round 3 looked at H5's losses. The longest-route race is folded into H5 as a smaller gain;
+re-planning a stalled hand was tried and dropped.
+
+### What H5's losses said
+
+From 2,000 games against H4, 31% of H5's losses were clean, decided by route points (−8.6)
+and the longest route (−7.2). The bonus matters more than that suggests: H4 held it in 59%
+of games to H5's 45%. In 31% of H5's losses H4 held it alone and the margin was under its
+20-point swing, and in another 170 games the bonus won the game for H5. H3's tiebreak for
+it, 0.35 points a car for any claim touching an existing network, is worth +27 Elo to H5
+by itself (setting it to 0 costs that much), so the bonus is worth pricing properly.
+
+### Kept: the longest-route race
+
+`longest_race_weight` (1.0) and `longest_race_spread` (0.4). Each decision computes this
+seat's exact longest trail and the longest rival trail, and for each candidate claim the
+trail it would leave, cached per segment. The claim is worth the bonus, plus the rival's
+loss of it divided among the rivals, times the change in a logistic of the lead, at a
+scale of `1 + spread × (my trains + the rival's)` cars. Early in the game the odds barely
+move; with both seats down to their last few trains, a lead of a car or two nearly
+settles it. The race replaces H3's tiebreak for H5: with both terms, play measured the
+same as with the race alone (+14 vs +15).
+
+New H5 vs old H5: SPRT at `--elo1 10` accepted after 1,200 blocks. Fixed-size: **+16 [+12,
++21] at USA 2P**, +7 [+4, +10] on mini 2P, +5 [+1, +9] at USA 4P. The new H5 against H4
+reads +44 / +8 / +47, and against H3 +133 / +43 / +125. On mini, H5 is now ahead of H4 (it
+was −2.5).
+
+- The grid over weight (0.75-1.5) and spread (0.25-0.7) is a plateau, +17 to +29 against
+  H5 at 1,500 blocks each. Its best cell, +28.6, read +15 on a fresh root: a winner's curse
+  from picking the best of nine noisy cells. Weight 2 loses (−13), and a sharper spread
+  (0.06) gains little (+6).
+- **Cost**: +8 µs a decision, mostly the trail recomputed per candidate segment. H5 is now
+  27.5 µs at USA 2P, beside H4's 25.5.
+
+### Dropped: re-planning a big hand
+
+Stalls are still a quarter of losses: a seat holding 10+ cards whose plan waits on a colour
+that never comes. The idea was to plan with a heavier card weight once the hand reaches N
+cards, so a network the hand can pay for beats a shorter one it cannot. Against H5, over
+1,500 blocks each: card weight 0.1 gave +4 to +8 at N = 8, 10 or 12; weight 0.3 gave −16 to
++6; weight 1.0 gave −26 to −65. As for H3's card weight, a plan that buys payability with
+route length loses the long routes' points and the contested highways. A big hand alone is
+the wrong signal, and the card prices are summed per segment, which double-counts the
+draws two segments of one colour share. Whatever fixes stalls has to know which segment is
+stuck.
+
+---
+
 ## 2026-10-18 — H5: a ticket costs its distance from the network
 
 **H5 is a new tier**: H4, plus a ticket draw priced against its own network. SPRT at

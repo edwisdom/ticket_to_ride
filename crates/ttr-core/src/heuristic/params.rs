@@ -179,6 +179,15 @@ pub struct HeuristicParams {
     /// at the cars from its network and plan to the ticket's cities, the offer at its
     /// expected best keep, and no train gate. Off is H3's mean-ticket model with its gate.
     pub ticket_draw_network: bool,
+
+    // -- H5: the longest-route race ---------------------------------------
+    /// Weight on the longest-route race: a claim's change in this seat's exact longest
+    /// trail against the longest rival's, priced as odds on the bonus. It replaces
+    /// [`Self::longest_chain_weight`]'s tiebreak, which knew neither trail. 0 = the tiebreak.
+    pub longest_race_weight: f64,
+    /// How fast those odds blur with the trains still to be placed: a logistic in the lead,
+    /// at a scale of `1 + spread × (my trains + the rival's)` cars.
+    pub longest_race_spread: f64,
 }
 
 impl Default for HeuristicParams {
@@ -225,6 +234,9 @@ impl Default for HeuristicParams {
             plan_card_spend_weight: 1.0,
 
             ticket_draw_network: true,
+
+            longest_race_weight: 1.0,
+            longest_race_spread: 0.4,
         }
     }
 }
@@ -297,6 +309,8 @@ impl HeuristicParams {
         field!(plan_budget_weight, Tier::H4);
         field!(plan_card_spend_weight, Tier::H4);
         field!(ticket_draw_network, Tier::H5);
+        field!(longest_race_weight, Tier::H5);
+        field!(longest_race_spread, Tier::H5);
         out
     }
 
@@ -521,6 +535,14 @@ mod tests {
             },
             HeuristicParams {
                 ticket_draw_network: false,
+                ..base
+            },
+            HeuristicParams {
+                longest_race_weight: 0.5,
+                ..base
+            },
+            HeuristicParams {
+                longest_race_spread: 0.5,
                 ..base
             },
         ];
