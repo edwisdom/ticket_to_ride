@@ -24,6 +24,8 @@ TERMS = {
     "gray_cannibalization": "Paying a gray route with a colour a coloured planned route "
     "still needs.",
     "locomotive_thrift": "Spending locomotives where coloured cards would do.",
+    "tickets_finished": "Its last turn: held tickets this claim completes, each swinging from "
+    "minus its points to plus.",
     "endgame": "Late in the game a plan that can still be finished is urgent, and one that "
     "cannot is worth nothing.",
     "threat": "H4: denies an opponent the route that would join two of their networks.",
@@ -74,6 +76,8 @@ CONTEXT = {
     "endgame": "1 once trains run low and play turns to finishing what can be finished.",
     "plan_completable": "1 if the trains left can still finish the plan.",
     "progress": "How far through the game it is, by the fastest seat's trains spent.",
+    "final_turn": "1 once the final round has started: this is the seat's last turn, so a "
+    "claim is worth only the points it scores now.",
 }
 
 #: Rules that rank a candidate.
@@ -90,6 +94,7 @@ RULES = {
     "pass": "No other move.",
     "keep_fewest_shortest": "H1: keep the fewest tickets allowed, the shortest routes.",
     "ticket_gate": "Too few trains left to take on new tickets.",
+    "final_turn": "Its last turn: a card or ticket drawn now can never be used.",
 }
 
 

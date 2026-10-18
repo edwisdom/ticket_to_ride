@@ -49,8 +49,9 @@ DESCRIPTIONS = {
     "the face-up colour it holds most of.",
     "h2": "Ticket planner: plans the cheapest network for its tickets and claims its most "
     "contested segment first.",
-    "h3": "H2 plus card and ticket values, endgame play, longest-route tiebreaks and "
-    "ticket keeping by expected value. The rating scale's zero.",
+    "h3": "H2 plus card and ticket values, a plan its cards can pay for, endgame and "
+    "last-turn play, longest-route tiebreaks and ticket keeping by expected value. The "
+    "rating scale's zero.",
     "h4": "H3 plus opponent modelling: blocks routes that would join an opponent's network "
     "and holds claims that are safe to wait on.",
 }

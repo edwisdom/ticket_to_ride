@@ -873,6 +873,7 @@ fn params_from(overrides: Option<&Bound<'_, PyDict>>) -> PyResult<HeuristicParam
             "faceup_needed_bonus" => p.faceup_needed_bonus = value.extract()?,
             "locomotive_value" => p.locomotive_value = value.extract()?,
             "surplus_card_value" => p.surplus_card_value = value.extract()?,
+            "plan_card_weight" => p.plan_card_weight = value.extract()?,
             "endgame_train_fraction" => p.endgame_train_fraction = value.extract()?,
             "endgame_ticket_urgency" => p.endgame_ticket_urgency = value.extract()?,
             "convex_path_exponent" => p.convex_path_exponent = value.extract()?,

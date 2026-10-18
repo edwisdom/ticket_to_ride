@@ -27,7 +27,7 @@ def test_no_line_of_a_real_game_says_a_before_a_vowel(map_name: str) -> None:
     names = ["H3", "H4"]
     article = re.compile(r"\ba [aeiou]", re.IGNORECASE)
     lines = 0
-    for seed in range(6):
+    for seed in range(8):
         bots = [ttr_rust.Heuristic(tier) for tier in ("h3", "h4")]
         for seat, bot in enumerate(bots):
             bot.begin_game(seat, seed)

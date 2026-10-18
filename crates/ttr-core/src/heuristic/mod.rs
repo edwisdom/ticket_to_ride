@@ -5,10 +5,10 @@
 //! per step defeats the entire batching design. Building the agents after the port means
 //! writing them once instead of writing them in Python and porting them later.
 //!
-//! ## H3 is the permanent Elo zero, and a name is not a freeze
+//! ## H3 is the Elo zero, and a name is not a freeze
 //!
-//! PLAN.md §11 anchors the rating scale at H3 = 0 for the project's lifetime. That only
-//! works if H3 is *the same player* across every invocation, months apart. Putting its
+//! PLAN.md §11 anchors the rating scale at H3 = 0. That only works if H3 is *the same
+//! player* across every invocation, months apart, until it is moved on purpose. Putting its
 //! constants in [`params::HeuristicParams`] is necessary and not sufficient: it pins the
 //! numbers and leaves the code around them free. A tiebreak reordered, a change to
 //! [`crate::graph::MAX_STEINER_TERMINALS`], a fix in the plan's path reconstruction -- each
@@ -19,9 +19,12 @@
 //! probe set, pinned as a golden literal. Constants *or* code, if the play changes the test
 //! says so. `params_hash` is provenance recorded alongside; the behaviour hash is identity.
 //!
-//! The corollary is how tuning works: a retuned H3 is a **new agent** (`h3.v2`) that gets
-//! rated *against* the anchor. It never becomes the anchor. That is the whole mechanism by
-//! which ratings accumulate across months rather than quietly re-basing.
+//! The corollary is how tuning works: an experiment is a **new agent** (`h3@...`) rated
+//! *against* the anchor, and H3 itself changes only as a recorded event -- measured against
+//! its predecessor, the golden hash updated, the re-basing noted in docs/WORKLOG.md. That is
+//! what lets ratings accumulate across months rather than quietly re-basing. It has
+//! happened once: the first H3 was too weak to be the bar, so it learned to plan the network
+//! its cards can pay for and to spend its last turn on points.
 
 pub mod params;
 pub mod plan;
