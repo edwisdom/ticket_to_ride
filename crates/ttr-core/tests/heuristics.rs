@@ -407,7 +407,7 @@ const BEHAVIOUR_HASHES: [(Tier, &str); 6] = [
     // H4 moved with the anchor, and again when its off-plan claims began paying for what
     // they take from the plan.
     (Tier::H4, "3099a56f772c213325a2197df3857d69"),
-    (Tier::H5, "17159cb8bb8daa26b3418eef23ddeb05"),
+    (Tier::H5, "834f43da0f251916034ed6ab10d92476"),
 ];
 
 #[test]
@@ -645,5 +645,56 @@ fn h5_races_for_the_longest_route() {
     assert!(
         after > rival,
         "the claim leaves H5 at {after} against {rival}"
+    );
+}
+
+/// H5 (seat 0) against H4, USA 2P: every ticket H5 holds is done, it has 10 trains, and it
+/// can pay for El Paso-Los Angeles, six cars for 15 points.
+const FINISHED_SEED: u64 = 9_000_007;
+#[rustfmt::skip]
+const FINISHED_PREFIX: [u16; 156] = [
+    909, 912, 598, 906, 910, 901, 901, 906, 908, 901, 901, 901, 591, 685, 901, 903, 903, 904,
+    905, 347, 608, 900, 901, 905, 905, 445, 905, 905, 906, 910, 905, 905, 901, 905, 744, 902,
+    904, 904, 905, 291, 905, 905, 904, 905, 905, 905, 204, 578, 905, 905, 502, 902, 902, 905,
+    905, 340, 905, 905, 532, 905, 905, 906, 907, 905, 905, 900, 901, 901, 171, 730, 901, 905,
+    513, 695, 905, 905, 814, 905, 905, 890, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905,
+    905, 905, 163, 905, 905, 905, 905, 905, 905, 905, 905, 158, 905, 905, 905, 905, 905, 905,
+    905, 905, 905, 905, 905, 905, 354, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905,
+    905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905,
+    905, 905, 905, 905, 905, 905, 905, 905, 905, 635, 905, 905,
+];
+
+#[test]
+fn with_its_tickets_done_h5_spends_its_trains_on_points() {
+    let g = game("usa", 2);
+    let mut state = g.new_initial_state(FINISHED_SEED);
+    for &action in &FINISHED_PREFIX {
+        state.step(action).unwrap();
+    }
+    assert_eq!(state.current_player(), 0);
+    let six = route(g.board, "El Paso", "Los Angeles");
+    let params = HeuristicParams::default();
+
+    // Charged H3's rate for its trains, H5 drew tickets here instead.
+    let charged = HeuristicParams {
+        finished_train_cost: params.min_points_per_train,
+        ..params
+    };
+    let mut before = Heuristic::new(Tier::H5, charged, 0);
+    before.begin_game(0, FINISHED_SEED);
+    assert_eq!(before.act(&mut state.clone()), g.space.draw_tickets);
+
+    let mut h5 = Heuristic::new(Tier::H5, params, 0);
+    h5.begin_game(0, FINISHED_SEED);
+    let e = h5.explain(&mut state);
+    assert!(e.context.contains(&("tickets_done", 1.0)));
+    assert!(e.chosen < g.space.claim_end, "H5 did not claim");
+    assert_eq!(g.space.decode_claim(e.chosen).0, six);
+    assert!(
+        !e.candidates[0]
+            .terms
+            .iter()
+            .any(|(name, _)| *name == "train_cost"),
+        "a finished H5 still charged its trains"
     );
 }

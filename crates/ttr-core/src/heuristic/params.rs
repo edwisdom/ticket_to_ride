@@ -188,6 +188,11 @@ pub struct HeuristicParams {
     /// How fast those odds blur with the trains still to be placed: a logistic in the lead,
     /// at a scale of `1 + spread × (my trains + the rival's)` cars.
     pub longest_race_spread: f64,
+    /// What a train car costs a claim once every held ticket is done, in place of
+    /// [`Self::min_points_per_train`]. That charge keeps trains for the plan; with no plan
+    /// left a train's only use is points, and one left unplaced when the game ends is
+    /// worth nothing.
+    pub finished_train_cost: f64,
 }
 
 impl Default for HeuristicParams {
@@ -237,6 +242,7 @@ impl Default for HeuristicParams {
 
             longest_race_weight: 1.0,
             longest_race_spread: 0.4,
+            finished_train_cost: 0.0,
         }
     }
 }
@@ -311,6 +317,7 @@ impl HeuristicParams {
         field!(ticket_draw_network, Tier::H5);
         field!(longest_race_weight, Tier::H5);
         field!(longest_race_spread, Tier::H5);
+        field!(finished_train_cost, Tier::H5);
         out
     }
 
@@ -543,6 +550,10 @@ mod tests {
             },
             HeuristicParams {
                 longest_race_spread: 0.5,
+                ..base
+            },
+            HeuristicParams {
+                finished_train_cost: 1.0,
                 ..base
             },
         ];

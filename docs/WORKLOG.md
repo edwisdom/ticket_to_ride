@@ -5,6 +5,65 @@ session. Decisions that deviate from [PLAN.md](PLAN.md) belong here, with the re
 
 ---
 
+## 2026-10-18 — H5 spends its trains once its tickets are done; three ideas that did nothing
+
+Round 4 started from the H5 that races for the longest route. One smaller gain is folded
+into H5. Three more ideas were tried and dropped, and a fourth was dropped after measuring
+it.
+
+### What H5's losses said
+
+Against H4, two thirds of H5's losses end with H4 closing the game while H5's plan is
+unfinished. That covers stalls, plans out of time, and plans "short of trains". The last
+group looked like over-commitment, but tracing what first pushed a plan past the trains
+shows 203 of 347 cases are H5's own final-round claims, points taken once the game is
+already over. Before the final round it is keeps (74), opponents' claims (44) and H5's own
+claims (26). The losing H5 seat ends with 5.1 trains unplaced, where H4's losing seat ends
+with 1.8. Once every ticket is done H5 is usually far ahead: its settled lead is 60 points
+on average, counting the opponent's open tickets as misses. Yet it went on to lose 28% of
+those games (274 of 972), drawing 2.3 more ticket offers a game after its plan was done.
+
+### Kept: free trains once the tickets are done
+
+`finished_train_cost` (0 for H5). Once every held ticket is done, a claim is charged
+nothing for its trains in place of H3's `min_points_per_train`. That charge exists to keep
+trains for the plan. With no plan left, a train's only use is points, and a train still
+unplaced when the game ends is worth nothing. Previously, at H3's rate, H5 would draw
+tickets at 10 trains rather than claim a 6-car route for 15 points (the reviewed position
+`with_its_tickets_done_h5_spends_its_trains_on_points`).
+
+New H5 vs the previous one: SPRT at `--elo1 10` accepted. Fixed-size: **+23 [+20, +27] at
+USA 2P**, +11 [+8, +14] on mini 2P, +21 [+19, +23] at USA 4P. H5 now leads H4 by +62 /
++10 / +52 and H3 by +150 / +48 / +136.
+
+- Also refusing ticket draws once done hurts: −26 when applied at any train count, −22
+  under 25 trains, neutral under 15. The free trains are the gain (+24 under 15 trains with
+  tickets refused, +21 with them allowed). A threshold on trains turned out to be
+  meaningless (18, 25, 32 and 45 played identically), because a plan only empties late.
+
+### Dropped
+
+- **Exact Steiner edge sets.** The plan's edge set comes from a shortest-path heuristic
+  and its cost from the exact DP. Over 25,745 decisions the edge set needed more cars than
+  the exact cost in 3.2% of them, by 0.04 cars on average. There is nothing to gain, so it
+  was not built.
+- **A time-aware filter on late keeps.** H5's tickets kept late net +10, +8 and +6 points
+  each as the opponent's trains fall through 20, 12 and 8, and +1.5 still with the opponent
+  on 7 or fewer. A filter could only prune that last band, so it was not built.
+- **Pricing dry colours in the plan.** H3's card price, but with a steep extra charge for
+  each draw past a threshold, so a segment whose colour has all but run out gives way to a
+  payable alternative. Screening at 1,500 blocks read +16 at best (threshold 4 draws,
+  weight 0.1). At 4,000 blocks it was −0.3, −2.1 and +1.7, and heavier weights lost up to
+  −114. Every form of card-aware planning tried so far ends the same way. A heavier price
+  also makes the plan flip between networks a little more often (0.08 to 0.15 times a
+  decision at weights 0.01 to 0.3), but not enough to explain the losses.
+- **Denying the rival's best trail extension.** This is a one-step lookahead on the longest
+  rival trail: claiming the free segment that would lengthen it most leaves the rival its
+  second best. It measured +0.1 to +1.6, because it almost never changes a decision, and it
+  doubled the cost per decision.
+
+---
+
 ## 2026-10-18 — H5 races for the longest route; re-planning a stall still loses
 
 Round 3 looked at H5's losses. The longest-route race is folded into H5 as a smaller gain;

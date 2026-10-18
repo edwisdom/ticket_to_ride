@@ -56,8 +56,8 @@ pub enum Tier {
     /// grabs, hoarding.
     H4 = 4,
     /// H4 + ticket draws priced against its own network -- early tickets are expensive and
-    /// late ones are cheap, so it draws them late, with no train gate -- and the
-    /// longest-route race priced from both trails.
+    /// late ones are cheap, so it draws them late, with no train gate -- the longest-route
+    /// race priced from both trails, and free trains once its tickets are done.
     H5 = 5,
 }
 
@@ -462,7 +462,15 @@ impl Heuristic {
         if ctx.final_turn {
             return self.score_final_claim(state, ctx, segment, points, sink);
         }
-        let train_cost = p.min_points_per_train * cars;
+        // H5: with every ticket done the charge's job -- keeping trains for the plan -- is
+        // over. Kept at H3's rate, H5 drew instead of claiming short routes it could pay for
+        // and ended games with trains unplaced; free, it gained 21 Elo at USA 2P.
+        let per_car = if ctx.finished {
+            p.finished_train_cost
+        } else {
+            p.min_points_per_train
+        };
+        let train_cost = per_car * cars;
         let mut score = points - train_cost;
         sink.term("route_points", points);
         sink.term("train_cost", -train_cost);
@@ -1289,6 +1297,8 @@ struct Ctx {
     locomotive_value: f64,
     /// Plan segments this seat can pay for right now.
     affordable: Vec<u16>,
+    /// H5+: every held ticket is done, so a train's only use left is points.
+    finished: bool,
 }
 
 impl Ctx {
@@ -1388,6 +1398,7 @@ impl Ctx {
             surplus_value: params.surplus_card_value,
             locomotive_value: params.locomotive_value,
             affordable,
+            finished: tier >= Tier::H5 && plan.live_points == 0 && plan.dead_tickets.is_empty(),
         }
     }
 
@@ -1406,6 +1417,9 @@ impl Ctx {
         );
         sink.context("progress", self.progress);
         sink.context("final_turn", f64::from(u8::from(self.final_turn)));
+        if self.finished {
+            sink.context("tickets_done", 1.0);
+        }
     }
 
     /// What one card of `card` is worth, in points.

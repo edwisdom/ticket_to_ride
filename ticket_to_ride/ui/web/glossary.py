@@ -94,6 +94,8 @@ CONTEXT = {
     "progress": "How far through the game it is, by the fastest seat's trains spent.",
     "final_turn": "1 once the final round has started: this is the seat's last turn, so a "
     "claim is worth only the points it scores now.",
+    "tickets_done": "H5: every held ticket is done, so its trains are worth only the points "
+    "they score and claims are not charged for them.",
 }
 
 #: Rules that rank a candidate.
