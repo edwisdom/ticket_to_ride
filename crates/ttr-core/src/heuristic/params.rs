@@ -193,6 +193,13 @@ pub struct HeuristicParams {
     /// left a train's only use is points, and one left unplaced when the game ends is
     /// worth nothing.
     pub finished_train_cost: f64,
+    /// Past this share of the game -- the fastest seat's trains spent -- the plan prices its
+    /// cards at [`Self::late_card_weight`] rather than [`Self::plan_card_weight`]. Early the
+    /// cards will come; late they will not, and the network the hand can pay for beats a
+    /// shorter one waiting on a colour. Above 1 = never.
+    pub late_card_progress: f64,
+    /// Train cars a draw is worth when choosing the plan, late in the game.
+    pub late_card_weight: f64,
 }
 
 impl Default for HeuristicParams {
@@ -243,6 +250,8 @@ impl Default for HeuristicParams {
             longest_race_weight: 1.0,
             longest_race_spread: 0.4,
             finished_train_cost: 0.0,
+            late_card_progress: 0.7,
+            late_card_weight: 0.5,
         }
     }
 }
@@ -318,6 +327,8 @@ impl HeuristicParams {
         field!(longest_race_weight, Tier::H5);
         field!(longest_race_spread, Tier::H5);
         field!(finished_train_cost, Tier::H5);
+        field!(late_card_progress, Tier::H5);
+        field!(late_card_weight, Tier::H5);
         out
     }
 
@@ -554,6 +565,14 @@ mod tests {
             },
             HeuristicParams {
                 finished_train_cost: 1.0,
+                ..base
+            },
+            HeuristicParams {
+                late_card_progress: 0.5,
+                ..base
+            },
+            HeuristicParams {
+                late_card_weight: 0.2,
                 ..base
             },
         ];

@@ -407,7 +407,7 @@ const BEHAVIOUR_HASHES: [(Tier, &str); 6] = [
     // H4 moved with the anchor, and again when its off-plan claims began paying for what
     // they take from the plan.
     (Tier::H4, "3099a56f772c213325a2197df3857d69"),
-    (Tier::H5, "834f43da0f251916034ed6ab10d92476"),
+    (Tier::H5, "8c917c3fb99338efb0307b871c1a52bf"),
 ];
 
 #[test]
@@ -697,4 +697,54 @@ fn with_its_tickets_done_h5_spends_its_trains_on_points() {
             .any(|(name, _)| *name == "train_cost"),
         "a finished H5 still charged its trains"
     );
+}
+
+/// H4 (seat 0) against an H5 without late card pricing, USA 2P. H5's tickets wait on
+/// Helena-Seattle, six yellows with one in hand, and Portland-Salt Lake City, six blues. Its
+/// hand pays for Calgary-Helena and Calgary-Seattle, gray, two cars longer than the yellow
+/// route; it has 13 trains and the game is three-quarters done. It lost 56-134 with 24 cards
+/// in hand.
+const STALL_SEED: u64 = 9_500_119;
+#[rustfmt::skip]
+const STALL_LATE_PREFIX: [u16; 117] = [
+    912, 911, 906, 908, 900, 605, 346, 23, 903, 903, 906, 908, 903, 904, 903, 903, 900, 901,
+    900, 745, 329, 900, 901, 532, 588, 905, 905, 902, 900, 905, 905, 902, 903, 171, 628, 902,
+    902, 904, 902, 48, 903, 905, 903, 905, 903, 903, 903, 279, 573, 903, 905, 905, 905, 191,
+    905, 902, 906, 908, 747, 435, 814, 903, 904, 886, 448, 905, 905, 905, 905, 905, 905, 905,
+    905, 905, 905, 708, 730, 905, 905, 831, 905, 905, 904, 905, 904, 905, 904, 903, 463, 904,
+    904, 905, 905, 711, 905, 905, 904, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905, 905,
+    905, 905, 905, 905, 903, 905, 784, 905, 905,
+];
+
+#[test]
+fn late_in_the_game_h5_plans_the_network_its_hand_can_pay_for() {
+    let g = game("usa", 2);
+    let mut state = g.new_initial_state(STALL_SEED);
+    for &action in &STALL_LATE_PREFIX {
+        state.step(action).unwrap();
+    }
+    assert_eq!(state.current_player(), 1);
+    let calgary = route(g.board, "Calgary", "Helena");
+    let params = HeuristicParams::default();
+
+    let early_rules = HeuristicParams {
+        late_card_progress: 2.0,
+        ..params
+    };
+    let mut before = Heuristic::new(Tier::H5, early_rules, 0);
+    before.begin_game(1, STALL_SEED);
+    assert!(
+        before.act(&mut state.clone()) >= g.space.claim_end,
+        "it no longer draws here"
+    );
+
+    let mut h5 = Heuristic::new(Tier::H5, params, 0);
+    h5.begin_game(1, STALL_SEED);
+    let e = h5.explain(&mut state);
+    assert!(
+        e.chosen < g.space.claim_end,
+        "H5 kept waiting on the yellows"
+    );
+    assert_eq!(g.space.decode_claim(e.chosen).0, calgary);
+    assert!(e.candidates[0].facts.contains(&("on_plan", 1.0)));
 }

@@ -280,6 +280,26 @@ impl Plan {
         }
     }
 
+    /// Re-choose the edge set at a different card weight, if it differs from the one the
+    /// plan was built with. The terminals and the exact cost stay as they are.
+    pub fn reweigh(&mut self, state: &State, card_weight: f64) {
+        if card_weight == self.card_weight {
+            return;
+        }
+        self.card_weight = card_weight;
+        if card_weight > 0.0 {
+            self.cards = Cards::of(state, self.player as usize);
+            let board = state.board;
+            self.prices = card_prices(
+                board,
+                &state.seg_owner[..board.n_segments],
+                &self.cards,
+                card_weight,
+            );
+        }
+        self.choose_segments(state);
+    }
+
     /// The edge set for `self.prices` (none: by cars alone), its colour demand, and a fresh
     /// detour cache.
     fn choose_segments(&mut self, state: &State) {

@@ -56,20 +56,21 @@ constants — a params hash would leave a reordered tiebreak or a fixed bug free
 the anchor and silently re-base every rating ever recorded. The anchor moves only on
 purpose: it did once, when H3 learned to plan the network its cards can pay for and to
 spend its last turn on points (+36 Elo over its predecessor at USA 2P; docs/WORKLOG.md).
-Above it, each tier adds one idea, found by stepping through the losses of the tier below:
-H4's off-plan claims pay for the trains and cards they take from its plan, and H5 prices a
-ticket draw against its own network, so it draws tickets late, when they are cheap. H5
-also races for the longest route against the longest trail on the board, and once its
-tickets are done it spends its trains on points.
+Above it, each tier adds what stepping through the losses of the tier below turned up:
+H4's off-plan claims pay for the trains and cards they take from its plan. H5 prices a
+ticket draw against its own network, so it draws tickets late, when they are cheap; it also
+races for the longest route against the longest trail on the board, spends its trains on
+points once its tickets are done, and late in the game plans the network its hand can pay
+for.
 
 | agent | usa 2P | mini 2P | usa 4P | µs/decision (usa 2P) |
 | --- | --- | --- | --- | --- |
-| h5 | 1653 [1637, 1670] | 1541 [1524, 1559] | 1630 [1624, 1636] | 27.1 |
-| h4 | 1590 [1576, 1605] | 1530 [1515, 1546] | 1567 [1562, 1572] | 25.5 |
+| h5 | 1693 [1677, 1713] | 1548 [1531, 1566] | 1624 [1618, 1631] | 26.7 |
+| h4 | 1598 [1584, 1612] | 1532 [1517, 1548] | 1564 [1559, 1569] | 25.5 |
 | **h3** | **1500** (anchor) | **1500** | **1500** | 18.0 |
-| h2 | 1325 [1307, 1342] | 1365 [1346, 1384] | 1351 [1344, 1357] | 11.4 |
-| h1 | 685 [624, 738] | 924 [888, 954] | 697 [678, 715] | 0.2 |
-| h0 | 134 [58, 201] | 656 [609, 699] | 183 [158, 205] | 0.2 |
+| h2 | 1329 [1311, 1347] | 1364 [1346, 1383] | 1352 [1344, 1358] | 11.4 |
+| h1 | 691 [632, 744] | 925 [889, 955] | 694 [674, 711] | 0.2 |
+| h0 | 141 [63, 209] | 655 [610, 696] | 180 [156, 202] | 0.2 |
 
 Bradley–Terry MLE, 95% intervals from a bootstrap that resamples **seed blocks** rather than
 games — games inside a block share a deck, and treating them as independent inflates

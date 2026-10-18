@@ -892,6 +892,8 @@ fn params_from(overrides: Option<&Bound<'_, PyDict>>) -> PyResult<HeuristicParam
             "longest_race_weight" => p.longest_race_weight = value.extract()?,
             "longest_race_spread" => p.longest_race_spread = value.extract()?,
             "finished_train_cost" => p.finished_train_cost = value.extract()?,
+            "late_card_progress" => p.late_card_progress = value.extract()?,
+            "late_card_weight" => p.late_card_weight = value.extract()?,
             other => {
                 return Err(PyValueError::new_err(format!(
                     "unknown heuristic parameter {other:?}"

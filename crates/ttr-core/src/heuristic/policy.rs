@@ -57,7 +57,8 @@ pub enum Tier {
     H4 = 4,
     /// H4 + ticket draws priced against its own network -- early tickets are expensive and
     /// late ones are cheap, so it draws them late, with no train gate -- the longest-route
-    /// race priced from both trails, and free trains once its tickets are done.
+    /// race priced from both trails, free trains once its tickets are done, and late in the
+    /// game a plan the hand can pay for.
     H5 = 5,
 }
 
@@ -248,15 +249,31 @@ impl Heuristic {
 
     fn refresh(&mut self, state: &mut State, seat: usize) {
         // H2 plans by cars alone; pricing the cards is one of H3's additions.
-        let card_weight = if self.tier >= Tier::H3 {
+        let mut card_weight = if self.tier >= Tier::H3 {
             self.params.plan_card_weight
         } else {
             0.0
         };
+        // H5: late in the game the cards a plan waits on may never come. Priced at H3's
+        // weight -- a tiebreak among networks of equal length -- H5 stalled, holding a dozen
+        // cards and trains to spare while one 6-car route of a scarce colour finished its
+        // tickets. Any heavier weight from the start loses: early, the cards will come.
+        if self.tier >= Tier::H5 && self.params.late_card_progress <= 1.0 {
+            let supply = f64::from(state.board.raw.trains_per_player);
+            let fastest = state.trains[..state.n_players()]
+                .iter()
+                .copied()
+                .min()
+                .unwrap_or(0);
+            if 1.0 - f64::from(fastest) / supply >= self.params.late_card_progress {
+                card_weight = self.params.late_card_weight;
+            }
+        }
         if !self.plan_ready || !self.plan.is_fresh(state, seat) {
             self.plan = Plan::build(state, seat, card_weight);
             self.plan_ready = true;
         } else {
+            self.plan.reweigh(state, card_weight);
             self.plan.follow_cards(state);
         }
         if !self.nets_ready || self.nets_version != state.board_version {

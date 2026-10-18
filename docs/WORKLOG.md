@@ -5,6 +5,64 @@ session. Decisions that deviate from [PLAN.md](PLAN.md) belong here, with the re
 
 ---
 
+## 2026-10-18 — Late in the game H5 plans by its hand; blocking is not worth it even with perfect sight
+
+Round 5 started from the H5 that spends its trains once its tickets are done. One smaller
+gain is folded into H5. An oracle shows blocking cannot pay for the inference it would
+need. Two more ideas measured nothing.
+
+### What H5's losses said
+
+Stalls still lose a quarter of H5's games against H4, and they account for most of its
+blowouts: 169 of 1,500 games lost by 40 or more, typically with 13-24 cards in hand, trains
+to spare, and one route short. During a stall H5 draws blind about 18 times in its last 24
+decisions. A colour it needs shows face up 0.9 times per stall and a locomotive 0.3 times,
+and it takes 90% of them, so better drawing cannot fix a stall. The plan has to change.
+Inside one reviewed stall (seed 9,500,119), the plan waited on Helena-Seattle, six yellows
+with one in hand, while two gray routes through Calgary cost two cars more and the four
+whites in hand paid for one of them. A card weight of 0.3 finds that network; H3's 0.01
+never will.
+
+### Kept: late in the game, the network the hand can pay for
+
+`late_card_progress` (0.7) and `late_card_weight` (0.5). Once the fastest seat has spent
+70% of its trains, H5 chooses its plan's network with each draw priced at 0.5 cars instead
+of 0.01. Every earlier attempt at card-aware planning priced cards the same way all game,
+whether as H3's heavier weight, a big-hand trigger or a dry-colour price, and every one lost
+or did nothing. Applied from halfway through, this one loses too (−5). Early in the game
+the cards will come; late in the game they will not.
+
+New H5 vs the previous one: SPRT at `--elo1 10` accepted. Fixed-size: **+25 [+20, +29] at
+USA 2P**, +4 [+2, +6] on mini 2P, +5 [+2, +8] at USA 4P. H5 now leads H4 by +86 / +22 /
++53 and H3 by +178 / +58 / +132, at 26.7 µs a decision.
+
+- The grid is a plateau. Threshold 0.6-0.8 with weight 0.1-1.0 read +5 to +27 at 1,500
+  to 2,000 blocks, and the best cell's +27 was a winner's curse. Three settings confirmed at
+  +19 at 5,000 blocks on a fresh root; 0.7 / 0.5 is the middle of them.
+
+### Dropped
+
+- **Blocking the opponent's tickets, bounded by an oracle.** Before building ticket
+  inference, an experiment-only H5 was given the opponent's actual tickets. It priced
+  taking a segment of their plan at what the detour costs their expected settlement.
+  Priced on every claim it loses (−7, −34, −66 at weights 0.5, 1, 2). Gated as H4 gates its
+  threat term, to track that is on its own plan or touches its own network, it reads +13 and
+  +7. Perfect sight of the opponent's tickets is worth about +10, and inference would
+  recover only part of that, so blocking is not worth building.
+- **No new tickets while old ones are open and the opponent is close to the end.** It
+  changed nothing (+0.6 to +2.4 across thresholds of 6 to 18 opponent trains), because the
+  network model already declines those draws.
+- **H5's inherited constants.** Nudging `min_points_per_train`, `contest_weight` and
+  `endgame_train_fraction` moved nothing; the endgame fraction barely matters to H5 at all.
+  Removing H4's opponent modelling from H5 costs −10, so it stays.
+- **Not ending the game while behind.** When H5 ends the game it wins 87% of the time (672
+  of 772). Of its 100 losses after ending the game, half were within 10 points, and it was
+  behind in only half of those at the moment it ended the game, even judged on true
+  ticket status, which H5 cannot see. At most about 2.5% of games are at stake, so this was
+  not built.
+
+---
+
 ## 2026-10-18 — H5 spends its trains once its tickets are done; three ideas that did nothing
 
 Round 4 started from the H5 that races for the longest route. One smaller gain is folded
