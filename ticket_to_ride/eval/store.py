@@ -205,6 +205,12 @@ class AgentRow:
     behaviour_hash: str
     checkpoint: str | None = None
 
+    @property
+    def key(self) -> tuple[str, str, str, str | None]:
+        """The identity alone: `spec` is a label, and two labels for the same play (`h0`
+        and `random`) are one agent."""
+        return (self.family, self.params_hash, self.behaviour_hash, self.checkpoint)
+
 
 @dataclass
 class MatchRow:

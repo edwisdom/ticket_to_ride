@@ -1,76 +1,20 @@
 """Running matches and putting the results in the store.
 
 Thin on purpose. Every game is played inside Rust (`ttr_rust.run_arena`), every statistic
-lives in `stats.py`, and every write lives in `store.py`; this module schedules and
-translates. The one thing it owns is the **agent spec** -- the short string that names an
-agent identically on a command line, in a config file and in a leaderboard row.
+lives in `stats.py`, every write lives in `store.py`, and every agent spec is parsed by
+`agents/registry.py`; this module schedules and translates.
 """
 
 from __future__ import annotations
 
 import subprocess
-import tomllib
 from dataclasses import dataclass
 from itertools import combinations
-from pathlib import Path
-from typing import Any
 
 import ttr_rust
 
-from ticket_to_ride.eval.store import AgentRow, MatchRow, Store
-
-#: Tiers `ttr_rust` knows. Neural agents arrive here in Phase 6 as `ppo:runs/x/best.pt`,
-#: resolved by a factory that imports torch lazily so the arena still starts in ~50 ms.
-TIERS = ("h0", "h1", "h2", "h3", "h4", "random")
-
-#: The permanent Elo anchor (PLAN.md §11). Its identity is held by
-#: `ttr_rust.behaviour_hash`, not by this string.
-ANCHOR_FAMILY = "h3"
-
-
-@dataclass(frozen=True)
-class Spec:
-    """A resolved agent specification."""
-
-    #: The spec string exactly as written, so a leaderboard row round-trips to a re-run.
-    text: str
-    family: str
-    overrides: dict[str, Any]
-    seed: int
-
-    @property
-    def is_anchor(self) -> bool:
-        return self.family == ANCHOR_FAMILY and not self.overrides
-
-
-def parse_spec(text: str, seed: int = 0) -> Spec:
-    """`h3`, or `h3@configs/agents/h3_v2.toml` for a tuned variant.
-
-    A tuned agent is written as a **different spec**, never by editing the anchor's
-    constants in place. That is the whole mechanism by which ratings accumulate: `h3` stays
-    the zero of the scale and `h3@...` is a new competitor rated against it.
-    """
-    name, _, path = text.partition("@")
-    if name == "random":
-        name = "h0"
-    if name not in TIERS:
-        raise ValueError(f"unknown agent {name!r}; available: {sorted(TIERS)}")
-    overrides: dict[str, Any] = {}
-    if path:
-        data = tomllib.loads(Path(path).read_text(encoding="utf-8"))
-        overrides = dict(data.get("params", data))
-    return Spec(text=text, family=name, overrides=overrides, seed=seed)
-
-
-def agent_row(spec: Spec) -> AgentRow:
-    """The store identity for a spec: what it plays, not where it came from."""
-    overrides = spec.overrides or None
-    return AgentRow(
-        spec=spec.text,
-        family=spec.family,
-        params_hash=ttr_rust.params_hash(overrides),
-        behaviour_hash=ttr_rust.behaviour_hash(spec.family, overrides),
-    )
+from ticket_to_ride.agents.registry import AgentSpec
+from ticket_to_ride.eval.store import MatchRow, Store
 
 
 def round_robin(n_agents: int, n_players: int) -> list[tuple[int, ...]]:
@@ -114,7 +58,7 @@ def run_match(
     store: Store,
     map_name: str,
     n_players: int,
-    specs: list[Spec],
+    specs: list[AgentSpec],
     lineup: tuple[int, ...],
     *,
     seed_root: int = 0,
@@ -138,7 +82,7 @@ def run_match(
     ids = agent_ids if agent_ids is not None else {}
     for index in lineup:
         if index not in ids:
-            ids[index] = store.agent_id(agent_row(specs[index]))
+            ids[index] = store.agent_id(specs[index].identity())
 
     # Only the agents in this lineup are handed to Rust, so the returned `agent` column
     # indexes *this* list; `local` maps it back to the caller's numbering.
@@ -205,7 +149,7 @@ def run_round_robin(
     store: Store,
     map_name: str,
     n_players: int,
-    specs: list[Spec],
+    specs: list[AgentSpec],
     *,
     seed_root: int = 0,
     blocks: int = 100,

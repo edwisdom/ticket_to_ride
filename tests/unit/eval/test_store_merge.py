@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ticket_to_ride.agents.registry import parse_spec
 from ticket_to_ride.cli.cmd_cloud import same_games
-from ticket_to_ride.eval.arena import agent_row, parse_spec, run_round_robin
+from ticket_to_ride.eval.arena import run_round_robin
 from ticket_to_ride.eval.store import Store
 
 
@@ -31,8 +32,8 @@ def test_agents_and_configs_are_matched_by_content_not_by_id(tmp_path: Path) -> 
     with Store(tmp_path / "local.db") as local, Store(tmp_path / "job.db") as job:
         agents_before = local.counts()["agent"]
         configs_before = local.counts()["config"]
-        h0 = local.agent_id(agent_row(parse_spec("h0")))
-        assert h0 != job.agent_id(agent_row(parse_spec("h0")))
+        h0 = local.agent_id(parse_spec("h0").identity())
+        assert h0 != job.agent_id(parse_spec("h0").identity())
         local.merge(job)
         assert local.counts()["agent"] == agents_before
         assert local.counts()["config"] == configs_before
