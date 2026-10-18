@@ -212,6 +212,61 @@ fn ticket_queries() {
     assert!(!held.iter().any(|&t| s.ticket_complete(0, usize::from(t))));
 }
 
+/// What the web client shows as each ticket's progress, checked against an independent
+/// implementation: a cost of 0 is a route over my own track (the encoder's graph search),
+/// which has to be what the union-find calls connected.
+#[test]
+fn ticket_costs_agree_with_the_union_find() {
+    use ttr_core::board::UNREACHABLE;
+    use ttr_core::obs::ticket_costs;
+    let mut checked = 0;
+    for map in ["usa", "mini"] {
+        let g = game(map, 2);
+        for seed in 0..6u64 {
+            let mut s = g.new_initial_state(seed);
+            let mut rng = policy(seed);
+            let mut scratch = Vec::new();
+            while !s.is_terminal() {
+                for seat in 0..2 {
+                    let costs = ticket_costs(&s, seat);
+                    let held: Vec<u8> = costs.iter().map(|&(t, _)| t).collect();
+                    assert_eq!(held, s.tickets_of(seat));
+                    for (ticket, cost) in costs {
+                        let complete = s.ticket_complete(seat, usize::from(ticket));
+                        assert_eq!(cost == 0, complete, "{map} seed {seed} ticket {ticket}");
+                        assert!(cost <= UNREACHABLE);
+                        checked += 1;
+                    }
+                }
+                let a = s.sample_legal_into(&mut rng, &mut scratch).unwrap();
+                s.step(a).unwrap();
+            }
+        }
+    }
+    assert!(checked > 1000, "only {checked} ticket states checked");
+}
+
+/// Competition ranks are the arena's ranks and agree with `winners`: rank 1 is exactly the
+/// winning set, and a tie shares a rank.
+#[test]
+fn competition_ranks_agree_with_the_winners() {
+    use ttr_core::scoring::{competition_ranks, score_breakdown, winners};
+    for (map, n) in [("usa", 2), ("usa", 4), ("mini", 3)] {
+        let g = game(map, n);
+        for seed in 0..10u64 {
+            let mut s = g.new_initial_state(seed);
+            play_out(&mut s, &mut policy(seed));
+            let ranks = competition_ranks(&score_breakdown(&mut s));
+            let top: Vec<usize> = (0..n).filter(|&p| ranks[p] == 1).collect();
+            assert_eq!(top, winners(&mut s), "{map} {n}P seed {seed}");
+            for &r in &ranks {
+                // One plus the seats strictly ahead: never past the seat count.
+                assert!((1..=n as u8).contains(&r));
+            }
+        }
+    }
+}
+
 #[test]
 fn deck_counts_sum_to_the_undrawn_deck() {
     let g = game("usa", 2);

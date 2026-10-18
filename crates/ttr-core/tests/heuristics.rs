@@ -281,6 +281,34 @@ fn the_h3_anchor_has_not_moved() {
     );
 }
 
+/// Every tier's behaviour hash, H3's included.
+///
+/// Recorded before Phase 4.1 threaded the trace sink behind `explain` through the scorer
+/// and re-wrote H1's cascade as a priority: both had to leave play exactly as it was, and
+/// this is the check that they did. Unlike [`H3_ANCHOR`] these are not the rating scale's
+/// zero -- a deliberate change to H0-H2 or H4 updates its literal here and is noted in the
+/// worklog, since it makes a new agent in every store -- but none may move by accident.
+const BEHAVIOUR_HASHES: [(Tier, &str); 5] = [
+    (Tier::H0, "5c62d98faf15e624e3248a25c9a1f85a"),
+    (Tier::H1, "2cd429112540266c66d055eab0040d79"),
+    (Tier::H2, "f7411becf76b49abe316f7fe8a157de4"),
+    (Tier::H3, H3_ANCHOR),
+    (Tier::H4, "1fa8740e078a4b9f791765e61da6f76a"),
+];
+
+#[test]
+fn no_tier_plays_differently_by_accident() {
+    let params = HeuristicParams::default();
+    for (tier, expected) in BEHAVIOUR_HASHES {
+        assert_eq!(
+            probe::behaviour_hash(tier, &params),
+            expected,
+            "{} plays differently than when its hash was recorded",
+            tier.name()
+        );
+    }
+}
+
 #[test]
 fn each_tier_has_a_distinct_identity() {
     let params = HeuristicParams::default();

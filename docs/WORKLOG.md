@@ -5,6 +5,98 @@ session. Decisions that deviate from [PLAN.md](PLAN.md) belong here, with the re
 
 ---
 
+## 2026-10-17 — Phases 4.1 and 4.2: the engine bindings and the game server
+
+Complete. The heuristics explain their decisions through the scorer that makes them, and
+`ttr serve` hosts play, spectating and post-game review over a play store every game
+rebuilds from. The Svelte client (4.3) is a parallel session; its integration waits on
+this branch being merged.
+
+### 4.1 -- engine additions
+
+- **`explain` is a trace sink, not a second scorer.** `heuristic/trace.rs` defines a
+  `Sink` the scorer reports to: each candidate, its additive terms (in points), the facts
+  behind them, a rule where one decided, and the total -- the very number the decision
+  compared. `act` passes `Silent`, whose empty methods compile away; `explain` passes a
+  `Recorder`. Both run one `decide`, so `explain` returns `act`'s action and leaves the
+  plan cache and H0's stream exactly as `act` would.
+- **H1's cascade is written as a priority** (`rule * 100 + value`, highest wins, ties to the
+  lowest id), so its explanation is what it compared rather than a story about it. Same
+  rules, same order; its behaviour hash did not move.
+- **Bindings:** `Heuristic`, `Explanation`, `Candidate`, `DecodedAction`;
+  `Game.decode_action` (from a new `ActionSpace::decode`, which `to_string` now uses);
+  `State.offer`, `discard`, `ticket_progress` (the encoder's own per-ticket remaining cost,
+  `obs::ticket_costs`), and `board_data(map)`. Two more than the plan listed, so Python
+  re-derives no rule: `State.claim_payment` (the canonical payment, for "3 blue + 1
+  locomotive") and `State.ranks` (`scoring::competition_ranks`, which the arena now uses
+  too). The stub types six existing accessors as the `bytes` they return (GOTCHAS).
+
+| exit criterion | result |
+| --- | --- |
+| explain's argmax = act, 10k positions, both maps, H1-H4 | 10,000 per (map, tier), 80,000 in all, an `act` agent and an `explain` agent in lockstep: same action at every one, the explanation's first candidate is it, candidates are exactly the legal actions in decision order, terms sum to the total (`tests/explain.rs`, 3.4 s). Reversing the tiebreak or dropping one term fails it |
+| every behaviour hash unchanged | H0 `5c62d98f`, H1 `2cd42911`, H2 `f7411bec`, H3 `5b906156` (the anchor), H4 `1fa8740e` -- recorded before the change and now pinned (`no_tier_plays_differently_by_accident`) |
+| stub test green | yes, with the four new classes in it |
+| no rules, hash or corpus change | `state_hash`, the rules and `OBS_VERSION` untouched; the golden-corpus prefix reproduces |
+
+### 4.2 -- the server
+
+- **`agents/registry.py`** is now the one place a spec becomes a player: `h0`-`h4`,
+  `h3@file.toml`, and `ppo:path` parsed with a seam behind it (building one says Phase 6;
+  nothing imports torch). `eval/arena.py`'s copy of the parser is gone.
+- **`ui/web/`:** `protocol.py` (Pydantic, the source of truth; `protocol.schema.json` checked
+  in with `make protocol` / `--check` in pre-commit and the suite), `views.py` (seat,
+  spectator and review views; decoded actions; the plain-English log), `store.py`
+  (`runs/play.db`, SQLite WAL, versioned, SQL kept to what Postgres also runs),
+  `games.py` (the `GameService`), `ratings.py`, `glossary.py`, `app.py` (REST, the game
+  socket, the built client or a placeholder). docs/WEB_PROTOCOL.md describes it.
+- **The store first, memory second.** A move is checked on a copy, appended to the store,
+  and only then made. A game not in memory is rebuilt from seed and moves, each bot asked
+  for each of its past decisions and required to give the recorded answer; a bot whose
+  identity or answer changed is `replay_mismatch`. A new game is loaded through the same
+  rebuild, so there is one way a live game comes to exist.
+- **Ratings:** `eval/leaderboard.py`'s fit is split into `tabulate` + `rate`, and
+  `fit_with` adds external games -- rated human games, each its own block, a person by
+  player id, a bot by its identity -- to a configuration's arena games on the H3 = 0 scale.
+  `fit` is bit-identical to before (ratings, intervals and seat scores compared on a
+  720-game store against the previous code).
+- `ttr serve` (uvicorn; `websockets` joins the `web` extra), `make serve`, CI's fast job
+  installs the `web` extra. `ui/terminal/` and `ui/render/` are deleted.
+
+| exit criterion | result |
+| --- | --- |
+| full games through the API on both maps | USA vs H3 and H4, mini vs H3, with a scripted person; each replays from its revealed seed to the same scores. Also against a real uvicorn server over WebSocket |
+| a restart mid-game rebuilds and continues | two restarts mid-game end exactly as the uninterrupted game (actions, scores, final view); a game the store left on a bot's move carries on; a tampered bot move is reported as `replay_mismatch` |
+| duplicate and illegal `act` handled | duplicate -> `ack` with `duplicate: true`; `stale_ply`, `future_ply`, `illegal_action` (the engine's reason), `bad_message`, `not_your_turn`, `spectating`, `game_over` |
+| masking test, >= 1k positions x seats x maps | 1,000 positions per map from H3-vs-H3 and H3-vs-H0 games, both seats: view and decoded legal moves identical on a resampled infoset; most resamples change the omniscient view, so the comparison is not vacuous. An opponent's hand or the deck's composition in a seat view fails it. Tickets and offers, which the sampler does not resample, are asserted directly, and the log for an opponent's blind draw or keep names no card or ticket |
+| no seed before the end | every REST response and socket message of a game is searched for the seed in decimal and hex; it appears first in `over` |
+| human games rated on the H3 = 0 scale | rated games put the person on the leaderboard and profile with an interval; unrated ones do not count; with an arena store, H2 is one competitor across arena and human games |
+
+### Decided here, open to objection
+
+- **Protocol departures from the §14.2 sketch** (docs/WEB_PROTOCOL.md lists them): `POST
+  /api/games` names its `mode` and needs a `player_id` (`POST /api/players` first); rated
+  games refuse a chosen seat; the socket adds `ack` and `error`; seeds are decimal strings;
+  a spectated game starts on its first spectator; the board's `layout` is the client's
+  file passed through, not re-keyed onto engine segment ids. Extra endpoints: meta,
+  glossary, players and profiles, leaderboard, game lists.
+- **Opponents are an allowlist** (`ttr serve --agents`, default h0-h4): a spec can name a
+  parameter file, and a public server must not read files on request.
+- **No interval below two seed blocks.** One block resampled is the same game each time,
+  so a one-game rating would show a zero-width interval (GOTCHAS).
+- **Not built:** accounts and seat tokens -- anyone holding a play game's id can open its
+  socket and play the person's seat. Harmless on a local server, and the first thing the
+  public deployment needs.
+- `obs_version` is stored with each game but not required on rebuild: the heuristics do
+  not read observations. Contract, rules and data hashes are required.
+
+### Next
+
+Merge, then 4.3 integrates its screens against this protocol (a hand-over note is in the
+session group's shared notes). Phase 4's exit is the user's: full games against H3 and H4
+on both maps, a rating with an interval, and a loss to H3.
+
+---
+
 ## 2026-10-17 — Plan revision 2: Phase 4 becomes the web client
 
 At the user's direction, Phase 4 is a web client instead of a terminal one: a terminal is a poor

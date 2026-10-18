@@ -27,8 +27,10 @@ pub mod params;
 pub mod plan;
 pub mod policy;
 pub mod probe;
+pub mod trace;
 
 pub use params::{HeuristicParams, PARAMS_VERSION};
 pub use plan::Plan;
 pub use policy::{Heuristic, Tier};
 pub use probe::{behaviour_hash, probe_configs};
+pub use trace::{Candidate, Explanation};

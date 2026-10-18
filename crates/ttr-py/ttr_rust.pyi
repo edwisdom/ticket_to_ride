@@ -92,6 +92,24 @@ class Game:
     def rules_hash(self) -> str: ...
     def new_initial_state(self, seed: int) -> State: ...
     def action_to_string(self, action: int) -> str: ...
+    def decode_action(self, action: int) -> DecodedAction:
+        """What an action id means, from the one place the layout lives."""
+
+class DecodedAction:
+    """An action id decoded. Fields that do not apply to `kind` are `None` (or empty)."""
+
+    #: `"claim"`, `"draw"`, `"draw_tickets"`, `"keep"` or `"pass"`.
+    kind: str
+    segment: int | None
+    #: The card type paid with: a colour, or the locomotive for an all-locomotive claim.
+    pay: int | None
+    #: A face-up draw's slot, 0-4; `None` for a blind draw.
+    slot: int | None
+    blind: bool
+    #: A keep's mask, 1-7.
+    mask: int | None
+    #: A keep's offer positions, ascending: the bits of `mask`.
+    offer_indices: list[int]
 
 class State:
     def step(self, action: int) -> None: ...
@@ -106,15 +124,32 @@ class State:
     def clone_into(self, dst: State) -> None: ...
     def validate(self) -> None: ...
     def history(self) -> list[int]: ...
-    def hand_of(self, player: int) -> list[int]: ...
-    def certain_of(self, player: int) -> list[int]: ...
-    def tickets_of(self, player: int) -> list[int]: ...
-    def deck_counts(self) -> list[int]: ...
+    # These five, and the `trains` and `seg_owner` properties, come back as `bytes`: PyO3
+    # hands any `Vec<u8>` over that way. Indexing and iteration give ints.
+    def hand_of(self, player: int) -> bytes: ...
+    def certain_of(self, player: int) -> bytes: ...
+    def tickets_of(self, player: int) -> bytes: ...
+    def deck_counts(self) -> bytes: ...
     def unseen_counts(self, observer: int) -> list[int]: ...
+    def offer(self) -> list[int]:
+        """The tickets on offer during a keep, in offer order: KEEP bit `i` is `offer()[i]`."""
+
+    def discard(self) -> list[int]:
+        """The discard pile's composition, by card type."""
+
+    def ticket_progress(self, seat: int) -> list[tuple[int, bool, int | None]]:
+        """`(ticket, connected, remaining train cars or None if unreachable)` per ticket held."""
+
+    def claim_payment(self, action: int) -> tuple[int, int]:
+        """`(coloured cards, locomotives)` the current player would pay for claim `action`."""
+
     def final_scores(self) -> list[int]: ...
     def score_breakdown(self) -> list[tuple[int, int, int, int, int, int, int, int]]: ...
     def returns(self) -> list[float]: ...
     def winners(self) -> list[int]: ...
+    def ranks(self) -> list[int]:
+        """Competition ranks under the full tiebreak chain, 1 for first."""
+
     def longest_trails(self) -> list[int]: ...
     def resample_from_infoset(self, observer: int, rng: Rng) -> State: ...
     def assert_consistent(self, public: State, observer: int) -> None: ...
@@ -136,19 +171,58 @@ class State:
     @property
     def pass_streak(self) -> int: ...
     @property
-    def trains(self) -> list[int]: ...
+    def trains(self) -> bytes: ...
     @property
     def score(self) -> list[int]: ...
     @property
     def faceup(self) -> list[int]: ...
     @property
-    def seg_owner(self) -> list[int]: ...
+    def seg_owner(self) -> bytes: ...
     @property
     def deck_pos(self) -> int: ...
     @property
     def tickets_remaining(self) -> int: ...
     @property
     def seed(self) -> int: ...
+
+class Heuristic:
+    """A scripted agent, H0-H4, deciding one position at a time.
+
+    `explain` is `act` with its reasoning recorded -- one scorer, a trace sink threaded
+    through it -- so it returns the action `act` would and leaves the agent as `act` would.
+    Call one or the other for a decision, never both: H0 would draw twice.
+    """
+
+    def __init__(
+        self, tier: str, params: dict[str, float | int | bool] | None = None, seed: int = 0
+    ) -> None: ...
+    @property
+    def tier(self) -> str: ...
+    def begin_game(self, seat: int, game_id: int) -> None: ...
+    def act(self, state: State) -> int: ...
+    def explain(self, state: State, top_k: int = 8) -> Explanation: ...
+
+class Explanation:
+    """One decision, explained. `candidates` are best first; for H1-H4 the first is `chosen`."""
+
+    tier: str
+    seat: int
+    phase: str
+    chosen: int
+    #: The chosen candidate's rule: H1's cascade step, "forced", "uniform" (H0).
+    rule: str | None
+    context: list[tuple[str, float]]
+    candidates: list[Candidate]
+
+class Candidate:
+    """One scored action: its total (`-inf` when ruled out), additive terms in points that
+    sum to it, and the inputs behind them."""
+
+    action: int
+    total: float
+    rule: str | None
+    terms: list[tuple[str, float]]
+    facts: list[tuple[str, float]]
 
 class ArenaGames:
     """One row per finished game, columnar."""
@@ -244,3 +318,7 @@ class VecEnv:
 def board_names() -> list[str]: ...
 def board_summary(map_name: str = ...) -> dict[str, Any]:
     """A board's data and derived invariants, as `ttr map` prints them."""
+
+def board_data(map_name: str = ...) -> dict[str, Any]:
+    """A board as the engine plays it: its own arrays, in its own order. The web client's
+    only source of board data (mini's TOML is not in engine order)."""

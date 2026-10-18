@@ -15,13 +15,8 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from ticket_to_ride.eval.arena import (
-    agent_row,
-    parse_spec,
-    round_robin,
-    run_match,
-    run_round_robin,
-)
+from ticket_to_ride.agents.registry import AgentSpec, parse_spec
+from ticket_to_ride.eval.arena import round_robin, run_match, run_round_robin
 from ticket_to_ride.eval.leaderboard import Report, fit
 from ticket_to_ride.eval.stats import elo_to_score, sprt
 from ticket_to_ride.eval.store import Store
@@ -35,7 +30,7 @@ EVEN = 0.5
 HEAD_TO_HEAD = 2
 
 
-def _specs(agents: str, seed: int) -> list:
+def _specs(agents: str, seed: int) -> list[AgentSpec]:
     return [parse_spec(text.strip(), seed) for text in agents.split(",") if text.strip()]
 
 
@@ -134,7 +129,7 @@ def _run_sprt(
         raise typer.BadParameter("--sprt takes 'challenger,incumbent' and needs --players 2")
     specs = [parse_spec(n, agent_seed) for n in names]
 
-    challenger = store.agent_id(agent_row(specs[0]))
+    challenger = store.agent_id(specs[0].identity())
     scores: list[float] = []
     done = 0
     while done < blocks:

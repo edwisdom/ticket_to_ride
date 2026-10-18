@@ -1,0 +1,1968 @@
+{
+  "$defs": {
+    "Ack": {
+      "additionalProperties": false,
+      "description": "The reply to an `act`. A duplicate -- the same action for a ply already played by\nyou -- changes nothing and says so.",
+      "properties": {
+        "type": {
+          "const": "ack",
+          "type": "string"
+        },
+        "ply": {
+          "type": "integer"
+        },
+        "action": {
+          "type": "integer"
+        },
+        "duplicate": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type",
+        "ply",
+        "action",
+        "duplicate"
+      ],
+      "title": "Ack",
+      "type": "object"
+    },
+    "Act": {
+      "additionalProperties": false,
+      "description": "Play `action` at `ply` -- the count of actions played before it, so a double click\nor a reconnect can never apply a move twice.",
+      "properties": {
+        "type": {
+          "const": "act",
+          "type": "string"
+        },
+        "ply": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "action": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "ply",
+        "action"
+      ],
+      "title": "Act",
+      "type": "object"
+    },
+    "Action": {
+      "discriminator": {
+        "mapping": {
+          "claim": "#/$defs/ClaimAction",
+          "draw": "#/$defs/DrawAction",
+          "draw_tickets": "#/$defs/DrawTicketsAction",
+          "keep": "#/$defs/KeepAction",
+          "pass": "#/$defs/PassAction"
+        },
+        "propertyName": "kind"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ClaimAction"
+        },
+        {
+          "$ref": "#/$defs/DrawAction"
+        },
+        {
+          "$ref": "#/$defs/DrawTicketsAction"
+        },
+        {
+          "$ref": "#/$defs/KeepAction"
+        },
+        {
+          "$ref": "#/$defs/PassAction"
+        }
+      ]
+    },
+    "Agent": {
+      "additionalProperties": false,
+      "description": "An opponent the server will seat.",
+      "properties": {
+        "spec": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "family": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "anchor": {
+          "description": "True for H3 itself, the zero of the rating scale.",
+          "type": "boolean"
+        },
+        "player": {
+          "$ref": "#/$defs/Player"
+        },
+        "behaviour_hash": {
+          "type": "string"
+        },
+        "ratings": {
+          "items": {
+            "$ref": "#/$defs/MapRating"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "spec",
+        "name",
+        "family",
+        "description",
+        "anchor",
+        "player",
+        "behaviour_hash",
+        "ratings"
+      ],
+      "title": "Agent",
+      "type": "object"
+    },
+    "ApiError": {
+      "additionalProperties": false,
+      "description": "The body of every REST error, under `detail`.",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "title": "ApiError",
+      "type": "object"
+    },
+    "Board": {
+      "additionalProperties": false,
+      "description": "A board as the engine plays it, in the engine's order -- the client's only source of\nboard data, since mini's TOML is not in engine order.",
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/MapName"
+        },
+        "data_hash": {
+          "type": "string"
+        },
+        "cities": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "segments": {
+          "items": {
+            "$ref": "#/$defs/Segment"
+          },
+          "type": "array"
+        },
+        "tickets": {
+          "items": {
+            "$ref": "#/$defs/Ticket"
+          },
+          "type": "array"
+        },
+        "colors": {
+          "description": "Colour names; card type i < len(colors) is colors[i].",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "locomotive": {
+          "description": "The locomotive's card type: len(colors).",
+          "type": "integer"
+        },
+        "card_counts": {
+          "description": "Cards printed per card type.",
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "trains_per_player": {
+          "type": "integer"
+        },
+        "route_points": {
+          "description": "route_points[n] scores a route of length n.",
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "longest_bonus": {
+          "type": "integer"
+        },
+        "players": {
+          "description": "[fewest, most] seats the map supports.",
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "initial_ticket_deal": {
+          "type": "integer"
+        },
+        "initial_ticket_keep_min": {
+          "type": "integer"
+        },
+        "draw_ticket_deal": {
+          "type": "integer"
+        },
+        "draw_ticket_keep_min": {
+          "type": "integer"
+        },
+        "faceup_slots": {
+          "type": "integer"
+        },
+        "action_space": {
+          "type": "integer"
+        },
+        "layout": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The client's drawing of this board (ticket_to_ride/data/layout/{map}.json), passed through verbatim; null until it is generated."
+        }
+      },
+      "required": [
+        "name",
+        "data_hash",
+        "cities",
+        "segments",
+        "tickets",
+        "colors",
+        "locomotive",
+        "card_counts",
+        "trains_per_player",
+        "route_points",
+        "longest_bonus",
+        "players",
+        "initial_ticket_deal",
+        "initial_ticket_keep_min",
+        "draw_ticket_deal",
+        "draw_ticket_keep_min",
+        "faceup_slots",
+        "action_space",
+        "layout"
+      ],
+      "title": "Board",
+      "type": "object"
+    },
+    "Candidate": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/Action"
+        },
+        "total": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What the decision compared; null when ruled out."
+        },
+        "rule": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "terms": {
+          "description": "Additive, in points; they sum to `total`.",
+          "items": {
+            "$ref": "#/$defs/Term"
+          },
+          "type": "array"
+        },
+        "facts": {
+          "description": "Inputs behind the terms, each in its own unit.",
+          "items": {
+            "$ref": "#/$defs/Term"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "action",
+        "total",
+        "rule",
+        "terms",
+        "facts"
+      ],
+      "title": "Candidate",
+      "type": "object"
+    },
+    "ClaimAction": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "claim",
+          "type": "string"
+        },
+        "id": {
+          "type": "integer"
+        },
+        "segment": {
+          "type": "integer"
+        },
+        "color": {
+          "description": "The card type paid with; the locomotive for all-locomotive.",
+          "type": "integer"
+        },
+        "colored": {
+          "description": "Cards of `color` spent.",
+          "type": "integer"
+        },
+        "locomotives": {
+          "type": "integer"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "segment",
+        "color",
+        "colored",
+        "locomotives",
+        "label"
+      ],
+      "title": "ClaimAction",
+      "type": "object"
+    },
+    "ClientMessage": {
+      "discriminator": {
+        "mapping": {
+          "act": "#/$defs/Act"
+        },
+        "propertyName": "type"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Act"
+        }
+      ],
+      "title": "ClientMessage"
+    },
+    "DrawAction": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "draw",
+          "type": "string"
+        },
+        "id": {
+          "type": "integer"
+        },
+        "slot": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The face-up slot; null for the top of the deck."
+        },
+        "card": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The card taken: always for face-up, for the deck only to its drawer."
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "slot",
+        "card",
+        "label"
+      ],
+      "title": "DrawAction",
+      "type": "object"
+    },
+    "DrawTicketsAction": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "draw_tickets",
+          "type": "string"
+        },
+        "id": {
+          "type": "integer"
+        },
+        "dealt": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Tickets dealt (in a log entry)."
+        },
+        "tickets": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Which, to the drawer only."
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "dealt",
+        "tickets",
+        "label"
+      ],
+      "title": "DrawTicketsAction",
+      "type": "object"
+    },
+    "ErrorCode": {
+      "enum": [
+        "bad_message",
+        "not_found",
+        "spectating",
+        "game_over",
+        "not_your_turn",
+        "stale_ply",
+        "future_ply",
+        "illegal_action",
+        "replay_mismatch",
+        "unavailable"
+      ],
+      "type": "string"
+    },
+    "ErrorMessage": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "error",
+          "type": "string"
+        },
+        "code": {
+          "$ref": "#/$defs/ErrorCode"
+        },
+        "message": {
+          "type": "string"
+        },
+        "ply": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "code",
+        "message",
+        "ply"
+      ],
+      "title": "ErrorMessage",
+      "type": "object"
+    },
+    "Event": {
+      "additionalProperties": false,
+      "description": "One action, as the viewer may see it, and the position after it.",
+      "properties": {
+        "type": {
+          "const": "event",
+          "type": "string"
+        },
+        "entry": {
+          "$ref": "#/$defs/LogEntry"
+        },
+        "view": {
+          "$ref": "#/$defs/View"
+        },
+        "legal": {
+          "items": {
+            "$ref": "#/$defs/Action"
+          },
+          "type": "array"
+        },
+        "explanation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Explanation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Spectating only."
+        },
+        "think_ms": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "entry",
+        "view",
+        "legal",
+        "explanation",
+        "think_ms"
+      ],
+      "title": "Event",
+      "type": "object"
+    },
+    "Explanation": {
+      "additionalProperties": false,
+      "description": "One bot decision: its best candidates and why. For H1-H4 the first is the action\nplayed; H0's candidates are the uniform distribution it drew from.",
+      "properties": {
+        "agent": {
+          "type": "string"
+        },
+        "tier": {
+          "type": "string"
+        },
+        "chosen": {
+          "type": "integer"
+        },
+        "rule": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "context": {
+          "items": {
+            "$ref": "#/$defs/Term"
+          },
+          "type": "array"
+        },
+        "candidates": {
+          "items": {
+            "$ref": "#/$defs/Candidate"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "agent",
+        "tier",
+        "chosen",
+        "rule",
+        "context",
+        "candidates"
+      ],
+      "title": "Explanation",
+      "type": "object"
+    },
+    "GameResult": {
+      "additionalProperties": false,
+      "properties": {
+        "game_id": {
+          "type": "string"
+        },
+        "map": {
+          "$ref": "#/$defs/MapName"
+        },
+        "rated": {
+          "type": "boolean"
+        },
+        "opponent": {
+          "$ref": "#/$defs/Player"
+        },
+        "seat": {
+          "type": "integer"
+        },
+        "score": {
+          "type": "integer"
+        },
+        "opponent_score": {
+          "type": "integer"
+        },
+        "result": {
+          "enum": [
+            "win",
+            "loss",
+            "draw"
+          ],
+          "type": "string"
+        },
+        "finished": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "game_id",
+        "map",
+        "rated",
+        "opponent",
+        "seat",
+        "score",
+        "opponent_score",
+        "result",
+        "finished"
+      ],
+      "title": "GameResult",
+      "type": "object"
+    },
+    "GameSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "map": {
+          "$ref": "#/$defs/MapName"
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode"
+        },
+        "rated": {
+          "type": "boolean"
+        },
+        "assist": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/Status"
+        },
+        "n_players": {
+          "type": "integer"
+        },
+        "seats": {
+          "items": {
+            "$ref": "#/$defs/SeatInfo"
+          },
+          "type": "array"
+        },
+        "human_seat": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The person's seat in a play game."
+        },
+        "ply": {
+          "description": "Actions played so far.",
+          "type": "integer"
+        },
+        "created": {
+          "type": "string"
+        },
+        "finished": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "map",
+        "mode",
+        "rated",
+        "assist",
+        "status",
+        "n_players",
+        "seats",
+        "human_seat",
+        "ply",
+        "created",
+        "finished"
+      ],
+      "title": "GameSummary",
+      "type": "object"
+    },
+    "Glossary": {
+      "additionalProperties": false,
+      "description": "What every name in an explanation means.",
+      "properties": {
+        "terms": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "facts": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "context": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "rules": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "terms",
+        "facts",
+        "context",
+        "rules"
+      ],
+      "title": "Glossary",
+      "type": "object"
+    },
+    "KeepAction": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "keep",
+          "type": "string"
+        },
+        "id": {
+          "type": "integer"
+        },
+        "offer_indices": {
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "count": {
+          "type": "integer"
+        },
+        "tickets": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Tickets kept, to the keeper only."
+        },
+        "returned": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Tickets returned, to the keeper only."
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "offer_indices",
+        "count",
+        "tickets",
+        "returned",
+        "label"
+      ],
+      "title": "KeepAction",
+      "type": "object"
+    },
+    "Leaderboard": {
+      "additionalProperties": false,
+      "description": "People and bots in one Bradley-Terry fit over arena and rated human games.",
+      "properties": {
+        "map": {
+          "$ref": "#/$defs/MapName"
+        },
+        "n_players": {
+          "type": "integer"
+        },
+        "anchor": {
+          "type": "string"
+        },
+        "games": {
+          "type": "integer"
+        },
+        "blocks": {
+          "type": "integer"
+        },
+        "standings": {
+          "items": {
+            "$ref": "#/$defs/Standing"
+          },
+          "type": "array"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Why the board is empty, when it is."
+        }
+      },
+      "required": [
+        "map",
+        "n_players",
+        "anchor",
+        "games",
+        "blocks",
+        "standings",
+        "note"
+      ],
+      "title": "Leaderboard",
+      "type": "object"
+    },
+    "LogEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "ply": {
+          "type": "integer"
+        },
+        "seat": {
+          "type": "integer"
+        },
+        "action": {
+          "$ref": "#/$defs/Action"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ply",
+        "seat",
+        "action",
+        "text"
+      ],
+      "title": "LogEntry",
+      "type": "object"
+    },
+    "MapName": {
+      "enum": [
+        "usa",
+        "mini"
+      ],
+      "type": "string"
+    },
+    "MapRating": {
+      "additionalProperties": false,
+      "properties": {
+        "map": {
+          "$ref": "#/$defs/MapName"
+        },
+        "rating": {
+          "$ref": "#/$defs/Rating"
+        }
+      },
+      "required": [
+        "map",
+        "rating"
+      ],
+      "title": "MapRating",
+      "type": "object"
+    },
+    "Meta": {
+      "additionalProperties": false,
+      "properties": {
+        "contract_version": {
+          "type": "integer"
+        },
+        "obs_version": {
+          "type": "integer"
+        },
+        "assist": {
+          "type": "string"
+        },
+        "maps": {
+          "items": {
+            "$ref": "#/$defs/MapName"
+          },
+          "type": "array"
+        },
+        "client_build": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "contract_version",
+        "obs_version",
+        "assist",
+        "maps",
+        "client_build"
+      ],
+      "title": "Meta",
+      "type": "object"
+    },
+    "Mode": {
+      "enum": [
+        "play",
+        "spectate"
+      ],
+      "type": "string"
+    },
+    "NewGame": {
+      "discriminator": {
+        "mapping": {
+          "play": "#/$defs/NewPlayGame",
+          "spectate": "#/$defs/NewSpectateGame"
+        },
+        "propertyName": "mode"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/NewPlayGame"
+        },
+        {
+          "$ref": "#/$defs/NewSpectateGame"
+        }
+      ],
+      "title": "NewGame"
+    },
+    "NewPlayGame": {
+      "additionalProperties": false,
+      "description": "Play a bot. A rated game seats you at random: seat 0 moves first, and first-player\nadvantage is real.",
+      "properties": {
+        "mode": {
+          "const": "play",
+          "type": "string"
+        },
+        "map": {
+          "$ref": "#/$defs/MapName"
+        },
+        "opponent": {
+          "description": "An agent spec from GET /api/agents.",
+          "type": "string"
+        },
+        "player_id": {
+          "type": "string"
+        },
+        "rated": {
+          "default": true,
+          "type": "boolean"
+        },
+        "seat": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Unrated games only."
+        }
+      },
+      "required": [
+        "mode",
+        "map",
+        "opponent",
+        "player_id"
+      ],
+      "title": "NewPlayGame",
+      "type": "object"
+    },
+    "NewPlayer": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 40,
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "NewPlayer",
+      "type": "object"
+    },
+    "NewSpectateGame": {
+      "additionalProperties": false,
+      "description": "Watch two bots, with every hand visible and each decision's reasoning.",
+      "properties": {
+        "mode": {
+          "const": "spectate",
+          "type": "string"
+        },
+        "map": {
+          "$ref": "#/$defs/MapName"
+        },
+        "agents": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        }
+      },
+      "required": [
+        "mode",
+        "map",
+        "agents"
+      ],
+      "title": "NewSpectateGame",
+      "type": "object"
+    },
+    "OpponentRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "map": {
+          "$ref": "#/$defs/MapName"
+        },
+        "opponent": {
+          "$ref": "#/$defs/Player"
+        },
+        "games": {
+          "type": "integer"
+        },
+        "wins": {
+          "type": "integer"
+        },
+        "losses": {
+          "type": "integer"
+        },
+        "draws": {
+          "type": "integer"
+        },
+        "mean_score": {
+          "type": "number"
+        },
+        "mean_opponent_score": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "map",
+        "opponent",
+        "games",
+        "wins",
+        "losses",
+        "draws",
+        "mean_score",
+        "mean_opponent_score"
+      ],
+      "title": "OpponentRecord",
+      "type": "object"
+    },
+    "Over": {
+      "additionalProperties": false,
+      "description": "The end: everything revealed, the score breakdown and the seed.",
+      "properties": {
+        "type": {
+          "const": "over",
+          "type": "string"
+        },
+        "game": {
+          "$ref": "#/$defs/GameSummary"
+        },
+        "view": {
+          "$ref": "#/$defs/View"
+        },
+        "scores": {
+          "items": {
+            "$ref": "#/$defs/Score"
+          },
+          "type": "array"
+        },
+        "seed": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "game",
+        "view",
+        "scores",
+        "seed"
+      ],
+      "title": "Over",
+      "type": "object"
+    },
+    "PassAction": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "pass",
+          "type": "string"
+        },
+        "id": {
+          "type": "integer"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "label"
+      ],
+      "title": "PassAction",
+      "type": "object"
+    },
+    "Phase": {
+      "enum": [
+        "initial_tickets",
+        "main",
+        "draw_second",
+        "ticket_keep",
+        "terminal"
+      ],
+      "type": "string"
+    },
+    "Player": {
+      "additionalProperties": false,
+      "description": "A person or a bot. A bot's id is derived from its identity -- what it plays -- so\none bot is one player in every store.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "human",
+            "bot"
+          ],
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "spec": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A bot's agent spec, e.g. 'h3'; null for a person."
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "name",
+        "spec"
+      ],
+      "title": "Player",
+      "type": "object"
+    },
+    "Profile": {
+      "additionalProperties": false,
+      "properties": {
+        "player": {
+          "$ref": "#/$defs/Player"
+        },
+        "ratings": {
+          "items": {
+            "$ref": "#/$defs/MapRating"
+          },
+          "type": "array"
+        },
+        "record": {
+          "description": "Finished games against each opponent.",
+          "items": {
+            "$ref": "#/$defs/OpponentRecord"
+          },
+          "type": "array"
+        },
+        "games": {
+          "description": "Finished games, newest first.",
+          "items": {
+            "$ref": "#/$defs/GameResult"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "player",
+        "ratings",
+        "record",
+        "games"
+      ],
+      "title": "Profile",
+      "type": "object"
+    },
+    "Rating": {
+      "additionalProperties": false,
+      "description": "Bradley-Terry Elo on the H3 = 0 scale, with a 95% block-bootstrap interval.",
+      "properties": {
+        "elo": {
+          "type": "number"
+        },
+        "lo": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "null when there is too little data for an interval."
+        },
+        "hi": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "games": {
+          "description": "Pairwise comparisons the rating rests on.",
+          "type": "integer"
+        },
+        "score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Share of those comparisons won."
+        }
+      },
+      "required": [
+        "elo",
+        "lo",
+        "hi",
+        "games",
+        "score"
+      ],
+      "title": "Rating",
+      "type": "object"
+    },
+    "Review": {
+      "additionalProperties": false,
+      "description": "A finished game with everything revealed, every decision in order, and each bot\ndecision's explanation -- recomputed by replay, not stored.",
+      "properties": {
+        "game": {
+          "$ref": "#/$defs/GameSummary"
+        },
+        "seed": {
+          "type": "string"
+        },
+        "initial": {
+          "$ref": "#/$defs/View"
+        },
+        "plies": {
+          "items": {
+            "$ref": "#/$defs/ReviewPly"
+          },
+          "type": "array"
+        },
+        "scores": {
+          "items": {
+            "$ref": "#/$defs/Score"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "game",
+        "seed",
+        "initial",
+        "plies",
+        "scores"
+      ],
+      "title": "Review",
+      "type": "object"
+    },
+    "ReviewPly": {
+      "additionalProperties": false,
+      "properties": {
+        "entry": {
+          "$ref": "#/$defs/LogEntry"
+        },
+        "view": {
+          "$ref": "#/$defs/View"
+        },
+        "explanation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Explanation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "think_ms": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "entry",
+        "view",
+        "explanation",
+        "think_ms"
+      ],
+      "title": "ReviewPly",
+      "type": "object"
+    },
+    "Score": {
+      "additionalProperties": false,
+      "properties": {
+        "seat": {
+          "type": "integer"
+        },
+        "routes": {
+          "type": "integer"
+        },
+        "tickets_made": {
+          "type": "integer"
+        },
+        "tickets_missed": {
+          "type": "integer"
+        },
+        "ticket_points": {
+          "type": "integer"
+        },
+        "longest_bonus": {
+          "type": "integer"
+        },
+        "longest_trail": {
+          "type": "integer"
+        },
+        "total": {
+          "type": "integer"
+        },
+        "rank": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "seat",
+        "routes",
+        "tickets_made",
+        "tickets_missed",
+        "ticket_points",
+        "longest_bonus",
+        "longest_trail",
+        "total",
+        "rank"
+      ],
+      "title": "Score",
+      "type": "object"
+    },
+    "SeatInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "seat": {
+          "type": "integer"
+        },
+        "player": {
+          "$ref": "#/$defs/Player"
+        },
+        "score": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Final score, once the game is over."
+        },
+        "rank": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "1 is first; ties share a rank."
+        }
+      },
+      "required": [
+        "seat",
+        "player",
+        "score",
+        "rank"
+      ],
+      "title": "SeatInfo",
+      "type": "object"
+    },
+    "SeatView": {
+      "additionalProperties": false,
+      "description": "One seat, as the viewer may see it.",
+      "properties": {
+        "seat": {
+          "type": "integer"
+        },
+        "trains": {
+          "type": "integer"
+        },
+        "score": {
+          "description": "Route points banked so far; tickets settle at the end.",
+          "type": "integer"
+        },
+        "hand_size": {
+          "type": "integer"
+        },
+        "known": {
+          "description": "Cards publicly known to be in hand, per card type: face-up takes not yet spent.",
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "ticket_count": {
+          "type": "integer"
+        },
+        "longest_trail": {
+          "type": "integer"
+        },
+        "hand": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Per card type; the viewer's own, or all omniscient."
+        },
+        "tickets": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/TicketProgress"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Hidden like the hand."
+        }
+      },
+      "required": [
+        "seat",
+        "trains",
+        "score",
+        "hand_size",
+        "known",
+        "ticket_count",
+        "longest_trail",
+        "hand",
+        "tickets"
+      ],
+      "title": "SeatView",
+      "type": "object"
+    },
+    "Segment": {
+      "additionalProperties": false,
+      "description": "One track. A double route is two segments, each the other's `sibling`.",
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "a": {
+          "type": "integer"
+        },
+        "b": {
+          "type": "integer"
+        },
+        "length": {
+          "type": "integer"
+        },
+        "color": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The colour required; null for gray (any one colour)."
+        },
+        "sibling": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "a",
+        "b",
+        "length",
+        "color",
+        "sibling"
+      ],
+      "title": "Segment",
+      "type": "object"
+    },
+    "ServerMessage": {
+      "discriminator": {
+        "mapping": {
+          "ack": "#/$defs/Ack",
+          "error": "#/$defs/ErrorMessage",
+          "event": "#/$defs/Event",
+          "over": "#/$defs/Over",
+          "snapshot": "#/$defs/Snapshot"
+        },
+        "propertyName": "type"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Snapshot"
+        },
+        {
+          "$ref": "#/$defs/Event"
+        },
+        {
+          "$ref": "#/$defs/Over"
+        },
+        {
+          "$ref": "#/$defs/Ack"
+        },
+        {
+          "$ref": "#/$defs/ErrorMessage"
+        }
+      ],
+      "title": "ServerMessage"
+    },
+    "Snapshot": {
+      "additionalProperties": false,
+      "description": "On connect: where the game stands. `legal` is non-empty exactly when the viewer is\nto move.",
+      "properties": {
+        "type": {
+          "const": "snapshot",
+          "type": "string"
+        },
+        "game": {
+          "$ref": "#/$defs/GameSummary"
+        },
+        "view": {
+          "$ref": "#/$defs/View"
+        },
+        "legal": {
+          "items": {
+            "$ref": "#/$defs/Action"
+          },
+          "type": "array"
+        },
+        "log": {
+          "items": {
+            "$ref": "#/$defs/LogEntry"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "type",
+        "game",
+        "view",
+        "legal",
+        "log"
+      ],
+      "title": "Snapshot",
+      "type": "object"
+    },
+    "Standing": {
+      "additionalProperties": false,
+      "properties": {
+        "player": {
+          "$ref": "#/$defs/Player"
+        },
+        "rating": {
+          "$ref": "#/$defs/Rating"
+        }
+      },
+      "required": [
+        "player",
+        "rating"
+      ],
+      "title": "Standing",
+      "type": "object"
+    },
+    "Status": {
+      "enum": [
+        "active",
+        "finished"
+      ],
+      "type": "string"
+    },
+    "Term": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ],
+      "title": "Term",
+      "type": "object"
+    },
+    "Ticket": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "a": {
+          "type": "integer"
+        },
+        "b": {
+          "type": "integer"
+        },
+        "points": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "a",
+        "b",
+        "points"
+      ],
+      "title": "Ticket",
+      "type": "object"
+    },
+    "TicketProgress": {
+      "additionalProperties": false,
+      "properties": {
+        "ticket": {
+          "type": "integer"
+        },
+        "connected": {
+          "type": "boolean"
+        },
+        "remaining": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Train cars still needed over your track and open track; null once no route is left."
+        }
+      },
+      "required": [
+        "ticket",
+        "connected",
+        "remaining"
+      ],
+      "title": "TicketProgress",
+      "type": "object"
+    },
+    "View": {
+      "additionalProperties": false,
+      "description": "A position as one viewer may see it. A seat view holds only what that seat knows;\n`viewer` null is omniscient (spectating, review, the end).",
+      "properties": {
+        "viewer": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ply": {
+          "type": "integer"
+        },
+        "turn": {
+          "type": "integer"
+        },
+        "phase": {
+          "$ref": "#/$defs/Phase"
+        },
+        "current": {
+          "type": "integer"
+        },
+        "draws_left": {
+          "type": "integer"
+        },
+        "final_turns": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Once the end is triggered: turns left, the current one included."
+        },
+        "owners": {
+          "description": "Per segment: the owning seat, or null.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "closed": {
+          "description": "Segments closed because the other track of their double was claimed (2-3 players).",
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "faceup": {
+          "description": "Card type per face-up slot; null when empty.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "deck": {
+          "description": "Cards left in the draw pile.",
+          "type": "integer"
+        },
+        "discard": {
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "ticket_deck": {
+          "type": "integer"
+        },
+        "seats": {
+          "items": {
+            "$ref": "#/$defs/SeatView"
+          },
+          "type": "array"
+        },
+        "offer": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Tickets on offer during a keep, to the keeper (or omniscient)."
+        },
+        "unseen": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Seat views: per card type, cards the viewer cannot account for -- the deck plus opponents' blind draws."
+        },
+        "deck_cards": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Omniscient views: the draw pile's composition (never its order)."
+        }
+      },
+      "required": [
+        "viewer",
+        "ply",
+        "turn",
+        "phase",
+        "current",
+        "draws_left",
+        "final_turns",
+        "owners",
+        "closed",
+        "faceup",
+        "deck",
+        "discard",
+        "ticket_deck",
+        "seats",
+        "offer",
+        "unseen",
+        "deck_cards"
+      ],
+      "title": "View",
+      "type": "object"
+    }
+  },
+  "title": "TicketToRideWebProtocol",
+  "description": "Generated from ticket_to_ride/ui/web/protocol.py by tools/gen_protocol.py.",
+  "type": "object",
+  "properties": {
+    "Board": {
+      "$ref": "#/$defs/Board"
+    },
+    "Agent": {
+      "$ref": "#/$defs/Agent"
+    },
+    "Player": {
+      "$ref": "#/$defs/Player"
+    },
+    "NewPlayer": {
+      "$ref": "#/$defs/NewPlayer"
+    },
+    "Profile": {
+      "$ref": "#/$defs/Profile"
+    },
+    "Leaderboard": {
+      "$ref": "#/$defs/Leaderboard"
+    },
+    "NewGame": {
+      "$ref": "#/$defs/NewGame"
+    },
+    "GameSummary": {
+      "$ref": "#/$defs/GameSummary"
+    },
+    "Review": {
+      "$ref": "#/$defs/Review"
+    },
+    "Glossary": {
+      "$ref": "#/$defs/Glossary"
+    },
+    "Meta": {
+      "$ref": "#/$defs/Meta"
+    },
+    "ApiError": {
+      "$ref": "#/$defs/ApiError"
+    },
+    "ServerMessage": {
+      "$ref": "#/$defs/ServerMessage"
+    },
+    "ClientMessage": {
+      "$ref": "#/$defs/ClientMessage"
+    }
+  }
+}

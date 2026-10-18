@@ -17,7 +17,8 @@ from pathlib import Path
 
 import pytest
 
-from ticket_to_ride.eval.arena import parse_spec, round_robin, run_round_robin
+from ticket_to_ride.agents.registry import parse_spec
+from ticket_to_ride.eval.arena import round_robin, run_round_robin
 from ticket_to_ride.eval.leaderboard import NoAnchorError, fit
 from ticket_to_ride.eval.store import Store
 

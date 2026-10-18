@@ -698,6 +698,21 @@ fn planned_segments(
     plan
 }
 
+/// Each of `player`'s tickets with the train cars it still needs -- 0 once connected,
+/// [`UNREACHABLE`] once no route is left -- in ticket order.
+///
+/// The encoder's own numbers, not a second derivation of them: what the `tickets` block
+/// encodes as `connected`, `remaining_cost` and `is_dead`. The web client shows exactly
+/// these, because the bots' observation holds them (PLAN.md §14.2, bot-parity assistance).
+pub fn ticket_costs(state: &State, player: usize) -> Vec<(u8, u16)> {
+    let derived = Derived::compute(state, player);
+    derived
+        .held()
+        .iter()
+        .map(|&ticket| (ticket, derived.ticket_cost[usize::from(ticket)]))
+        .collect()
+}
+
 // ---------------------------------------------------------------------------
 // Encoding
 // ---------------------------------------------------------------------------

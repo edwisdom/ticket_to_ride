@@ -14,6 +14,7 @@ from ticket_to_ride.cli.cmd_arena import arena_command, leaderboard_command
 from ticket_to_ride.cli.cmd_bench import bench_command
 from ticket_to_ride.cli.cmd_cloud import cloud_app
 from ticket_to_ride.cli.cmd_map import map_command
+from ticket_to_ride.cli.cmd_serve import serve_command
 
 app = typer.Typer(
     name="ttr",
@@ -43,6 +44,7 @@ app.command("map")(map_command)
 app.command("bench")(bench_command)
 app.command("arena")(arena_command)
 app.command("leaderboard")(leaderboard_command)
+app.command("serve")(serve_command)
 app.add_typer(cloud_app, name="cloud")
 
 

@@ -400,6 +400,65 @@ venv.
 spike's first runs treated every environment as finished on every step. Use
 `np.frombuffer(flags, dtype=np.uint8)`. The stub said `list[int]`; it says `bytes` now.
 
+Six `State` accessors had the same lie in the stub until Phase 4.1 -- `hand_of`,
+`certain_of`, `tickets_of`, `deck_counts` and the `trains` and `seg_owner` properties all
+return `bytes` -- and it bites again at the web layer: `json.dumps` refuses `bytes`, and a
+Pydantic `list[int]` field accepts them only by coercion. The stub says `bytes` now; the
+accessors added for the web server (`offer`, `discard`, `ranks`, `board_data`'s arrays)
+widen to `u16` so they arrive as lists.
+
+### `explain` *is* `act`: call one or the other, never both
+
+`Heuristic.explain` runs the same decision as `act` with a recording sink, so it advances
+the agent exactly as `act` does -- including H0's random stream. Calling `explain` for the
+reasoning and then `act` for the move draws twice, and from then on the game diverges
+from any replay of it. The server calls `explain` *instead of* `act` when it wants the
+reasoning (spectating, review) and `act` otherwise; a rebuild calls `act`, which reproduces
+an `explain`ed game because the two are one code path
+(`crates/ttr-core/tests/explain.rs::explaining_h0_draws_exactly_what_acting_would`).
+
+### H1's priority scale must stay above every value it ranks
+
+Phase 4.1 wrote H1's rule cascade as one priority per action, `rule * 100 + value`, so its
+explanation is what it compared. That is the cascade only while every value -- a route's
+points, cards of one colour in hand, an offer's total cars (69 at most on USA) -- stays
+below the scale; a board whose three-ticket offer could need 100 cars would let a value
+outrank a rule. A `debug_assert` guards it, and H1's behaviour hash would move.
+
+### A seat view can be resample-tested only where the sampler resamples
+
+The masking test compares a seat's view of a position with its view of
+`resample_from_infoset(seat)` of it. The sampler redeals hidden cards and the deck, but
+keeps every seat's tickets and any open offer as they are (`ttr_core::resample`), so an
+opponent's tickets or offer leaking into a view would pass that test. Those are asserted
+directly (`tests/unit/web/test_masking.py`); a new hidden field needs the same.
+
+### A one-block bootstrap is a point, not an interval
+
+Resampling a single seed block draws the same games every time, so a competitor with one
+block -- a person after one rated game, each human game being its own block -- gets
+`lo == elo == hi`, which reads as certainty. The web ratings report no interval below two
+blocks (`MIN_INTERVAL_BLOCKS`).
+
+### Starlette's test client and its HTTP library
+
+Starlette 1.3 deprecates `httpx` for `starlette.testclient` in favour of `httpx2`, and
+warns at import. Under `filterwarnings = ["error"]` that warning fails every test that
+imports `fastapi.testclient`. The dev group has `httpx2`.
+
+### `asyncio.TaskGroup` inside a Starlette WebSocket handler
+
+Starlette ends a connection by cancelling its handler through an anyio cancel scope, and
+`asyncio.TaskGroup`'s own cancellation bookkeeping turns that into a `CancelledError` that
+escapes the handler -- in the test client it surfaced as `concurrent.futures.CancelledError`
+on leaving `websocket_connect`. The game socket uses an anyio task group.
+
+### Two test files may not share a basename
+
+`tests/` has no `__init__.py`, so pytest imports each test file by its basename, and
+`tests/unit/web/test_store.py` beside `tests/unit/eval/test_store.py` is an "import file
+mismatch" that stops collection. The web one is `test_play_store.py`.
+
 ### `Categorical.sample()` on MPS can pick a masked action
 
 With masked logits at -1e9, torch's categorical sampling on MPS still returned a masked

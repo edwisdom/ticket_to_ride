@@ -83,6 +83,16 @@ web-dev: web/node_modules/.package-lock.json  ## Client dev server (:5173), prox
 corpus:  ## Verify the golden corpus, every game
 	cargo run -q --release -p ttr-tools --bin gen-corpus -- --check
 
+# --- The game server -----------------------------------------------------
+
+.PHONY: protocol serve
+
+protocol:  ## Regenerate the web protocol's JSON Schema (protocol.py -> protocol.schema.json)
+	uv run python tools/gen_protocol.py
+
+serve:  ## Serve the game and the built web client on http://127.0.0.1:8000
+	uv run ttr serve
+
 tb:  ## Launch tensorboard over all runs
 	uv run tensorboard --logdir runs/
 
