@@ -5,6 +5,72 @@ session. Decisions that deviate from [PLAN.md](PLAN.md) belong here, with the re
 
 ---
 
+## 2026-10-18 — The ladder stops at H6: two rounds with nothing to promote
+
+Rounds 8 and 9 started from H6 and produced nothing promotable, which is the stopping
+rule. The ladder as it stands:
+
+| tier | adds | vs tier below (usa 2P / mini 2P / usa 4P) | vs H3 | µs/decision (usa 2P / 4P / mini) |
+| --- | --- | --- | --- | --- |
+| H4 | off-plan claims pay for the trains and cards they take from the plan | +81 / +43 / +77 | +81 / +43 / +77 | 25.7 / 27.3 / 3.0 |
+| H5 | tickets priced against its own network (drawn late); folded in: the longest-route race, free trains once done, a late plan the hand can pay for | +86 / +22 / +53 | +178 / +58 / +132 | 26.7 / 27.3 / 4.2 |
+| H6 | a network chosen for the points its routes score, scaled by the spare trains | +212 / +44 / +188 | +353 / +110 / +297 | 25.2 / 27.8 / 4.3 |
+
+Each figure comes from the promotion that set it: 10,000-game fixed-size estimates on fresh
+seed roots, every rotation, and at 4P one challenger against three incumbents. H5's and H6's
+gains over the tier below include their folds.
+
+### Round 8: nothing (from H6)
+
+H6 beats H5 77% of the time. It keeps 3.3-3.6 tickets a game (H5 keeps 5.6-6.3), and in its
+losses H5 out-scores it on tickets by 43 points while trailing by 24 on routes.
+
+- **Pricing H6's ticket draws against the fewest-car cost** rather than the cars of the
+  network it plans makes every new ticket look cheaper. It took on too many: −28 [−34, −21].
+  So H6's ticket appetite is right where it is.
+- **Pricing a keep by the route points its network would score**, at weights 0.25, 0.5 and
+  1: +7, −6, −43.
+- **Valuing cards by the long routes they pay for**, a bonus per point a car beyond par for
+  the colour of a long planned route: −2 to −7.
+- **Claiming long planned routes first**, since an opponent who also plans for points wants
+  them: +1.5 to +2.4.
+- Budget weight (2, 3), completion target (0.65, 0.9) and sharpness (2, 4.5) were all
+  within ±4, except a target of 0.9 at −25.
+
+### Round 9: nothing
+
+- **H4's opponent modelling no longer earns its keep at 2P.** Without it, H6 measured −0.3
+  at USA 2P, but −3 on mini and −9.5 at 4P, and saved only 1.3 µs a decision. It stays.
+- Re-tuning the inherited contest, double-lockout and gray-cannibalization weights: all
+  inside ±8.
+- **Not ending the game while behind.** H6 ends 92% of its games and wins 82% of those. In
+  the losses it ended itself it was behind on true ticket status 63% of the time, by 7
+  points on average, against an opponent holding 6.5 tickets. Exploiting that would mean
+  estimating hidden tickets for a few percent of games, so it was not built.
+- **Growing the plan's tree from every terminal.** Grown from the first terminal, the tree
+  could be cheaper in 14% of decisions, by 1.3 rebated cars and 5.9 route points. Choosing
+  the cheapest over all starts measured +1.7 [−2, +6].
+
+### What the ladder taught
+
+Four insights carried almost all the gain, and each was a mismatch between what the bot
+optimized and what scores:
+
+1. **H4**: trains are a budget the plan shares, so an off-plan claim costs the plan.
+2. **H5**: a ticket's cost is its distance from the network, so tickets should be drawn
+   late.
+3. **H5, late plan**: cards a plan waits on may not come late in the game, so the network
+   must be one the hand can pay for.
+4. **H6**: route points grow faster than length, so the network should be built from long
+   routes.
+
+What failed fell into two groups. Most were cleverer pricing of things already priced well
+enough: every all-game card-aware plan, blocking even with perfect sight of the opponent's
+tickets, denying trail extensions, and banking tickets. The others were small refinements
+of a term that had already captured the effect.
+
+---
+
 ## 2026-10-18 — H6's route value, scaled by the spare trains
 
 Round 7 started from the new H6. Re-tuning its other weights (train cost, late cards,
