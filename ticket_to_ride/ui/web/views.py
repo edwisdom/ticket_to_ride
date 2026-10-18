@@ -62,6 +62,11 @@ class BoardInfo:
     def card(self, card_type: int) -> str:
         return "locomotive" if card_type == self.locomotive else self.colors[card_type]
 
+    def a_card(self, card_type: int) -> str:
+        """`a red`, `an orange`: the article follows the colour's spelling."""
+        name = self.card(card_type)
+        return f"{'an' if name[0] in 'aeiou' else 'a'} {name}"
+
     def cards(self, card_type: int, count: int) -> str:
         name = self.card(card_type)
         return f"{count} {name}{'s' if count != 1 and name == 'locomotive' else ''}"
@@ -330,7 +335,7 @@ def _said(info: BoardInfo, decoded: p.Action, before: ttr_rust.State, after: ttr
         case p.ClaimAction():
             said = f"claimed {info.route(decoded.segment)} with {payment(info, decoded)}"
         case p.DrawAction(slot=None, card=card):
-            said = f"drew {'a card' if card is None else f'a {info.card(card)}'} from the deck"
+            said = f"drew {'a card' if card is None else info.a_card(card)} from the deck"
         case p.DrawAction(card=int(card)):
             said = f"took the face-up {info.card(card)}"
         case p.DrawTicketsAction(dealt=dealt, tickets=tickets):
