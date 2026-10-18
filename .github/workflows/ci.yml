@@ -76,6 +76,25 @@ jobs:
           import importlib.util, sys;
           sys.exit(1) if importlib.util.find_spec('torch') else print('torch absent, as intended')"
 
+  # The web client: type check, unit tests, production build. Node is a build-time tool
+  # only, so no other job needs it.
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - run: npm run build
+
   test-rl:
     runs-on: ubuntu-latest
     if: contains(github.event.pull_request.labels.*.name, 'rl') || github.event_name == 'schedule'

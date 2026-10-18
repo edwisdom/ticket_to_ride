@@ -1,5 +1,5 @@
 .PHONY: setup fmt lint type test test-all cov bench bench-check board layout vectors tb clean clean-rust help \
-        rust-fmt rust-lint rust-test rust-sweep rust-cov mutants
+        rust-fmt rust-lint rust-test rust-sweep rust-cov mutants web web-dev
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-13s\033[0m %s\n", $$1, $$2}'
@@ -68,6 +68,17 @@ board:  ## Regenerate the board data (RULES.md -> usa.toml, board_gen.rs)
 
 layout:  ## Regenerate the board layouts the client draws (data/layout/*.toml -> *.json)
 	uv run python tools/gen_layout.py
+
+# --- Web client (Node >= 22.12 at build time only; see web/.nvmrc) --------
+
+web/node_modules/.package-lock.json: web/package.json web/package-lock.json
+	cd web && npm ci
+
+web: web/node_modules/.package-lock.json  ## Build the client into ticket_to_ride/ui/web/static/
+	cd web && npm run build
+
+web-dev: web/node_modules/.package-lock.json  ## Client dev server (:5173), proxying /api and /ws to `ttr serve`
+	cd web && npm run dev
 
 corpus:  ## Verify the golden corpus, every game
 	cargo run -q --release -p ttr-tools --bin gen-corpus -- --check

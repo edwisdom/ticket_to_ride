@@ -234,3 +234,6 @@ artifacts/
 target/
 # pytest-benchmark saves
 .benchmarks/
+# web client: npm dependencies, and the production build FastAPI serves (`make web`)
+node_modules/
+ticket_to_ride/ui/web/static/

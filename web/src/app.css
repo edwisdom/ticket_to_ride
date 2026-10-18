@@ -1,0 +1,31 @@
+:root {
+  --ink: #2e1d10;
+  --ink-soft: #6a5039;
+  --paper: #f4e8cb;
+  --paper-deep: #e6d3a6;
+  --oxblood: #5c1d16;
+  --gilt: #c9a35a;
+  --felt: #20302a;
+  font-family: 'Alegreya Sans', system-ui, sans-serif;
+  color: var(--ink);
+  background: var(--felt);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(ellipse at 50% 30%, #2d4339 0%, #1b2823 70%, #141d19 100%);
+}
+
+h1,
+h2,
+h3 {
+  font-family: 'Alegreya SC', serif;
+  font-weight: 700;
+  margin: 0;
+}
