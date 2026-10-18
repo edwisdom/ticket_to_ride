@@ -59,7 +59,8 @@ jobs:
       - run: uv run ty check --output-format github
 
   # The Python suite, still with NO torch installed: that is what keeps it at a couple of
-  # minutes and avoids the CUDA wheels entirely. `uv sync` builds ttr_rust.
+  # minutes and avoids the CUDA wheels entirely. `uv sync` builds ttr_rust; the `web` extra
+  # (FastAPI, uvicorn) is what the game server's tests run against.
   test-fast:
     runs-on: ubuntu-latest
     steps:
@@ -69,7 +70,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-      - run: uv sync --group dev
+      - run: uv sync --group dev --extra web
       - run: uv run pytest -n auto
       - name: assert torch is absent
         run: uv run python -c "

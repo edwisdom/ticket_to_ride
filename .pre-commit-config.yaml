@@ -25,6 +25,16 @@ repos:
         pass_filenames: false
         files: ^(RULES\.md|ticket_to_ride/data/maps/.*\.toml|tools/gen_board\.py)$
 
+      # The web client generates its TypeScript types from the checked-in schema, so a
+      # protocol model committed without it would leave the client coding against the old
+      # protocol.
+      - id: gen-protocol
+        name: protocol schema is regenerated
+        entry: uv run python tools/gen_protocol.py --check
+        language: system
+        pass_filenames: false
+        files: ^(ticket_to_ride/ui/web/protocol\.py|tools/gen_protocol\.py)$
+
       # Rust formatting and lints. `cargo fmt` is fast enough to be unconditional; clippy
       # is scoped to Rust changes because a cold run is ~30s.
       - id: cargo-fmt

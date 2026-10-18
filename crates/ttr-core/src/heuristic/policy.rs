@@ -879,7 +879,7 @@ impl Heuristic {
             let marginal = f64::from(cost.saturating_sub(base_cost) as u16);
 
             sink.fact("ticket_points", points);
-            sink.fact("plan_cost", f64::from(cost as u16));
+            sink.fact("plan_cost_after", f64::from(cost as u16));
             sink.fact("added_cars", marginal);
             let value = if ev_filter {
                 // What this ticket set settles for: `+points` each if completed, `-points`
@@ -1042,7 +1042,7 @@ impl Ctx {
         sink.context("plan_cost", f64::from(plan.steiner_cost));
         sink.context("plan_points", f64::from(plan.live_points));
         sink.context("plan_segments", plan.segments.len() as f64);
-        sink.context("dead_tickets", plan.dead_tickets.len() as f64);
+        sink.context("unreachable_tickets", plan.dead_tickets.len() as f64);
         sink.context("plan_car_value", self.plan_car_value);
         sink.context("trains", f64::from(state.trains[self.seat]));
         sink.context("endgame", f64::from(u8::from(self.endgame)));
