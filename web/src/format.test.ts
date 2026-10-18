@@ -5,10 +5,11 @@ import { elo, outcome, plural, versus, when } from './format';
 const rating = (v: number, lo: number | null, hi: number | null) => ({ elo: v, lo, hi, games: 10, score: 0.5 });
 
 describe('elo', () => {
-  it('signs the rating and its interval', () => {
-    expect(elo(rating(21.4, 8, 33))).toBe('+21 [+8, +33]');
-    expect(elo(rating(-100, -119, -82))).toBe('−100 [−119, −82]');
-    expect(elo(rating(0, null, null))).toBe('0');
+  it('shows an absolute rating and its interval, unsigned', () => {
+    expect(elo(rating(1521.4, 1508, 1533))).toBe('1521 [1508, 1533]');
+    expect(elo(rating(1500, null, null))).toBe('1500');
+    // Below the floor is possible, just unusual; it keeps a proper minus.
+    expect(elo(rating(-12, -40, 9))).toBe('−12 [−40, 9]');
     expect(elo(undefined)).toBe('unrated');
   });
 });

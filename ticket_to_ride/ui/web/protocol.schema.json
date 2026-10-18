@@ -98,7 +98,7 @@
           "type": "string"
         },
         "anchor": {
-          "description": "True for H3 itself, the zero of the rating scale.",
+          "description": "True for H3 itself, the fixed point of the rating scale.",
           "type": "boolean"
         },
         "player": {
@@ -854,6 +854,10 @@
         "anchor": {
           "type": "string"
         },
+        "anchor_elo": {
+          "description": "The anchor's rating, by definition.",
+          "type": "number"
+        },
         "games": {
           "type": "integer"
         },
@@ -882,6 +886,7 @@
         "map",
         "n_players",
         "anchor",
+        "anchor_elo",
         "games",
         "blocks",
         "standings",
@@ -1274,7 +1279,7 @@
     },
     "Rating": {
       "additionalProperties": false,
-      "description": "Bradley-Terry Elo on the H3 = 0 scale, with a 95% block-bootstrap interval.",
+      "description": "Bradley-Terry Elo anchored on H3 (`Leaderboard.anchor_elo`), with a 95% interval.",
       "properties": {
         "elo": {
           "type": "number"

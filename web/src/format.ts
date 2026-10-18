@@ -3,14 +3,15 @@ import type { GameSummary, MapRating, Rating } from './api/protocol';
 /** "1 point", "2 points". */
 export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-const signed = (v: number) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(Math.round(v))}`;
+/** Whole, with a typographic minus: ratings are absolute, so no plus sign. */
+const whole = (v: number) => `${Math.round(v)}`.replace('-', '−');
 
-/** A rating on the H3 = 0 scale, with its interval when there is one. */
+/** A rating on the H3-anchored scale, with its interval when there is one. */
 export function elo(rating: Rating | null | undefined): string {
   if (!rating) return 'unrated';
   const lo = rating.lo;
   const hi = rating.hi;
-  return lo === null || hi === null ? signed(rating.elo) : `${signed(rating.elo)} [${signed(lo)}, ${signed(hi)}]`;
+  return lo === null || hi === null ? whole(rating.elo) : `${whole(rating.elo)} [${whole(lo)}, ${whole(hi)}]`;
 }
 
 export function ratingOn(ratings: MapRating[], map: string): Rating | undefined {

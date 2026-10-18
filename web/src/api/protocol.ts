@@ -125,7 +125,7 @@ export interface Agent {
   family: string;
   description: string;
   /**
-   * True for H3 itself, the zero of the rating scale.
+   * True for H3 itself, the fixed point of the rating scale.
    */
   anchor: boolean;
   player: Player;
@@ -150,7 +150,7 @@ export interface MapRating {
   rating: Rating;
 }
 /**
- * Bradley-Terry Elo on the H3 = 0 scale, with a 95% block-bootstrap interval.
+ * Bradley-Terry Elo anchored on H3 (`Leaderboard.anchor_elo`), with a 95% interval.
  */
 export interface Rating {
   elo: number;
@@ -211,6 +211,10 @@ export interface Leaderboard {
   map: MapName;
   n_players: number;
   anchor: string;
+  /**
+   * The anchor's rating, by definition.
+   */
+  anchor_elo: number;
   games: number;
   blocks: number;
   standings: Standing[];

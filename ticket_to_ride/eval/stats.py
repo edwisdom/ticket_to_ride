@@ -33,6 +33,13 @@ import numpy as np
 #: Elo's scale constant: a 400-point gap is 10:1 odds.
 ELO_SCALE = 400.0
 
+#: What the anchor (H3) reads, so ratings land where chess players expect them: random play
+#: near the bottom of the scale (~100-650 by board), club strength around 1500, and room
+#: above for master-level agents. Only differences are identified, so this is a pure shift
+#: -- but every stored rating row is on it, which makes changing it a store schema change
+#: (`eval.store.SCHEMA_VERSION`, with a migration that shifts the old rows).
+ANCHOR_ELO = 1500.0
+
 #: Natural-log units per Elo point.
 LOG10_OVER_SCALE = np.log(10.0) / ELO_SCALE
 
@@ -140,16 +147,17 @@ def bradley_terry(
     tolerance: float = 1e-10,
     max_iterations: int = 100,
 ) -> np.ndarray:
-    """Bradley-Terry MLE by Newton's method. Returns Elo, with `anchor` at exactly 0.
+    """Bradley-Terry MLE by Newton's method. Returns Elo, with `anchor` at exactly
+    `ANCHOR_ELO`.
 
     `wins[i, j]` is `i`'s score against `j` (wins plus half the draws).
 
     Two things keep this well-posed. A weak `N(0, prior_sd^2)` prior on Elo stops a
     six-game newcomer -- or an agent that has never lost -- landing at infinity, which the
-    unpenalised MLE genuinely does. And the fit is then **shifted** so the anchor reads 0,
-    rather than the anchor being constrained during optimisation: shifting is exact because
-    the likelihood depends only on rating *differences*, and it keeps the prior doing the
-    one job it is here for.
+    unpenalised MLE genuinely does. And the fit is then **shifted** so the anchor reads
+    `ANCHOR_ELO`, rather than the anchor being constrained during optimisation: shifting is
+    exact because the likelihood depends only on rating *differences*, and it keeps the
+    prior doing the one job it is here for.
 
     `anchor` is H3 permanently (PLAN.md §11) so the scale stays comparable for the
     project's lifetime -- see `ttr_rust.behaviour_hash` for what actually holds it still.
@@ -181,7 +189,7 @@ def bradley_terry(
             break
 
     elo = theta / LOG10_OVER_SCALE
-    return elo - elo[anchor]
+    return elo - elo[anchor] + ANCHOR_ELO
 
 
 def bootstrap_elo(

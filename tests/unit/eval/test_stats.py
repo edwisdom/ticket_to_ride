@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 
 from ticket_to_ride.eval.stats import (
+    ANCHOR_ELO,
     ELO_SCALE,
     block_pair_matrix,
     bootstrap_elo,
@@ -46,20 +47,21 @@ def synthetic_wins(true_elo: np.ndarray, games: int, seed: int = 0) -> np.ndarra
 
 def test_the_fit_recovers_planted_ratings() -> None:
     true = np.array([-400.0, -120.0, 0.0, 130.0])
-    fitted = bradley_terry(synthetic_wins(true, games=20_000), anchor=2)
+    fitted = bradley_terry(synthetic_wins(true, games=20_000), anchor=2) - ANCHOR_ELO
     assert np.allclose(fitted, true, atol=25), f"{fitted} vs {true}"
 
 
-def test_the_anchor_is_exactly_zero_whichever_agent_it_is() -> None:
-    """H3 is the permanent zero of the scale (PLAN.md §11), so this is not approximate."""
+def test_the_anchor_is_exactly_its_rating_whichever_agent_it_is() -> None:
+    """H3 is the permanent fixed point of the scale (PLAN.md §11), so this is not
+    approximate."""
     wins = synthetic_wins(np.array([-300.0, 0.0, 200.0]), games=500)
     for anchor in range(3):
         fitted = bradley_terry(wins, anchor=anchor)
-        assert fitted[anchor] == 0.0
+        assert fitted[anchor] == ANCHOR_ELO
     # Only differences are identified, so re-anchoring must be a pure shift.
     a = bradley_terry(wins, anchor=0)
     b = bradley_terry(wins, anchor=2)
-    assert np.allclose(a - a[2], b, atol=1e-9)
+    assert np.allclose(a - a[2] + ANCHOR_ELO, b, atol=1e-9)
 
 
 def test_the_prior_keeps_an_undefeated_agent_finite() -> None:
@@ -68,7 +70,7 @@ def test_the_prior_keeps_an_undefeated_agent_finite() -> None:
     wins = np.array([[0.0, 40.0], [0.0, 0.0]])
     fitted = bradley_terry(wins, anchor=1, prior_sd=400.0)
     assert np.isfinite(fitted).all()
-    assert 200 < fitted[0] < 2000, fitted
+    assert 200 < fitted[0] - fitted[1] < 2000, fitted
 
 
 def test_a_shorter_prior_pulls_a_thin_record_further_toward_the_anchor() -> None:
@@ -83,7 +85,7 @@ def test_ties_count_half_a_win_to_each_side() -> None:
     Dropping them would bias ratings toward whoever draws less often."""
     all_draws = np.array([[0.0, 50.0], [50.0, 0.0]])
     fitted = bradley_terry(all_draws, anchor=0)
-    assert abs(fitted[1]) < 1e-6
+    assert abs(fitted[1] - fitted[0]) < 1e-6
 
 
 def test_a_pair_that_never_met_does_not_break_the_fit() -> None:
@@ -94,7 +96,7 @@ def test_a_pair_that_never_met_does_not_break_the_fit() -> None:
     wins[1, 2], wins[2, 1] = 80.0, 20.0
     fitted = bradley_terry(wins, anchor=2)
     assert np.isfinite(fitted).all()
-    assert fitted[0] > 0 and fitted[1] > 0
+    assert fitted[0] > fitted[2] and fitted[1] > fitted[2]
 
 
 # ---------------------------------------------------------------------------
@@ -180,8 +182,9 @@ def test_the_interval_covers_the_planted_rating() -> None:
             ranks.append([1, 2] if first else [2, 1])
             blocks.append(b)
     matrix = block_pair_matrix(np.array(blocks), np.array(agents), np.array(ranks), 2, n_blocks)
-    elo = bradley_terry(pair_counts(matrix, 2), anchor=1)
+    elo = bradley_terry(pair_counts(matrix, 2), anchor=1) - ANCHOR_ELO
     lo, hi = bootstrap_elo(matrix, 2, 1, resamples=400, seed=2)
+    lo, hi = lo - ANCHOR_ELO, hi - ANCHOR_ELO
     assert lo[0] < 150.0 < hi[0], f"150 outside [{lo[0]:.0f}, {hi[0]:.0f}] (point {elo[0]:.0f})"
 
 

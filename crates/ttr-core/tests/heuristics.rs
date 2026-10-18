@@ -360,7 +360,7 @@ fn on_its_last_turn_h3_claims_whenever_it_can() {
 // The anchor
 // ---------------------------------------------------------------------------
 
-/// H3's behaviour hash. **This is the Elo scale's zero.**
+/// H3's behaviour hash. **This is what the Elo scale is anchored on.**
 ///
 /// If this test fails, H3 plays differently than it did when the value was recorded --
 /// because a constant moved, or because code it depends on did. Either way every rating
@@ -380,7 +380,7 @@ fn the_h3_anchor_has_not_moved() {
     assert_eq!(
         got, H3_ANCHOR,
         "H3 plays differently than when the anchor was recorded. Read the comment on \
-         H3_ANCHOR before touching this literal: it is the zero of every rating in the \
+         H3_ANCHOR before touching this literal: it is the anchor of every rating in the \
          results store."
     );
 }

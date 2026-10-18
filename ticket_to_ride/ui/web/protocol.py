@@ -124,7 +124,7 @@ class NewPlayer(Request):
 
 
 class Rating(Model):
-    """Bradley-Terry Elo on the H3 = 0 scale, with a 95% block-bootstrap interval."""
+    """Bradley-Terry Elo anchored on H3 (`Leaderboard.anchor_elo`), with a 95% interval."""
 
     elo: float
     lo: float | None = Field(description="null when there is too little data for an interval.")
@@ -145,7 +145,7 @@ class Agent(Model):
     name: str
     family: str
     description: str
-    anchor: bool = Field(description="True for H3 itself, the zero of the rating scale.")
+    anchor: bool = Field(description="True for H3 itself, the fixed point of the rating scale.")
     player: Player
     behaviour_hash: str
     ratings: list[MapRating]
@@ -162,6 +162,7 @@ class Leaderboard(Model):
     map: MapName
     n_players: int
     anchor: str
+    anchor_elo: float = Field(description="The anchor's rating, by definition.")
     games: int
     blocks: int
     standings: list[Standing]

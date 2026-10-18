@@ -3,12 +3,14 @@
 -->
 <script lang="ts">
   import { api, HttpError } from '../api/http';
-  import type { Agent, GameSummary, MapName } from '../api/protocol';
+  import type { Agent, GameSummary, MapName, Rating } from '../api/protocol';
   import { elo, MAP_NAMES, outcome, ratingOn, versus, when } from '../format';
   import { forget, me, remember } from '../player.svelte';
   import { href } from '../router';
 
   const MAPS: MapName[] = ['usa', 'mini'];
+  // The anchor's interval is zero-width by construction, so its point alone.
+  const anchorLabel = (r: Rating | undefined) => (r ? `${elo({ ...r, lo: null, hi: null })} (anchor)` : 'anchor');
 
   let agents = $state<Agent[]>([]);
   let games = $state<GameSummary[]>([]);
@@ -100,7 +102,7 @@
         {#each agents as a (a.spec)}
           <button class="agent" class:on={opponent === a.spec} onclick={() => (opponent = a.spec)}>
             <strong>{a.name}</strong>
-            <span class="rating">{a.anchor ? '0 (anchor)' : elo(ratingOn(a.ratings, map))}</span>
+            <span class="rating">{a.anchor ? anchorLabel(ratingOn(a.ratings, map)) : elo(ratingOn(a.ratings, map))}</span>
             <span class="desc">{a.description}</span>
           </button>
         {/each}

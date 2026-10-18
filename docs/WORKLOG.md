@@ -5,6 +5,40 @@ session. Decisions that deviate from [PLAN.md](PLAN.md) belong here, with the re
 
 ---
 
+## 2026-10-18 — H3 reads 1500, not 0
+
+**Departs from PLAN.md §11** ("anchor H3 = 0"). H3 is still the anchor, pinned by its
+behaviour hash; what changed is the number it reads. A competent heuristic sitting at 0,
+with everything below it negative, reads strangely to anyone who knows chess ratings,
+so the scale is now offset to look like one.
+
+**Why 1500.** It is the Glicko/Lichess starting rating, the conventional "unknown,
+average club player". With H3 there, the measured ladder lands where chess intuition puts
+it: random play at 140 (USA 2P) to 637 (Mini 2P), near USCF's floor of 100; H1 around
+700-900, a rank beginner; H2 around 1350. §11's predicted ISMCTS (+350) and R2 target
+(+700 to +900) become roughly 1850 and 2200-2400, which reads as "master". 1200 would
+put random play below zero on USA (−160); 2000 would call an agent a person beat 123-4 an
+expert.
+
+**What it is not.** The numbers feel like chess numbers but are not chess strength. TTR
+has far more luck than chess, so its spreads are compressed (Mini's most of all), and a
+rating means something only within a configuration's pool. The 400-points-is-10:1 scale
+was already chess's and is unchanged.
+
+**How.** One constant, `eval.stats.ANCHOR_ELO = 1500`, added after the fit's existing
+shift. The `N(0, 400²)` prior acts on the unshifted parameters, so it pulls exactly as
+before; every difference, interval width and SPRT bound is unchanged. Absolute ratings
+lose their plus sign (CLI and web); differences keep theirs. The leaderboard protocol
+carries `anchor_elo` so the client never hardcodes the number.
+
+**Stored ratings.** `results.db` schema 1 → 2. Opening a v1 store shifts every
+`rating` row's `elo`/`lo`/`hi` by +1500 in one transaction (`store.MIGRATIONS`). That is
+exact, since v1 rows were anchored at 0, and it runs once. A build still on schema 1 then
+refuses the migrated store, which is the version guard working as intended. Changing
+`ANCHOR_ELO` again is a schema change too, with a migration that shifts by the difference.
+
+---
+
 ## 2026-10-18 — H3 moves: the plan follows the cards
 
 **The anchor moved, on purpose.** PLAN.md §11 meant H3 to be the Elo zero for the

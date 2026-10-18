@@ -1,7 +1,7 @@
 """People and bots on one leaderboard (PLAN.md §14.2).
 
-Finished rated human games join the arena's games in one Bradley-Terry fit on the H3 = 0
-scale (`eval.leaderboard.fit_with`): each human game its own seed block, a person
+Finished rated human games join the arena's games in one Bradley-Terry fit with H3 at
+`ANCHOR_ELO` (`eval.leaderboard.fit_with`): each human game its own seed block, a person
 identified by player id, a bot by its agent identity -- so the H3 a person beat is the same
 competitor the arena measured. Nothing is stored: a rating is a view, refit whenever a
 rated game finishes or the arena records more.
@@ -27,6 +27,7 @@ from ticket_to_ride.eval.leaderboard import (
     fit_with,
     human,
 )
+from ticket_to_ride.eval.stats import ANCHOR_ELO
 from ticket_to_ride.eval.store import AgentRow, Store
 from ticket_to_ride.ui.web import protocol as p
 from ticket_to_ride.ui.web.games import N_PLAYERS, player_model
@@ -105,7 +106,9 @@ class Ratings:
         except NoGamesError:
             return Unrated("no games have been recorded on this map yet")
         except NoAnchorError:
-            return Unrated(f"nobody has played {ANCHOR_FAMILY.upper()}, the scale's zero, here yet")
+            return Unrated(
+                f"nobody has played {ANCHOR_FAMILY.upper()}, the scale's anchor, here yet"
+            )
         finally:
             if arena is not None:
                 arena.close()
@@ -144,6 +147,7 @@ class Ratings:
                 map=map_name,
                 n_players=N_PLAYERS,
                 anchor=ANCHOR_FAMILY,
+                anchor_elo=ANCHOR_ELO,
                 games=0,
                 blocks=0,
                 standings=[],
@@ -153,6 +157,7 @@ class Ratings:
             map=map_name,
             n_players=N_PLAYERS,
             anchor=ANCHOR_FAMILY,
+            anchor_elo=ANCHOR_ELO,
             games=result.n_games,
             blocks=result.n_blocks,
             standings=[

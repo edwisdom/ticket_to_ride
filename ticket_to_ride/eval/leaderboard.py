@@ -17,7 +17,7 @@ enough to tell whether a pool is healthy:
   remains a real property of the game and is worth measuring rather than assuming away.
 
 Rated human games join the same fit (`fit_with`, PLAN.md §14.2): every game of a
-configuration, arena and human alike, on the H3 = 0 scale. A human game is its own seed
+configuration, arena and human alike, on the one H3-anchored scale. A human game is its own seed
 block -- nobody else was dealt its deck -- and a human is identified by player id.
 """
 

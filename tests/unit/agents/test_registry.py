@@ -13,7 +13,7 @@ from ticket_to_ride.agents.registry import ANCHOR_FAMILY, parse_spec
 
 
 def test_a_bare_name_is_the_anchor_and_a_tuned_variant_is_not(tmp_path: Path) -> None:
-    """The mechanism by which ratings accumulate: `h3` stays the zero of the scale and a
+    """The mechanism by which ratings accumulate: `h3` stays the anchor of the scale and a
     retune is a *new competitor* rated against it, never an edit to the anchor."""
     assert parse_spec("h3").is_anchor
     tuned = tmp_path / "h3_v2.toml"

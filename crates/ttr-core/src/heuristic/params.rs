@@ -158,7 +158,7 @@ pub struct HeuristicParams {
 }
 
 impl Default for HeuristicParams {
-    /// **The anchor's values.** Changing any of these moves H3, the zero of every rating --
+    /// **The anchor's values.** Changing any of these moves H3, the anchor of every rating --
     /// the golden test in `tests/heuristics.rs` fails and says so. Experiment with a modified
     /// copy registered as its own spec (`h3@...`), rated against H3; edit these only to move
     /// the anchor on purpose, with the measurement recorded in docs/WORKLOG.md.

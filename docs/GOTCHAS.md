@@ -563,7 +563,8 @@ the component-split + Eulerian-shortcut layers matter: without them the adversar
 
 ### The Elo anchor is pinned by behaviour, and moving it re-bases every stored rating
 
-H3 is the permanent zero of the rating scale (PLAN.md §11). Its identity is the **behaviour
+H3 is the permanent anchor of the rating scale (PLAN.md §11), fixed at Elo 1500
+(`eval.stats.ANCHOR_ELO`). Its identity is the **behaviour
 hash** in `crates/ttr-core/src/heuristic/probe.rs` -- its action sequence over ten frozen
 probes -- not its constants, because a params hash pins the numbers and leaves a reordered
 tiebreak or a fixed bug free to move its play.

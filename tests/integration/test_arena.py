@@ -20,6 +20,7 @@ import pytest
 from ticket_to_ride.agents.registry import parse_spec
 from ticket_to_ride.eval.arena import round_robin, run_round_robin
 from ticket_to_ride.eval.leaderboard import NoAnchorError, fit
+from ticket_to_ride.eval.stats import ANCHOR_ELO
 from ticket_to_ride.eval.store import Store
 
 pytestmark = pytest.mark.slow
@@ -140,14 +141,14 @@ def test_a_leaderboard_without_the_anchor_is_refused(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_the_ladder_is_monotone_and_the_anchor_is_zero(tmp_path: Path) -> None:
+def test_the_ladder_is_monotone_and_the_anchor_is_fixed(tmp_path: Path) -> None:
     path = tmp_path / "results.db"
     play(path, blocks=60)
     with Store(path) as store:
         report = fit(store, 1, resamples=300)
 
     elo = {s.spec: s.elo for s in report.standings}
-    assert elo["h3"] == 0.0
+    assert elo["h3"] == ANCHOR_ELO
     assert elo["h3"] > elo["h2"] > elo["h1"] > elo["h0"]
     # The intervals must separate the tiers that are genuinely different, or the ladder is
     # an ordering of noise. H4 is deliberately excluded: measured, it sits within noise of

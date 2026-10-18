@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from ticket_to_ride.eval.stats import ANCHOR_ELO
 from ticket_to_ride.eval.store import SCHEMA_VERSION, AgentRow, MatchRow, Store
 
 
@@ -167,6 +168,37 @@ def test_a_database_from_another_schema_version_is_refused(tmp_path: Path) -> No
         s.db.execute("UPDATE meta SET value=? WHERE key='schema_version'", (SCHEMA_VERSION + 1,))
     with pytest.raises(RuntimeError, match="schema version"):
         Store(path)
+
+
+def test_a_v1_store_is_moved_onto_the_current_scale(tmp_path: Path) -> None:
+    """v1 put the anchor at 0. Its snapshots are the same fits, so opening one shifts every
+    stored rating onto `ANCHOR_ELO` -- once, however many times it is opened."""
+    path = tmp_path / "v1.db"
+    with Store(path) as s:
+        config = a_config(s)
+        agent = s.agent_id(an_agent())
+        run = s.record_ratings(
+            config,
+            agent,
+            [(agent, -120.0, -140.0, -100.0, 10, 0.4)],
+            method="bradley-terry-newton",
+            prior_sd=400.0,
+            resamples=100,
+            n_games=10,
+            n_blocks=5,
+            cycle_fraction=0.0,
+        )
+        s.db.execute("UPDATE meta SET value='1' WHERE key='schema_version'")
+    for _ in range(2):
+        with Store(path) as s:
+            row = s.ratings_of(run)[0]
+            version = s.db.execute("SELECT value FROM meta WHERE key='schema_version'")
+            assert int(version.fetchone()["value"]) == SCHEMA_VERSION
+    assert (row["elo"], row["lo"], row["hi"]) == (
+        ANCHOR_ELO - 120.0,
+        ANCHOR_ELO - 140.0,
+        ANCHOR_ELO - 100.0,
+    )
 
 
 def test_wal_is_on(tmp_path: Path) -> None:

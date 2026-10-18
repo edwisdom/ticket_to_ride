@@ -1,5 +1,5 @@
 """Human games rated on the bots' scale (PLAN.md §14.2): one Bradley-Terry fit over arena
-and rated human games, H3 = 0, each human game its own block, a person by player id."""
+and rated human games, H3 fixed, each human game its own block, a person by player id."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from web_rig import make_app, new_game, new_player, play_out
 
 from ticket_to_ride.agents.registry import parse_spec
 from ticket_to_ride.eval.arena import run_round_robin
+from ticket_to_ride.eval.stats import ANCHOR_ELO
 from ticket_to_ride.eval.store import Store
 
 
@@ -33,15 +34,16 @@ def test_rated_human_games_sit_on_the_h3_scale(client: TestClient) -> None:
     ann = new_player(client, "Ann")
     _play(client, ann, 3)
     board = client.get("/api/leaderboard", params={"map": "mini"}).json()
-    assert board["anchor"] == "h3" and board["games"] == 3 and board["blocks"] == 3
+    assert board["anchor"] == "h3" and board["anchor_elo"] == ANCHOR_ELO
+    assert board["games"] == 3 and board["blocks"] == 3
     h3 = next(s for s in board["standings"] if s["player"]["spec"] == "h3")
-    assert h3["rating"]["elo"] == 0.0, "H3 is the zero of the scale"
+    assert h3["rating"]["elo"] == ANCHOR_ELO, "H3 is the scale's fixed point"
     me = _standing(board, ann)
     assert me["player"] == {"id": ann, "kind": "human", "name": "Ann", "spec": None}
-    # A random player against H3: three blocks, so an interval, and a long way below zero.
+    # A random player against H3: three blocks, so an interval, and a long way below H3.
     assert me["rating"]["lo"] is not None and me["rating"]["hi"] is not None
     assert me["rating"]["lo"] <= me["rating"]["elo"] <= me["rating"]["hi"]
-    assert me["rating"]["elo"] < 0
+    assert me["rating"]["elo"] < ANCHOR_ELO
 
     # The profile shows the same rating, and the record behind it.
     profile = client.get(f"/api/players/{ann}").json()
@@ -55,7 +57,7 @@ def test_rated_human_games_sit_on_the_h3_scale(client: TestClient) -> None:
 
     # The opponents list carries the same numbers.
     agents = {a["spec"]: a for a in client.get("/api/agents").json()}
-    assert agents["h3"]["anchor"] and agents["h3"]["ratings"][0]["rating"]["elo"] == 0.0
+    assert agents["h3"]["anchor"] and agents["h3"]["ratings"][0]["rating"]["elo"] == ANCHOR_ELO
     assert agents["h3"]["player"]["id"] == h3["player"]["id"]
 
 
@@ -100,7 +102,7 @@ def test_people_and_arena_bots_share_one_fit(tmp_path: Path) -> None:
         # Nothing else moved the arena's ratings much: the person played two games.
         before = {s["player"]["spec"]: s["rating"]["elo"] for s in arena_only["standings"]}
         after = {s["player"]["spec"]: s["rating"]["elo"] for s in board["standings"]}
-        assert after["h3"] == before["h3"] == 0.0
+        assert after["h3"] == before["h3"] == ANCHOR_ELO
         assert abs(after["h4"] - before["h4"]) < 5
         # Another map is another fit, with nothing in it yet.
         assert client.get("/api/leaderboard", params={"map": "usa"}).json()["standings"] == []

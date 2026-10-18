@@ -5,12 +5,12 @@
 //! per step defeats the entire batching design. Building the agents after the port means
 //! writing them once instead of writing them in Python and porting them later.
 //!
-//! ## H3 is the Elo zero, and a name is not a freeze
+//! ## H3 is the Elo anchor, and a name is not a freeze
 //!
-//! PLAN.md §11 anchors the rating scale at H3 = 0. That only works if H3 is *the same
-//! player* across every invocation, months apart, until it is moved on purpose. Putting its
-//! constants in [`params::HeuristicParams`] is necessary and not sufficient: it pins the
-//! numbers and leaves the code around them free. A tiebreak reordered, a change to
+//! PLAN.md §11 anchors the rating scale on H3, fixed at Elo 1500 (`eval.stats.ANCHOR_ELO`).
+//! That only works if H3 is *the same player* across every invocation, months apart, until
+//! it is moved on purpose. Putting its constants in [`params::HeuristicParams`] is
+//! necessary and not sufficient: it pins the numbers and leaves the code around them free. A tiebreak reordered, a change to
 //! [`crate::graph::MAX_STEINER_TERMINALS`], a fix in the plan's path reconstruction -- each
 //! changes what H3 plays with `params_hash` unmoved, and every rating ever recorded against
 //! it silently re-bases.

@@ -18,7 +18,7 @@ from rich.table import Table
 from ticket_to_ride.agents.registry import AgentSpec, parse_spec
 from ticket_to_ride.eval.arena import round_robin, run_match, run_round_robin
 from ticket_to_ride.eval.leaderboard import Report, fit
-from ticket_to_ride.eval.stats import elo_to_score, sprt
+from ticket_to_ride.eval.stats import ANCHOR_ELO, elo_to_score, sprt
 from ticket_to_ride.eval.store import Store
 
 DEFAULT_DB = "runs/results.db"
@@ -259,7 +259,7 @@ def leaderboard_command(
 
     table = Table(
         title=f"{report.map_name} {report.n_players}P -- {report.n_games:,} games in "
-        f"{report.n_blocks:,} seed blocks, anchored on h3"
+        f"{report.n_blocks:,} seed blocks, h3 = {ANCHOR_ELO:.0f}"
     )
     table.add_column("agent", style="cyan")
     table.add_column("elo", justify="right")
@@ -270,8 +270,8 @@ def leaderboard_command(
     for standing in report.standings:
         table.add_row(
             standing.spec,
-            f"{standing.elo:+.0f}",
-            f"[{standing.lo:+.0f}, {standing.hi:+.0f}]",
+            f"{standing.elo:.0f}",
+            f"[{standing.lo:.0f}, {standing.hi:.0f}]",
             f"{standing.games:,}",
             f"{standing.score:.3f}",
             standing.behaviour_hash[:12],

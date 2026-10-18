@@ -27,7 +27,9 @@ Maintaining a `pair_stat` table would be a cache in front of a query whose cost 
 Rating rows are **append-only snapshots**. A refit writes a new `rating_run` rather than
 overwriting: the leaderboard as of any past date stays recoverable, and the anchor each fit
 used is recorded, so a moved anchor shows up in the history instead of retroactively
-rewriting it.
+rewriting it. The one exception is the scale's *offset* (`stats.ANCHOR_ELO`): it is a pure
+shift that changes no comparison, so a store written under an older offset is migrated
+forward on open (`MIGRATIONS`) rather than left reading on a different scale.
 """
 
 from __future__ import annotations
@@ -40,7 +42,15 @@ from pathlib import Path
 from typing import Any
 
 #: Bumped when the schema changes in a way an older database cannot be read as.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+
+#: How a database at version `v` becomes version `v + 1`, run in one transaction on open.
+#: A version with no entry here is refused rather than guessed at.
+MIGRATIONS: dict[int, str] = {
+    # v1 put the anchor at Elo 0, v2 at 1500 (`stats.ANCHOR_ELO` when v2 was cut). Only
+    # differences are identified, so the old snapshots are the same fits, shifted.
+    1: "UPDATE rating SET elo = elo + 1500, lo = lo + 1500, hi = hi + 1500",
+}
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -267,12 +277,32 @@ class Store:
             )
             return
         found = int(row["value"])
+        if found < SCHEMA_VERSION and all(v in MIGRATIONS for v in range(found, SCHEMA_VERSION)):
+            self._migrate(found)
+            return
         if found != SCHEMA_VERSION:
             raise RuntimeError(
                 f"{self.path} was written by schema version {found}, this build is "
                 f"{SCHEMA_VERSION}. Refusing to mix them: the accumulated ratings would be "
                 "computed over rows read under the wrong meaning."
             )
+
+    def _migrate(self, found: int) -> None:
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            # Read again under the write lock: another process may have migrated it
+            # between our first read and here, and a shift applied twice is silent.
+            row = self.db.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+            found = int(row["value"])
+            for version in range(found, SCHEMA_VERSION):
+                self.db.execute(MIGRATIONS[version])
+            self.db.execute(
+                "UPDATE meta SET value=? WHERE key='schema_version'", (str(SCHEMA_VERSION),)
+            )
+            self.db.execute("COMMIT")
+        except Exception:
+            self.db.execute("ROLLBACK")
+            raise
 
     def close(self) -> None:
         self.db.close()

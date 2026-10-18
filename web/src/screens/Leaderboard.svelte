@@ -1,5 +1,5 @@
 <!--
-  People and bots in one Bradley-Terry fit, on the H3 = 0 scale.
+  People and bots in one Bradley-Terry fit, on the H3-anchored scale.
 -->
 <script lang="ts">
   import { api } from '../api/http';
@@ -58,7 +58,7 @@
           </tbody>
         </table>
         <p class="muted foot">
-          {board.games} {board.n_players}-player games in {board.blocks} seed blocks. Elo on the {board.anchor.toUpperCase()} = 0 scale: arena games
+          {board.games} {board.n_players}-player games in {board.blocks} seed blocks. Elo with {board.anchor.toUpperCase()} fixed at {board.anchor_elo}: arena games
           and rated human games in one fit.
         </p>
       {/if}

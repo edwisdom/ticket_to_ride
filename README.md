@@ -50,19 +50,20 @@ On an M2 Max. 366 Rust tests (and 7 `#[ignore]`d sweeps) and 195 Python tests; t
 coverage 96%.
 
 Five scripted agents, H0–H4, rated over 10,000 paired games in 2.1 s. **H3 is the Elo
-zero**, and its identity is a hash of what it *plays* over a frozen probe set rather than of
-its constants — a params hash would leave a reordered tiebreak or a fixed bug free to move
+anchor, fixed at 1500**, which puts random play near the bottom of a chess-like scale. Its
+identity is a hash of what it *plays* over a frozen probe set rather than of its constants
+— a params hash would leave a reordered tiebreak or a fixed bug free to move
 the anchor and silently re-base every rating ever recorded. The anchor moves only on
 purpose: it did once, when H3 learned to plan the network its cards can pay for and to
 spend its last turn on points (+36 Elo over its predecessor at USA 2P; docs/WORKLOG.md).
 
 | agent | usa 2P | mini 2P | usa 4P |
 | --- | --- | --- | --- |
-| h4 | −1 [−18, +16] | +2 [−11, +16] | −20 [−28, −13] |
-| **h3** | **0** (anchor) | **0** | **0** |
-| h2 | −156 [−174, −137] | −132 [−153, −111] | −142 [−151, −134] |
-| h1 | −809 [−865, −761] | −595 [−632, −560] | −804 [−830, −781] |
-| h0 | −1360 [−1437, −1294] | −863 [−908, −823] | −1326 [−1363, −1294] |
+| h4 | 1499 [1482, 1516] | 1502 [1489, 1516] | 1480 [1472, 1487] |
+| **h3** | **1500** (anchor) | **1500** | **1500** |
+| h2 | 1344 [1326, 1363] | 1368 [1347, 1389] | 1358 [1349, 1366] |
+| h1 | 691 [635, 739] | 905 [868, 940] | 696 [670, 719] |
+| h0 | 140 [63, 206] | 637 [592, 677] | 174 [137, 206] |
 
 Bradley–Terry MLE, 95% intervals from a bootstrap that resamples **seed blocks** rather than
 games — games inside a block share a deck, and treating them as independent inflates
@@ -100,7 +101,7 @@ screen, and review a finished game move by move with each bot decision's candida
 down by term. The browser never holds hidden information -- no seed, no deck, nothing of an
 opponent's hand beyond what is public -- and every game is recorded in `runs/play.db`, from
 which it can be rebuilt and replayed. Rated games put you on the same leaderboard as the
-bots, on the H3 = 0 scale: play H3, or run `ttr arena` first so the other bots are anchored
+bots, on the same H3-anchored scale: play H3, or run `ttr arena` first so the other bots are anchored
 to it.
 
 ### The web client

@@ -45,7 +45,7 @@
         {#if !profile.ratings.length}
           <p class="muted">No rating yet: finish a rated game. A rating needs a path to H3, so play H3 or have the arena run.</p>
         {/if}
-        <p class="muted scale">Elo on the H3 = 0 scale, with a 95% interval; the leaderboard has everyone on it.</p>
+        <p class="muted scale">Elo anchored on H3, with a 95% interval; the leaderboard has everyone on it.</p>
       </div>
     </section>
 

@@ -6,7 +6,7 @@ store, on the web server and on a leaderboard row:
 * `h0` ... `h4` -- the Rust heuristics (`random` is an alias for `h0`);
 * `h3@configs/agents/h3_v2.toml` -- a tier with parameter overrides, a `[params]` table or
   a bare one. A tuned agent is a *different spec*, never an edit to the anchor's constants:
-  `h3` stays the zero of the rating scale and `h3@...` is a new competitor rated against it;
+  `h3` stays the anchor of the rating scale and `h3@...` is a new competitor rated against it;
 * `ppo:runs/x/best.pt` -- reserved for Phase 6's learned agents. Parsed now so the seam
   exists; building one imports torch lazily, so nothing that only needs heuristics (the
   arena, the web server, `ttr --help`) ever pays for it (PLAN.md §2, boundary 3).

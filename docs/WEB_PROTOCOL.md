@@ -132,7 +132,7 @@ bot decision explained.
 ## Ratings
 
 Rated finished games join the arena's games (`--results-db`, default `runs/results.db`) in
-one Bradley-Terry fit per map on the H3 = 0 scale: each human game its own seed block, a
+one Bradley-Terry fit per map with H3 fixed at 1500 (`Leaderboard.anchor_elo`): each human game its own seed block, a
 person by player id, a bot by its identity -- so the H3 you played is the H3 the arena
 measured. A rating needs a path to H3: play H3, or run `ttr arena` so the other bots are
 anchored. Intervals are 95% block-bootstrap; with fewer than two blocks there is no interval
