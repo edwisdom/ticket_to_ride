@@ -21,6 +21,7 @@
   import SeatPanel from '../game/SeatPanel.svelte';
   import { GameSession, SPEEDS, type Speed } from '../game/session.svelte';
   import TicketOffer from '../game/TicketOffer.svelte';
+  import { yourTurn } from '../game/turn';
   import { href } from '../router';
 
   let { id }: { id: string } = $props();
@@ -60,13 +61,17 @@
   const others = $derived(view ? view.seats.filter((s) => s.seat !== viewer) : []);
   const mine = $derived(view && viewer !== null ? view.seats[viewer] : undefined);
 
+  // The viewer's own turn: the moves it allows and, when train pieces rule out every route, why.
+  const own = $derived(
+    view?.phase === 'main' && legal.length && model && mine ? yourTurn(legal, model, view, mine.trains) : null,
+  );
   const prompt = $derived.by(() => {
     if (!view || session.over) return null;
     if (legal.length) {
       if (view.phase === 'initial_tickets') return 'Choose your opening tickets.';
       if (view.phase === 'ticket_keep') return 'Choose which tickets to keep.';
       if (view.phase === 'draw_second') return 'Draw one more card: from the deck, or a face-up card that is not a locomotive.';
-      return 'Your turn: draw two cards, claim a route, or draw tickets.';
+      return own?.prompt ?? 'Your turn.';
     }
     if (session.sent) return 'Sending…';
     return `${name(view.current)} is ${view.phase === 'initial_tickets' || view.phase === 'ticket_keep' ? 'choosing tickets' : 'to move'}…`;
@@ -91,7 +96,10 @@
 {:else}
   <div class="game" class:watching={session.spectating}>
     <div class="status">
-      <span class="prompt" class:yours={legal.length > 0}>{prompt ?? 'Game over.'}</span>
+      <div class="say">
+        <span class="prompt" class:yours={legal.length > 0}>{prompt ?? 'Game over.'}</span>
+        {#if own?.why}<span class="why">{own.why}</span>{/if}
+      </div>
       {#if view.final_turns !== null && !session.over}
         <span class="final">Final round: {view.final_turns} turn{view.final_turns === 1 ? '' : 's'} left</span>
       {/if}
@@ -131,6 +139,8 @@
           {model}
           segment={model.segments[picking]!}
           options={claims.filter((c) => c.segment === picking)}
+          trains={mine?.trains ?? 0}
+          finalRound={view.final_turns !== null}
           onpick={act}
           onclose={() => (picking = null)}
         />
@@ -216,7 +226,12 @@
           <span class="seat-dot" style="background: {seatColor(mine.seat).fill}"></span>
           <strong>{name(mine.seat)}</strong>
           <span><b>{mine.score}</b> points</span>
-          <span><b>{mine.trains}</b> trains</span>
+          <span
+            class="supply"
+            class:low={mine.trains <= model.endTriggerTrains}
+            title="The plastic trains you place on routes, one per space. Ending a turn with {model.endTriggerTrains} or fewer starts the final round."
+          ><b>{mine.trains}</b> of {model.trainsPerPlayer} train pieces left</span>
+          <span><b>{mine.hand_size}</b> {mine.hand_size === 1 ? 'card' : 'cards'} in hand</span>
           <span class="muted">longest trail {mine.longest_trail}</span>
         </div>
         <div class="hand">
@@ -291,11 +306,24 @@
     color: var(--paper);
     min-height: 32px;
   }
+  .say {
+    display: flex;
+    flex-direction: column;
+  }
   .prompt {
     font: 600 16px var(--sans);
   }
   .prompt.yours {
     color: var(--gilt-soft);
+  }
+  .why {
+    font-size: 13.5px;
+    color: var(--paper-deep);
+  }
+  /* The chip and the controls keep their size; a long prompt wraps instead. */
+  .final,
+  .speed {
+    flex: none;
   }
   .final {
     font: 700 13px var(--caps);
@@ -383,6 +411,14 @@
   }
   .me-head b {
     font-size: 17px;
+    /* Old-style figures draw 0 as a small o: "o of 45 train pieces". */
+    font-variant-numeric: lining-nums;
+  }
+  .supply {
+    cursor: help;
+  }
+  .supply.low b {
+    color: var(--bad);
   }
   .hand {
     display: flex;

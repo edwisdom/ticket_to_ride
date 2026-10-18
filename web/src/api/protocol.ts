@@ -66,7 +66,14 @@ export interface Board {
    * Cards printed per card type.
    */
   card_counts: number[];
+  /**
+   * Train pieces each seat starts with.
+   */
   trains_per_player: number;
+  /**
+   * A seat ending its turn with this many train pieces or fewer starts the final round: every seat, itself included, gets one more turn.
+   */
+  end_trigger_trains: number;
   /**
    * route_points[n] scores a route of length n.
    */
@@ -341,6 +348,9 @@ export interface View {
  */
 export interface SeatView {
   seat: number;
+  /**
+   * Train pieces left to place: the supply, not cards.
+   */
   trains: number;
   /**
    * Route points banked so far; tickets settle at the end.
@@ -366,7 +376,7 @@ export interface TicketProgress {
   ticket: number;
   connected: boolean;
   /**
-   * Train cars still needed over your track and open track; null once no route is left.
+   * Train pieces still needed over your track and open track; null once no route is left.
    */
   remaining: number | null;
 }

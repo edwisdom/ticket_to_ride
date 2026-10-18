@@ -86,6 +86,10 @@ export interface EngineBoard {
   cardKinds: CardKind[];
   cityNames: string[];
   tickets: { a: string; b: string; points: number }[];
+  /** Train pieces each seat starts with: the plastic trains it places, not cards. */
+  trainsPerPlayer: number;
+  /** Ending a turn on this many pieces or fewer starts the final round. */
+  endTriggerTrains: number;
 }
 
 export interface BoardModel extends Omit<EngineBoard, 'segments'> {
@@ -133,7 +137,8 @@ export function joinBoard(layout: Layout, engine: EngineBoard): BoardModel {
   };
 }
 
-/** A model straight from the layout, in its own order: for drawing a board with no game. */
+/** A model straight from the layout, in its own order: for drawing a board with no game --
+ * so no tickets, and no train pieces to count. */
 export function layoutOnly(layout: Layout, routePoints: number[]): BoardModel {
   const colors = [...new Set(layout.segments.map((s) => s.color))].filter((c) => c !== 'gray').sort();
   return joinBoard(layout, {
@@ -142,5 +147,7 @@ export function layoutOnly(layout: Layout, routePoints: number[]): BoardModel {
     cardKinds: [...(colors as CardColor[]), 'locomotive'],
     cityNames: layout.cities.map((c) => c.name),
     tickets: [],
+    trainsPerPlayer: 0,
+    endTriggerTrains: 0,
   });
 }

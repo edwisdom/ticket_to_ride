@@ -70,7 +70,7 @@ CONTEXT = {
     "unreachable_tickets": "Held tickets no route can complete any more.",
     "plan_car_value": "What a car of progress on the plan is worth, in points: more when "
     "the plan is nearly done.",
-    "trains": "Trains this seat has left.",
+    "trains": "Train pieces this seat has left to place (the plastic trains, not cards).",
     "endgame": "1 once trains run low and play turns to finishing what can be finished.",
     "plan_completable": "1 if the trains left can still finish the plan.",
     "progress": "How far through the game it is, by the fastest seat's trains spent.",

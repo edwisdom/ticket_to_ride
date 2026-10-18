@@ -17,7 +17,7 @@ use pyo3::types::{PyBytes, PyDict};
 use ttr_core::actions::{BLIND_SLOT, Decoded};
 use ttr_core::arena::{self, AgentSpec};
 use ttr_core::board::{FACEUP_SLOTS, GRAY, NO_SIBLING, UNREACHABLE};
-use ttr_core::config::RuleConfig;
+use ttr_core::config::{END_TRIGGER_TRAINS, RuleConfig};
 use ttr_core::heuristic::{Explanation, Heuristic, HeuristicParams, Tier};
 use ttr_core::resample::{assert_consistent, resample_from_infoset};
 use ttr_core::rng::Pcg32;
@@ -1475,6 +1475,7 @@ fn board_data(py: Python<'_>, map_name: &str) -> PyResult<Py<PyDict>> {
     d.set_item("locomotive", board.locomotive)?;
     d.set_item("card_counts", widen(&board.deck_composition_counts))?;
     d.set_item("trains_per_player", raw.trains_per_player)?;
+    d.set_item("end_trigger_trains", END_TRIGGER_TRAINS)?;
     d.set_item("route_points", widen(board.route_points))?;
     d.set_item("longest_bonus", raw.longest_bonus)?;
     d.set_item(

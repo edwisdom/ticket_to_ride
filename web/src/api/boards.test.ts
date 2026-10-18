@@ -32,6 +32,7 @@ describe('fromServer', () => {
     const model = fromServer({ ...cases[0]!.board, layout: mini });
     expect(model.cardKinds).toEqual(['black', 'blue', 'green', 'orange', 'red', 'yellow', 'locomotive']);
     expect(model.routePoints).toEqual([1, 2, 4, 7, 10]);
+    expect([model.trainsPerPlayer, model.endTriggerTrains]).toEqual([20, 2]);
     const t = cases[0]!.board.tickets[0]!;
     expect(model.tickets[0]).toEqual({ a: model.cityNames[t.a], b: model.cityNames[t.b], points: t.points });
   });

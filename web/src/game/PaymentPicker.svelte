@@ -1,23 +1,30 @@
 <!--
   Claiming a route: the ways the server says the viewer can pay for it, as the cards each
-  would spend. One click claims; Escape or a click outside cancels.
+  would spend, and the train pieces it takes -- with a warning when it starts the final round.
+  One click claims; Escape or a click outside cancels.
 -->
 <script lang="ts">
   import type { ClaimAction } from '../api/protocol';
   import type { BoardModel, CardKind, Segment } from '../board/layout';
   import { SWATCH, SYMBOL } from '../board/palette';
   import { plural } from '../format';
+  import { claimNote } from './turn';
 
   interface Props {
     model: BoardModel;
     segment: Segment;
     options: ClaimAction[];
+    /** The claimer's train pieces. */
+    trains: number;
+    /** The final round is already under way. */
+    finalRound: boolean;
     onpick: (action: ClaimAction) => void;
     onclose: () => void;
   }
-  let { model, segment, options, onpick, onclose }: Props = $props();
+  let { model, segment, options, trains, finalRound, onpick, onclose }: Props = $props();
 
   const points = $derived(model.routePoints[segment.length - 1] ?? 0);
+  const note = $derived(claimNote(segment.length, trains, model.endTriggerTrains, finalRound));
   const cards = (a: ClaimAction): CardKind[] => [
     ...Array<CardKind>(a.colored).fill(model.cardKinds[a.color]!),
     ...Array<CardKind>(a.locomotives).fill('locomotive'),
@@ -39,6 +46,11 @@
     <span>{segment.length} {SWATCH[segment.color].label.toLowerCase()} · {plural(points, 'point')}</span>
   </header>
   <div class="body">
+    {#if note.ends}
+      <p class="ends" role="alert"><strong>This starts the final round.</strong> {note.text}</p>
+    {:else}
+      <p class="cost">{note.text}</p>
+    {/if}
     <p>{options.length === 1 ? 'Pay with:' : 'Choose how to pay:'}</p>
     <ul>
       {#each options as a, i (a.id)}
@@ -84,6 +96,23 @@
   p {
     margin: 0 0 6px;
     color: var(--ink-soft);
+  }
+  .cost {
+    color: var(--ink);
+  }
+  .ends {
+    max-width: 380px;
+    margin-bottom: 10px;
+    padding: 6px 10px;
+    color: var(--ink);
+    background: #f6d9a8;
+    border: 1px solid #b7791f;
+    border-left-width: 4px;
+    border-radius: 4px;
+  }
+  .ends strong {
+    display: block;
+    color: var(--bad);
   }
   ul {
     list-style: none;

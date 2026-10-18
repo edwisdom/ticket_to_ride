@@ -1,7 +1,7 @@
 <!--
-  One seat: what everyone knows of it -- trains, banked points, hand size, the cards known to
-  be in its hand (face-up takes not yet spent), its tickets' count, its longest trail -- and,
-  when the viewer may see them, its hand and tickets.
+  One seat: what everyone knows of it -- train pieces left, banked points, hand size, the cards
+  known to be in its hand (face-up takes not yet spent), its tickets' count, its longest trail
+  -- and, when the viewer may see them, its hand and tickets.
 -->
 <script lang="ts">
   import type { Player, SeatView } from '../api/protocol';
@@ -38,8 +38,14 @@
   <div class="body">
     <dl class="stats">
       <div><dt>Points</dt><dd>{seat.score}</dd></div>
-      <div><dt>Trains</dt><dd>{seat.trains}</dd></div>
-      <div><dt>Cards</dt><dd>{seat.hand_size}</dd></div>
+      <div
+        class="supply"
+        class:low={seat.trains <= model.endTriggerTrains}
+        title="Train pieces left, of {model.trainsPerPlayer}: the plastic trains placed on routes, one per space. Not cards."
+      >
+        <dt>Train pieces</dt><dd>{seat.trains}</dd>
+      </div>
+      <div title="Train cards in hand."><dt>Cards</dt><dd>{seat.hand_size}</dd></div>
       <div><dt>Tickets</dt><dd>{seat.ticket_count}</dd></div>
       <div><dt>Longest</dt><dd>{seat.longest_trail}</dd></div>
     </dl>
@@ -110,7 +116,13 @@
   dd {
     margin: 0;
     font: 700 18px var(--sans);
-    font-variant-numeric: tabular-nums;
+    font-variant-numeric: lining-nums tabular-nums;
+  }
+  .supply {
+    cursor: help;
+  }
+  .supply.low dd {
+    color: var(--bad);
   }
   .line {
     display: flex;

@@ -192,6 +192,11 @@
           "type": "array"
         },
         "trains_per_player": {
+          "description": "Train pieces each seat starts with.",
+          "type": "integer"
+        },
+        "end_trigger_trains": {
+          "description": "A seat ending its turn with this many train pieces or fewer starts the final round: every seat, itself included, gets one more turn.",
           "type": "integer"
         },
         "route_points": {
@@ -252,6 +257,7 @@
         "locomotive",
         "card_counts",
         "trains_per_player",
+        "end_trigger_trains",
         "route_points",
         "longest_bonus",
         "players",
@@ -1482,6 +1488,7 @@
           "type": "integer"
         },
         "trains": {
+          "description": "Train pieces left to place: the supply, not cards.",
           "type": "integer"
         },
         "score": {
@@ -1747,7 +1754,7 @@
               "type": "null"
             }
           ],
-          "description": "Train cars still needed over your track and open track; null once no route is left."
+          "description": "Train pieces still needed over your track and open track; null once no route is left."
         }
       },
       "required": [

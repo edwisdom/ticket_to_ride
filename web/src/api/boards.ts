@@ -20,6 +20,8 @@ export function fromServer(board: Board): BoardModel {
     cardKinds: [...board.colors, 'locomotive'] as CardKind[],
     cityNames: board.cities,
     tickets: board.tickets.map((t) => ({ a: city(t.a), b: city(t.b), points: t.points })),
+    trainsPerPlayer: board.trains_per_player,
+    endTriggerTrains: board.end_trigger_trains,
   });
   for (const s of board.segments) {
     if (model.segments[s.id]?.sibling !== s.sibling) throw new Error(`${board.name}: segment ${s.id}'s sibling disagrees`);

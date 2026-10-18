@@ -11,6 +11,8 @@ const engine = (segments: EngineSegment[]): EngineBoard => ({
   cardKinds: ['locomotive'],
   cityNames: [],
   tickets: [],
+  trainsPerPlayer: 45,
+  endTriggerTrains: 2,
 });
 
 describe('joinBoard', () => {

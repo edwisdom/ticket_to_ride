@@ -84,7 +84,11 @@ class Board(Model):
     colors: list[str] = Field(description="Colour names; card type i < len(colors) is colors[i].")
     locomotive: int = Field(description="The locomotive's card type: len(colors).")
     card_counts: list[int] = Field(description="Cards printed per card type.")
-    trains_per_player: int
+    trains_per_player: int = Field(description="Train pieces each seat starts with.")
+    end_trigger_trains: int = Field(
+        description="A seat ending its turn with this many train pieces or fewer starts the"
+        " final round: every seat, itself included, gets one more turn."
+    )
     route_points: list[int] = Field(description="route_points[n] scores a route of length n.")
     longest_bonus: int
     players: list[int] = Field(description="[fewest, most] seats the map supports.")
@@ -254,7 +258,7 @@ class TicketProgress(Model):
     ticket: int
     connected: bool
     remaining: int | None = Field(
-        description="Train cars still needed over your track and open track; null once no "
+        description="Train pieces still needed over your track and open track; null once no "
         "route is left."
     )
 
@@ -263,7 +267,7 @@ class SeatView(Model):
     """One seat, as the viewer may see it."""
 
     seat: int
-    trains: int
+    trains: int = Field(description="Train pieces left to place: the supply, not cards.")
     score: int = Field(description="Route points banked so far; tickets settle at the end.")
     hand_size: int
     known: list[int] = Field(

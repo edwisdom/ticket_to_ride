@@ -12,7 +12,7 @@
     points: number;
     /** done: connected; failed: the game ended without it. */
     status?: 'open' | 'done' | 'failed';
-    /** Trains still needed to connect it, when known. */
+    /** Train pieces still needed to connect it, when known. */
     remaining?: number | null;
     width?: number;
     onhover?: (cities: [string, string] | null) => void;
@@ -86,7 +86,7 @@
     </g>
   {:else if remaining !== null}
     <text class="remaining" x="141" y="88" text-anchor="middle">{remaining}</text>
-    <text class="kind" x="141" y="100" text-anchor="middle">trains to go</text>
+    <text class="kind" x="141" y="100" text-anchor="middle">pieces to go</text>
   {/if}
 </svg>
 

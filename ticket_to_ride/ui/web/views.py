@@ -116,6 +116,7 @@ def board(map_name: p.MapName) -> p.Board:
         locomotive=info.locomotive,
         card_counts=list(raw["card_counts"]),
         trains_per_player=raw["trains_per_player"],
+        end_trigger_trains=raw["end_trigger_trains"],
         route_points=list(raw["route_points"]),
         longest_bonus=raw["longest_bonus"],
         players=list(raw["players"]),
@@ -322,7 +323,11 @@ def entry(
     who = "You" if viewer == seat else names[seat]
     text = f"{who} {_said(info, decoded, before, after)}."
     if before.final_left == NOT_TRIGGERED and after.final_left != NOT_TRIGGERED:
-        text += f" {who} {'are' if who == 'You' else 'is'} down to {after.trains[seat]} trains: "
+        # Train pieces, not "trains": a player read "down to 0 trains" as the cards in hand.
+        # And "no", not "0", which the client's old-style figures draw as a small o.
+        left = after.trains[seat]
+        pieces = "no train pieces" if left == 0 else f"{left} train piece{'s' if left != 1 else ''}"
+        text += f" {who} {'have' if who == 'You' else 'has'} {pieces} left: "
         text += "everyone gets one more turn."
     if after.is_terminal():
         text += " Game over."
