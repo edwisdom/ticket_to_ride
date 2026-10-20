@@ -69,7 +69,7 @@ board:  ## Regenerate the board data (RULES.md -> usa.toml, board_gen.rs)
 layout:  ## Regenerate the board layouts the client draws (data/layout/*.toml -> *.json)
 	uv run python tools/gen_layout.py
 
-# --- Web client (Node >= 22.12 at build time only; see web/.nvmrc) --------
+# --- Web client (Node 24 at build time only; see web/.nvmrc) --------
 
 web/node_modules/.package-lock.json: web/package.json web/package-lock.json
 	cd web && npm ci
